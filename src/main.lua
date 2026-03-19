@@ -75,19 +75,81 @@ end
 --- @param restoreFn function called on disable
 --- @return function callback
 function public.standaloneUI(def, modConfig, apply, restoreFn)
+    local function onOptionChanged()
+        if def.dataMutation then
+            restoreFn()
+            apply()
+            rom.game.SetupRunData()
+        end
+    end
+
     return function()
         if mods['adamant-Modpack_Core'] then return end
         if rom.ImGui.BeginMenu("adamant") then
-            local val, chg = rom.ImGui.Checkbox(def.name, modConfig.Enabled)
+            local imgui = rom.ImGui
+            local val, chg = imgui.Checkbox(def.name, modConfig.Enabled)
             if chg then
                 modConfig.Enabled = val
                 if val then apply() else restoreFn() end
                 if def.dataMutation then rom.game.SetupRunData() end
             end
-            if rom.ImGui.IsItemHovered() and (def.tooltip or "") ~= "" then
-                rom.ImGui.SetTooltip(def.tooltip)
+            if imgui.IsItemHovered() and (def.tooltip or "") ~= "" then
+                imgui.SetTooltip(def.tooltip)
             end
-            rom.ImGui.EndMenu()
+
+            -- Inline options (when module is enabled)
+            if modConfig.Enabled and def.options then
+                imgui.Separator()
+                for _, opt in ipairs(def.options) do
+                    imgui.PushID(opt.configKey)
+
+                    if opt.type == "checkbox" then
+                        local oVal, oChg = imgui.Checkbox(opt.label or opt.configKey, modConfig[opt.configKey] or false)
+                        if oChg then
+                            modConfig[opt.configKey] = oVal
+                            onOptionChanged()
+                        end
+
+                    elseif opt.type == "dropdown" then
+                        local current = modConfig[opt.configKey] or opt.default or ""
+                        local currentIdx = 1
+                        for i, v in ipairs(opt.values) do
+                            if v == current then currentIdx = i; break end
+                        end
+                        imgui.Text(opt.label or opt.configKey)
+                        imgui.SameLine()
+                        if imgui.BeginCombo("##opt", opt.values[currentIdx] or "") then
+                            for i, v in ipairs(opt.values) do
+                                if imgui.Selectable(v, i == currentIdx) then
+                                    if i ~= currentIdx then
+                                        modConfig[opt.configKey] = v
+                                        onOptionChanged()
+                                    end
+                                end
+                            end
+                            imgui.EndCombo()
+                        end
+
+                    elseif opt.type == "radio" then
+                        local current = modConfig[opt.configKey] or opt.default or ""
+                        imgui.Text(opt.label or opt.configKey)
+                        for _, v in ipairs(opt.values) do
+                            if imgui.RadioButton(v, current == v) then
+                                if v ~= current then
+                                    modConfig[opt.configKey] = v
+                                    onOptionChanged()
+                                end
+                            end
+                            imgui.SameLine()
+                        end
+                        imgui.NewLine()
+                    end
+
+                    imgui.PopID()
+                end
+            end
+
+            imgui.EndMenu()
         end
     end
 end
