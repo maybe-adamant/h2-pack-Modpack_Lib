@@ -11,7 +11,7 @@ read_globals = {
     "chalk",
     "reload",
 
-    "add_to_menu_bar"
+    "SetupRunData"
 }
 
 max_line_length = 120

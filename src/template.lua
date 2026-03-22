@@ -97,4 +97,5 @@ end)
 
 -- Standalone UI — menu-bar toggle when Core is not installed
 local uiCallback = lib.standaloneUI(public.definition, config, apply, revert)
+---@diagnostic disable-next-line: redundant-parameter
 rom.gui.add_to_menu_bar(uiCallback)

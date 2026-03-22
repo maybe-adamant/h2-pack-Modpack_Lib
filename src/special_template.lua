@@ -182,6 +182,7 @@ end)
 
 local showWindow = false
 
+---@diagnostic disable-next-line: redundant-parameter
 rom.gui.add_imgui(function()
     if mods['adamant-Modpack_Core'] then return end
     if not showWindow then return end
@@ -201,6 +202,7 @@ rom.gui.add_imgui(function()
     end
 end)
 
+---@diagnostic disable-next-line: redundant-parameter
 rom.gui.add_to_menu_bar(function()
     if mods['adamant-Modpack_Core'] then return end
     if rom.ImGui.BeginMenu("adamant") then
