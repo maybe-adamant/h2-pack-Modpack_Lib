@@ -35,7 +35,7 @@ Every module must expose `public.definition`:
 public.definition = {
     id           = "MyMod",        -- unique key (hash-stable)
     name         = "My Mod",       -- display name
-    category     = "BugFixes",     -- "BugFixes" | "RunModifiers" | "QoLSettings"
+    category     = "Bug Fixes",    -- tab label in Core UI, e.g. "Bug Fixes" | "Run Modifiers" | "QoL"
     group        = "General",      -- UI group header
     tooltip      = "...",          -- hover text
     default      = true,           -- default Enabled value
@@ -110,10 +110,12 @@ FieldTypes.mytype = {
 
 ## Templates
 
-- `src/template.lua` -- boolean module starting point
-- `src/special_template.lua` -- special module starting point
+The canonical templates live in the [h2-modpack-template](https://github.com/h2-modpack/h2-modpack-template) repo:
 
-Copy the relevant template into a new mod folder as `src/main.lua` and fill in the marked sections.
+- `src/main.lua` -- boolean module starting point
+- `src/main_special.lua` -- special module starting point
+
+`src/template.lua` and `src/special_template.lua` in this repo are reference copies kept in sync for IDE navigation — prefer the template repo when starting a new module.
 
 ## Standalone mode
 
