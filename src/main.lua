@@ -9,7 +9,7 @@
 --   rom.gui.add_to_menu_bar(cb)  -- caller registers in own plugin context
 --   staging, snapshot, sync = lib.createSpecialState(config, schema)
 --   lib.isEnabled(modConfig) — true if module AND master toggle are both on
---   lib.warn(msg) — framework diagnostic, gated on lib.config.DebugMode
+--   lib.warn(packId, enabled, msg) — framework diagnostic, gated on caller's enabled flag
 --   lib.log(name, enabled, msg) — module trace, gated on caller's config.DebugMode
 --   lib.FieldTypes — central registry of field types (checkbox, dropdown, radio)
 --   lib.drawField(imgui, field, value, width) — render a field widget
@@ -40,12 +40,22 @@ function public.isEnabled(modConfig)
     return modConfig.Enabled == true
 end
 
---- Print a diagnostic warning when Core's DebugMode is enabled.
---- Silent in production. Works with or without Core installed.
---- @param msg string  The warning message
-function public.warn(msg)
+--- Lib-internal diagnostic — gated on lib's own DebugMode (libConfig.DebugMode).
+--- Used by validateSchema, FieldTypes, and drawField. Not part of the public API.
+local function libWarn(msg)
     if libConfig.DebugMode then
-        print("[adamant] " .. msg)
+        print("[lib] " .. msg)
+    end
+end
+
+--- Print a framework diagnostic warning, gated on the caller's enabled flag.
+--- Mirrors lib.log — the caller owns the gate.
+--- @param packId  string   Pack identifier shown as the console prefix
+--- @param enabled boolean  Pass the coordinator's config.DebugMode
+--- @param msg     string   The warning message
+function public.warn(packId, enabled, msg)
+    if enabled then
+        print("[" .. packId .. "] " .. msg)
     end
 end
 
@@ -212,7 +222,7 @@ function public.drawField(imgui, field, value, width)
         end
         return ft.draw(imgui, field, value, width)
     end
-    public.warn("drawField: unknown type '" .. tostring(field.type) .. "'")
+    libWarn("drawField: unknown type '" .. tostring(field.type) .. "'")
     return value, false
 end
 
@@ -221,20 +231,20 @@ end
 --- @param label string   Name shown in warnings (e.g. module name)
 function public.validateSchema(schema, label)
     if type(schema) ~= "table" then
-        public.warn(label .. ": schema is not a table")
+        libWarn(label .. ": schema is not a table")
         return
     end
     for i, field in ipairs(schema) do
         local prefix = label .. " field #" .. i
         if not field.configKey then
-            public.warn(prefix .. ": missing configKey")
+            libWarn(prefix .. ": missing configKey")
         end
         if not field.type then
-            public.warn(prefix .. ": missing type")
+            libWarn(prefix .. ": missing type")
         else
             local ft = FieldTypes[field.type]
             if not ft then
-                public.warn(prefix .. ": unknown type '" .. tostring(field.type) .. "'")
+                libWarn(prefix .. ": unknown type '" .. tostring(field.type) .. "'")
             elseif ft.validate then
                 field._imguiId = "##" .. tostring(field.configKey)
                 ft.validate(field, prefix)
@@ -335,7 +345,7 @@ end
 FieldTypes.checkbox = {
     validate = function(field, prefix)
         if field.default ~= nil and type(field.default) ~= "boolean" then
-            public.warn(prefix .. ": checkbox default must be boolean, got " .. type(field.default))
+            libWarn(prefix .. ": checkbox default must be boolean, got " .. type(field.default))
         end
     end,
     toHash    = function(_, value) return value and "1" or "0" end,
@@ -350,13 +360,13 @@ FieldTypes.checkbox = {
 FieldTypes.dropdown = {
     validate = function(field, prefix)
         if not field.values then
-            public.warn(prefix .. ": dropdown missing values list")
+            libWarn(prefix .. ": dropdown missing values list")
         elseif type(field.values) ~= "table" or #field.values == 0 then
-            public.warn(prefix .. ": dropdown values must be a non-empty list")
+            libWarn(prefix .. ": dropdown values must be a non-empty list")
         else
             for _, v in ipairs(field.values) do
                 if type(v) == "string" and string.find(v, "|", 1, true) then
-                    public.warn(prefix .. ": value '" .. v .. "' contains reserved separator '|'")
+                    libWarn(prefix .. ": value '" .. v .. "' contains reserved separator '|'")
                 end
             end
         end
@@ -400,13 +410,13 @@ FieldTypes.dropdown = {
 FieldTypes.radio = {
     validate = function(field, prefix)
         if not field.values then
-            public.warn(prefix .. ": radio missing values list")
+            libWarn(prefix .. ": radio missing values list")
         elseif type(field.values) ~= "table" or #field.values == 0 then
-            public.warn(prefix .. ": radio values must be a non-empty list")
+            libWarn(prefix .. ": radio values must be a non-empty list")
         else
             for _, v in ipairs(field.values) do
                 if type(v) == "string" and string.find(v, "|", 1, true) then
-                    public.warn(prefix .. ": value '" .. v .. "' contains reserved separator '|'")
+                    libWarn(prefix .. ": value '" .. v .. "' contains reserved separator '|'")
                 end
             end
         end
@@ -445,10 +455,10 @@ public.FieldTypes = FieldTypes
 rom.gui.add_to_menu_bar(function()
     if mods['adamant-Modpack_Core'] then return end
     if rom.ImGui.BeginMenu("adamant") then
-        local val, chg = rom.ImGui.Checkbox("Framework Debug", libConfig.DebugMode == true)
+        local val, chg = rom.ImGui.Checkbox("Lib Debug", libConfig.DebugMode == true)
         if chg then libConfig.DebugMode = val end
         if rom.ImGui.IsItemHovered() then
-            rom.ImGui.SetTooltip("Print framework diagnostic warnings to the console (schema errors, discovery issues)")
+            rom.ImGui.SetTooltip("Print lib-internal diagnostic warnings (schema errors, unknown field types)")
         end
         rom.ImGui.EndMenu()
     end
