@@ -49,11 +49,8 @@ Warnings = {}
 
 function CaptureWarnings()
     Warnings = {}
-    -- Enable lib's own debug mode so warn() actually fires
+    -- Enable lib's own debug mode so libWarn() actually fires
     lib.config.DebugMode = true
-    rom.mods['adamant-Modpack_Core'] = {
-        config = { ModEnabled = true, DebugMode = true },
-    }
     -- Override print to capture warnings
     _originalPrint = print
     print = function(msg)

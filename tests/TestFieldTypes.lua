@@ -75,12 +75,11 @@ function TestDropdown:testFromHashUnknownValueFallsBackToDefault()
 end
 
 function TestDropdown:testValidateWarnsPipeInValue()
-    local warned = false
     local field = { type = "dropdown", configKey = "X", values = { "Good", "Bad|Value" } }
-    local origWarn = lib.warn
-    lib.warn = function() warned = true end
+    CaptureWarnings()
     lib.FieldTypes.dropdown.validate(field, "test")
-    lib.warn = origWarn --luacheck: ignore
+    local warned = #Warnings > 0
+    RestoreWarnings()
     lu.assertTrue(warned)
 end
 
@@ -117,11 +116,10 @@ function TestRadio:testFromHashUnknownValueFallsBackToDefault()
 end
 
 function TestRadio:testValidateWarnsPipeInValue()
-    local warned = false
     local field = { type = "radio", configKey = "X", values = { "Good", "Bad|Value" } }
-    local origWarn = lib.warn
-    lib.warn = function() warned = true end
+    CaptureWarnings()
     lib.FieldTypes.radio.validate(field, "test")
-    lib.warn = origWarn --luacheck: ignore
+    local warned = #Warnings > 0
+    RestoreWarnings()
     lu.assertTrue(warned)
 end

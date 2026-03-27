@@ -37,8 +37,9 @@ local _coordinators = {}
 
 --- Register a coordinator's config under its packId.
 --- Called by Framework.init on behalf of the coordinator.
---- @param packId string  The pack identifier (e.g. "h2-modpack")
---- @param config table   The coordinator's Chalk config (needs .ModEnabled)
+--- Pass nil to deregister (used in tests and hot-reload).
+--- @param packId string       The pack identifier (e.g. "h2-modpack")
+--- @param config table|nil    The coordinator's Chalk config (needs .ModEnabled), or nil to clear
 function public.registerCoordinator(packId, config)
     _coordinators[packId] = config
 end
