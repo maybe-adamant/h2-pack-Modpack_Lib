@@ -5,6 +5,35 @@ local libWarn = shared.libWarn
 local PrepareSchemaFieldRuntimeMetadata = shared.PrepareSchemaFieldRuntimeMetadata
 local IsSchemaConfigField = shared.IsSchemaConfigField
 local ChoiceDisplay = shared.ChoiceDisplay
+local REQUIRED_FIELD_TYPE_METHODS = { "validate", "toHash", "fromHash", "toStaging", "draw" }
+
+local function ValidateFieldTypeContract(typeName, fieldType, prefix)
+    if type(fieldType) ~= "table" then
+        libWarn("%s: field type '%s' must be a table", prefix, tostring(typeName))
+        return false
+    end
+
+    local ok = true
+    for _, methodName in ipairs(REQUIRED_FIELD_TYPE_METHODS) do
+        if type(fieldType[methodName]) ~= "function" then
+            libWarn("%s: field type '%s' is missing required method '%s'", prefix, tostring(typeName), methodName)
+            ok = false
+        end
+    end
+    return ok
+end
+
+--- Validate all registered FieldTypes for authoring completeness.
+--- @return boolean
+function public.validateFieldTypes()
+    local ok = true
+    for typeName, fieldType in pairs(FieldTypes) do
+        if not ValidateFieldTypeContract(typeName, fieldType, "FieldTypes") then
+            ok = false
+        end
+    end
+    return ok
+end
 
 --- Render a schema field widget. Returns (newValue, changed).
 --- @param imgui table
@@ -56,6 +85,7 @@ function public.validateSchema(schema, label)
     for i, field in ipairs(schema) do
         local prefix = label .. " field #" .. i
         local ft = nil
+        local ftValid = false
         if field.type ~= "separator" and not field.configKey then
             libWarn("%s: missing configKey", prefix)
         end
@@ -65,8 +95,8 @@ function public.validateSchema(schema, label)
             ft = FieldTypes[field.type]
             if not ft then
                 libWarn("%s: unknown type '%s'", prefix, field.type)
-            elseif ft.validate then
-                field._imguiId = "##" .. tostring(field.configKey)
+            elseif ValidateFieldTypeContract(field.type, ft, prefix) then
+                ftValid = true
                 ft.validate(field, prefix)
             end
             if field.visibleIf ~= nil and type(field.visibleIf) ~= "string" then
@@ -80,8 +110,9 @@ function public.validateSchema(schema, label)
             end
         end
 
-        if field.configKey and ft then
+        if field.configKey and ftValid then
             PrepareSchemaFieldRuntimeMetadata(field)
+            field._imguiId = "##" .. tostring(field._schemaKey or field.configKey)
             if IsSchemaConfigField(field) then
                 if seenKeys[field._schemaKey] then
                     libWarn("%s: duplicate configKey '%s'", prefix, field._schemaKey)

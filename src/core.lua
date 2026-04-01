@@ -8,6 +8,7 @@ shared.mutationRuntime = _mutationRuntime
 local SpecialFieldKey
 local PrepareSchemaFieldRuntimeMetadata
 local IsSchemaConfigField
+local GetSchemaConfigFields
 local ChoiceDisplay
 
 --- Register a coordinator's config under its packId.
@@ -398,12 +399,58 @@ function public.revertDefinition(def, store)
     return true, nil
 end
 
+local function BuildManagedFields(definitionOrSchema)
+    if type(definitionOrSchema) ~= "table" then
+        return nil
+    end
+
+    if definitionOrSchema.stateSchema ~= nil
+        or definitionOrSchema.options ~= nil
+        or definitionOrSchema.special ~= nil
+        or definitionOrSchema.id ~= nil
+    then
+        local label = tostring(definitionOrSchema.name or definitionOrSchema.id or _PLUGIN.guid or "module")
+
+        if type(definitionOrSchema.stateSchema) == "table" then
+            return definitionOrSchema.stateSchema
+        end
+
+        if definitionOrSchema.special then
+            libWarn("%s: special modules must declare definition.stateSchema; no uiState created", label)
+            return nil
+        end
+
+        if type(definitionOrSchema.options) == "table" then
+            local managedFields = {}
+            local hasManagedField = false
+            for _, field in ipairs(definitionOrSchema.options) do
+                if field.type == "separator" then
+                    table.insert(managedFields, field)
+                elseif type(field.configKey) == "table" then
+                    libWarn("%s: regular definition.options configKey must be a flat string; nested option skipped",
+                        label)
+                else
+                    table.insert(managedFields, field)
+                    hasManagedField = true
+                end
+            end
+            if hasManagedField then
+                return managedFields
+            end
+            return nil
+        end
+        return nil
+    end
+
+    return definitionOrSchema
+end
+
 --- Build a menu-bar callback for a boolean mod.
 --- @param def table
 --- @param store table
 --- @return function
 function public.standaloneUI(def, store)
-    local function onOptionChanged()
+    local function onUiStateFlushed()
         if def.dataMutation then
             public.revertDefinition(def, store)
             public.applyDefinition(def, store)
@@ -415,7 +462,11 @@ function public.standaloneUI(def, store)
         if not opt.visibleIf then
             return true
         end
-        return store.read(opt.visibleIf) == true
+        local uiState = store.uiState
+        if not uiState or not uiState.view then
+            return false
+        end
+        return uiState.view[opt.visibleIf] == true
     end
 
     local function DrawOption(imgui, opt, index)
@@ -431,12 +482,11 @@ function public.standaloneUI(def, store)
 
         local currentValue = nil
         if opt.configKey ~= nil then
-            currentValue = store.read(opt.configKey)
+            currentValue = store.uiState and store.uiState.get(opt.configKey) or nil
         end
         local newVal, newChg = public.drawField(imgui, opt, currentValue)
         if newChg and opt.configKey then
-            store.write(opt.configKey, newVal)
-            onOptionChanged()
+            store.uiState.set(opt.configKey, newVal)
         end
 
         if opt.indent then
@@ -472,11 +522,23 @@ function public.standaloneUI(def, store)
                 imgui.SetTooltip("Print diagnostic warnings to the console for this module.")
             end
 
+            if store.uiState and imgui.Button("Audit + Resync UI State") then
+                public.auditAndResyncUiState(def.name or def.id or "module", store.uiState)
+            end
+
             if enabled and def.options then
                 imgui.Separator()
-                for index, opt in ipairs(def.options) do
-                    DrawOption(imgui, opt, index)
-                end
+                public.runUiStatePass({
+                    name = def.name,
+                    imgui = imgui,
+                    uiState = store.uiState,
+                    draw = function()
+                        for index, opt in ipairs(def.options) do
+                            DrawOption(imgui, opt, index)
+                        end
+                    end,
+                    onFlushed = onUiStateFlushed,
+                })
             end
 
             imgui.EndMenu()
@@ -517,16 +579,13 @@ function public.writePath(tbl, key, value)
 end
 
 --- Create the module-owned store facade around persisted Chalk-backed config.
---- Regular modules call createStore(config); special modules pass stateSchema too.
+--- Modules may pass either definition tables or legacy stateSchema tables.
 --- @param modConfig table
---- @param schema table|nil
+--- @param definitionOrSchema table|nil
 --- @return table
-function public.createStore(modConfig, schema)
+function public.createStore(modConfig, definitionOrSchema)
     local backend = GetConfigBackend(modConfig)
-    local store = {
-        _config = modConfig,
-        _backend = backend,
-    }
+    local store = {}
 
     function store.read(key)
         if backend then
@@ -545,8 +604,9 @@ function public.createStore(modConfig, schema)
         public.writePath(modConfig, key, value)
     end
 
-    if schema then
-        store.specialState = shared.CreateSpecialState(store, schema)
+    local managedFields = BuildManagedFields(definitionOrSchema)
+    if managedFields then
+        store.uiState = shared.CreateUiState(modConfig, backend, managedFields)
     end
 
     return store
@@ -743,6 +803,29 @@ IsSchemaConfigField = function(field)
     return field and field.type ~= "separator" and field.configKey ~= nil
 end
 shared.IsSchemaConfigField = IsSchemaConfigField
+
+GetSchemaConfigFields = function(schema)
+    if type(schema) ~= "table" then
+        return {}
+    end
+
+    local configFields = rawget(schema, "_configFields")
+    if configFields then
+        return configFields
+    end
+
+    configFields = {}
+    for _, field in ipairs(schema) do
+        if IsSchemaConfigField(field) then
+            PrepareSchemaFieldRuntimeMetadata(field)
+            table.insert(configFields, field)
+        end
+    end
+    schema._configFields = configFields
+    return configFields
+end
+shared.GetSchemaConfigFields = GetSchemaConfigFields
+public.getSchemaConfigFields = GetSchemaConfigFields
 
 ChoiceDisplay = function(field, value)
     if field.displayValues and field.displayValues[value] ~= nil then

@@ -99,3 +99,14 @@ function TestValidateSchema:testVisibleIfWarnsWhenNotInSameSchema()
     lu.assertTrue(#Warnings > 0)
     lu.assertStrContains(table.concat(Warnings, "\n"), "visibleIf 'OtherModuleFlag'")
 end
+
+function TestValidateSchema:testTablePathFieldGetsStableImguiIdFromSchemaKey()
+    local schema = {
+        { type = "checkbox", configKey = { "Parent", "Child" }, default = false },
+    }
+
+    lib.validateSchema(schema, "TestMod")
+
+    lu.assertEquals(schema[1]._schemaKey, "Parent.Child")
+    lu.assertEquals(schema[1]._imguiId, "##Parent.Child")
+end

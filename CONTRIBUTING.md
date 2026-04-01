@@ -1,6 +1,6 @@
 # Contributing to adamant-Lib
 
-Shared utility library for adamant modpack modules. Provides the module contract, UI primitives, managed special-state handling, and the field type system.
+Shared utility library for adamant modpack modules. Provides the module contract, UI primitives, managed UI-state handling, and the field type system.
 
 See also:
 
@@ -10,7 +10,8 @@ See also:
 
 ## Architecture
 
-Single-file library (`src/main.lua`) loaded as `adamant-ModpackLib`. Modules access it with:
+Lib is split internally across `src/main.lua`, `src/core.lua`, `src/fields.lua`, and `src/special.lua`,
+but modules still load it as one mod package:
 
 ```lua
 local lib = rom.mods["adamant-ModpackLib"]
@@ -31,13 +32,48 @@ local lib = rom.mods["adamant-ModpackLib"]
 | `lib.writePath(tbl, key, value)` | Write to table using string or path key |
 | `lib.drawField(imgui, field, value, width)` | Render a regular-module option widget, returns `(newValue, changed)` |
 | `lib.validateSchema(schema, label)` | Validate field descriptors at declaration time |
-| `lib.createStore(config, schema?)` | Returns the module store; special modules get `store.specialState` |
+| `lib.createStore(config, definitionOrSchema?)` | Returns the module store; modules with managed fields get `store.uiState` |
 | `lib.isFieldVisible(field, values)` | Returns true if `field.visibleIf` is absent or `values[field.visibleIf] == true` |
 | `lib.FieldTypes` | The field type registry table |
 
 `lib.createStore(...)` is the only supported store constructor. Do not build hand-rolled store tables.
-Underscore-prefixed store members such as `_config` and `_backend` are Lib internals, not supported
-module API.
+Raw config/backend handles are intentionally hidden; `store.read(...)`, `store.write(...)`, and
+`store.uiState` are the supported store surface.
+
+### `createStore(config, definitionOrSchema)` contract
+
+`lib.createStore(...)` accepts either:
+
+- a full module definition table
+- or a raw schema/options array
+
+Detection is shape-based:
+
+- if the table has module-definition markers such as `stateSchema`, `options`, `special`, or `id`,
+  Lib treats it as a definition
+- otherwise Lib treats the table itself as the managed field list
+
+Resolution rules:
+
+- `definition.stateSchema` wins for special modules
+- otherwise `definition.options` is used for regular modules
+- otherwise no `uiState` is created
+
+Supported patterns:
+
+```lua
+public.store = lib.createStore(config, public.definition)
+public.store = lib.createStore(config, public.definition.stateSchema)
+public.store = lib.createStore(config, public.definition.options)
+```
+
+Preferred pattern for new code:
+
+```lua
+public.store = lib.createStore(config, public.definition)
+```
+
+Do not pass arbitrary mixed tables that are neither a real definition table nor a real schema list.
 
 ## Module contract
 
@@ -211,6 +247,10 @@ public.definition.options = {
 
 `configKey` must be a flat string. Table-path keys are only valid in `definition.stateSchema` for special modules.
 
+Regular modules with inline options also get `public.store.uiState`. Hosted Framework UI and
+standalone regular-module UI both edit options through that managed state and flush to persisted
+config at the end of the draw pass.
+
 ### Special modules
 
 Special modules get their own sidebar tab and custom state:
@@ -219,23 +259,23 @@ Special modules get their own sidebar tab and custom state:
 public.definition.special     = true
 public.definition.tabLabel    = "Hammers"
 public.definition.stateSchema = { ... }
-public.store                  = lib.createStore(config, public.definition.stateSchema)
+public.store                  = lib.createStore(config, public.definition)
 
-function public.DrawTab(imgui, specialState, theme) ... end
-function public.DrawQuickContent(imgui, specialState, theme) ... end
+function public.DrawTab(imgui, uiState, theme) ... end
+function public.DrawQuickContent(imgui, uiState, theme) ... end
 ```
 
-`public.store.specialState` is the managed state object for schema-backed UI state.
+`public.store.uiState` is the managed state object for schema-backed UI state.
 
 It exposes:
-- `specialState.view` - read-only render view
-- `specialState.get(path)`
-- `specialState.set(path, value)`
-- `specialState.update(path, fn)`
-- `specialState.toggle(path)`
-- `specialState.reloadFromConfig()`
-- `specialState.flushToConfig()`
-- `specialState.isDirty()`
+- `uiState.view` - read-only render view
+- `uiState.get(path)`
+- `uiState.set(path, value)`
+- `uiState.update(path, fn)`
+- `uiState.toggle(path)`
+- `uiState.reloadFromConfig()`
+- `uiState.flushToConfig()`
+- `uiState.isDirty()`
 
 ### Schema caching
 
@@ -243,7 +283,7 @@ It exposes:
 
 | Field | Value | Purpose |
 |---|---|---|
-| `field._schemaKey` | `table.concat(configKey, ".")` for path keys, `tostring(configKey)` for strings | Stable hash key used by hash encode/decode and special-state bookkeeping |
+| `field._schemaKey` | `table.concat(configKey, ".")` for path keys, `tostring(configKey)` for strings | Stable hash key used by hash encode/decode and managed `uiState` bookkeeping |
 | `field._imguiId` | `"##" .. tostring(configKey)` | Stable ImGui widget ID reused by `drawField` every frame |
 
 These are written once and never recomputed. Do not overwrite them.
@@ -256,21 +296,27 @@ field tables as per-module declarations, not immutable shared constants:
 - do not share field descriptor tables across modules or schemas
 - do not mutate descriptor objects after validation/discovery
 
-### Special-module rules
+### Managed UI-state rules
 
-For schema-backed state:
-- read from `specialState.view`
-- mutate only through `specialState.set/update/toggle`
-- do not write `config` directly during `DrawTab` / `DrawQuickContent`
+For managed fields:
+- read from `uiState.view`
+- mutate only through `uiState.set/update/toggle`
+- do not bypass `store`/`uiState` from feature files
 
 Framework-owned hosted flow:
 - Framework calls `DrawTab` / `DrawQuickContent`
-- if `specialState.isDirty()` is true after draw, Framework calls `specialState.flushToConfig()`
+- if `uiState.isDirty()` is true after draw, Framework calls `uiState.flushToConfig()`
 - Framework then invalidates the cached hash and updates the HUD fingerprint
 
 Standalone special-module flow:
 - the module renders its own window
-- after `DrawTab` / `DrawQuickContent`, the module should call `specialState.flushToConfig()` if dirty
+- after `DrawTab` / `DrawQuickContent`, the module should call `uiState.flushToConfig()` if dirty
+
+Standalone regular-module flow:
+- Lib renders the regular controls
+- reads from `store.uiState.view`
+- writes through `store.uiState`
+- flushes once after the draw pass if dirty
 
 ## Field type system
 
@@ -283,7 +329,7 @@ All field types live in the `FieldTypes` registry in `src/main.lua`. Each type i
 | `validate(field, prefix)` | Declaration-time checks |
 | `toHash(field, value)` | Serialize value to canonical hash string |
 | `fromHash(field, str)` | Deserialize value from canonical hash string |
-| `toStaging(val)` | Transform config value for managed special-state staging |
+| `toStaging(val)` | Transform config value for managed `uiState` staging |
 | `draw(imgui, field, value, width)` | Render the ImGui widget for regular-module options |
 
 ### Built-in field types
@@ -327,7 +373,7 @@ The canonical templates live in the `h2-modpack-template` repo:
 
 Every module works without Core installed.
 - Regular modules get a menu-bar toggle via `lib.standaloneUI()`
-- Special modules render their own window and use `public.store.specialState` there too
+- Special modules render their own window and use `public.store.uiState` there too
 
 When Core is installed, standalone UI is automatically suppressed.
 
@@ -337,8 +383,7 @@ Standalone helpers now follow the same inferred mutation lifecycle as Framework:
 - manual-only modules are supported
 - hybrid modules are supported
 
-The helper signatures still accept `apply` / `revert` for compatibility, but the mutation lifecycle
-is driven by the module definition shape rather than those callback parameters alone.
+The mutation lifecycle is driven by the module definition shape (inferred from `patchPlan`, `apply`, `revert` exports), not by separate callback parameters.
 
 ## Debug system
 
@@ -359,7 +404,7 @@ lib.log("MyMod", config.DebugMode, "hook fired: value=%s", value)
 Console output is visually distinct:
 
 ```text
-[run-director] Skipping special foo: missing public.store.specialState
+[run-director] adamant-foo: special module is missing public.store.uiState (managed UI state)
 [MyMod] hook fired: value=Always
 ```
 

@@ -5,26 +5,7 @@ local _coordinators = shared.coordinators
 local SpecialFieldKey = shared.SpecialFieldKey
 local PrepareSchemaFieldRuntimeMetadata = shared.PrepareSchemaFieldRuntimeMetadata
 local IsSchemaConfigField = shared.IsSchemaConfigField
-local function GetSchemaConfigFields(schema)
-    if type(schema) ~= "table" then
-        return {}
-    end
-
-    local configFields = rawget(schema, "_configFields")
-    if configFields then
-        return configFields
-    end
-
-    configFields = {}
-    for _, field in ipairs(schema) do
-        if IsSchemaConfigField(field) then
-            PrepareSchemaFieldRuntimeMetadata(field)
-            table.insert(configFields, field)
-        end
-    end
-    schema._configFields = configFields
-    return configFields
-end
+local GetSchemaConfigFields = shared.GetSchemaConfigFields
 
 local function BuildConfigEntries(configFields, configBackend)
     if not configBackend then
@@ -57,11 +38,12 @@ local function WriteConfigFieldValue(field, modConfig, value, configEntries)
     field._writeValue(modConfig, value)
 end
 
---- Create managed staging state for a special module.
+--- Create managed staging state for schema-backed or option-backed UI fields.
+--- @param modConfig table
+--- @param configBackend table|nil
 --- @param schema table
 --- @return table
-function shared.CreateSpecialState(store, schema)
-    local modConfig = store._config
+function shared.CreateUiState(modConfig, configBackend, schema)
     public.validateSchema(schema, _PLUGIN.guid or "unknown module")
 
     local staging = {}
@@ -69,7 +51,7 @@ function shared.CreateSpecialState(store, schema)
     local dirtyKeys = {}
     local fieldByKey = {}
     local configFields = GetSchemaConfigFields(schema)
-    local configEntries = BuildConfigEntries(configFields, store._backend)
+    local configEntries = BuildConfigEntries(configFields, configBackend)
     for _, field in ipairs(configFields) do
         local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
         fieldByKey[schemaKey] = field
@@ -138,7 +120,7 @@ function shared.CreateSpecialState(store, schema)
                 return value
             end,
             __newindex = function()
-                error("special state view is read-only; use state.set/update/toggle", 2)
+                error("uiState view is read-only; use state.set/update/toggle", 2)
             end,
             __pairs = function()
                 return function(_, lastKey)
@@ -227,29 +209,44 @@ function shared.CreateSpecialState(store, schema)
         isDirty = function()
             return dirty
         end,
+        collectConfigMismatches = function()
+            local mismatches = {}
+            for _, field in ipairs(configFields) do
+                local currentValue = ReadConfigFieldValue(field, modConfig, configEntries)
+                local stagedValue = field._readValue(staging)
+                local ft = FieldTypes[field.type]
+                if ft and ft.toStaging then
+                    currentValue = ft.toStaging(currentValue, field)
+                end
+                if currentValue ~= stagedValue then
+                    table.insert(mismatches, field._schemaKey or SpecialFieldKey(field.configKey))
+                end
+            end
+            return mismatches
+        end,
     }
 end
 
---- Run one special-module UI draw pass and flush managed state if dirty.
+--- Run one managed UI-state draw pass and flush staged state if dirty.
 --- @param opts table
 --- @return boolean
-function public.runSpecialUiPass(opts)
+function public.runUiStatePass(opts)
     local draw = opts and opts.draw
     if type(draw) ~= "function" then
         return false
     end
 
-    local specialState = opts.specialState
-    if not specialState or type(specialState.isDirty) ~= "function" or type(specialState.flushToConfig) ~= "function" then
+    local uiState = opts.uiState
+    if not uiState or type(uiState.isDirty) ~= "function" or type(uiState.flushToConfig) ~= "function" then
         if shared.libWarn then
-            shared.libWarn("runSpecialUiPass: specialState is missing or malformed; pass skipped")
+            shared.libWarn("runUiStatePass: uiState is missing or malformed; pass skipped")
         end
         return false
     end
-    draw(opts.imgui or rom.ImGui, specialState, opts.theme)
+    draw(opts.imgui or rom.ImGui, uiState, opts.theme)
 
-    if specialState.isDirty() then
-        specialState.flushToConfig()
+    if uiState.isDirty() then
+        uiState.flushToConfig()
         if type(opts.onFlushed) == "function" then
             opts.onFlushed()
         end
@@ -259,14 +256,32 @@ function public.runSpecialUiPass(opts)
     return false
 end
 
+--- Audit staged uiState for drift from persisted config, warn on mismatches, then reload.
+--- @param name string
+--- @param uiState table
+--- @return table
+function public.auditAndResyncUiState(name, uiState)
+    if not uiState or type(uiState.collectConfigMismatches) ~= "function" or type(uiState.reloadFromConfig) ~= "function" then
+        return {}
+    end
+
+    local mismatches = uiState.collectConfigMismatches()
+    if #mismatches > 0 then
+        print("[" .. tostring(name) .. "] UI state drift detected; reloading staged values for: " .. table.concat(mismatches, ", "))
+    end
+    uiState.reloadFromConfig()
+    return mismatches
+end
+
 --- Build standalone window + menu-bar callbacks for a special module.
 --- @param def table
 --- @param store table
---- @param specialState table
+--- @param uiState table
 --- @param opts table|nil
 --- @return table
-function public.standaloneSpecialUI(def, store, specialState, opts)
+function public.standaloneSpecialUI(def, store, uiState, opts)
     opts = opts or {}
+    uiState = uiState or (store and store.uiState) or nil
 
     local function getDrawQuickContent()
         if type(opts.getDrawQuickContent) == "function" then
@@ -318,6 +333,10 @@ function public.standaloneSpecialUI(def, store, specialState, opts)
                 store.write("DebugMode", debugValue)
             end
 
+            if uiState and imgui.Button("Audit + Resync UI State") then
+                public.auditAndResyncUiState(def.name or def.id or "module", uiState)
+            end
+
             local drawQuickContent = getDrawQuickContent()
             local drawTab = getDrawTab()
 
@@ -327,10 +346,10 @@ function public.standaloneSpecialUI(def, store, specialState, opts)
             end
 
             if drawQuickContent then
-                public.runSpecialUiPass({
+                public.runUiStatePass({
                     name = def.name,
                     imgui = imgui,
-                    specialState = specialState,
+                    uiState = uiState,
                     theme = opts.theme,
                     draw = drawQuickContent,
                     onFlushed = onStateFlushed,
@@ -343,10 +362,10 @@ function public.standaloneSpecialUI(def, store, specialState, opts)
             end
 
             if drawTab then
-                public.runSpecialUiPass({
+                public.runUiStatePass({
                     name = def.name,
                     imgui = imgui,
-                    specialState = specialState,
+                    uiState = uiState,
                     theme = opts.theme,
                     draw = drawTab,
                     onFlushed = onStateFlushed,

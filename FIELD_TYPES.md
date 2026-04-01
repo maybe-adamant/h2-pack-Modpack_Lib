@@ -33,7 +33,7 @@ Every field type must provide all of these methods:
 | `validate(field, prefix)` | Declaration-time checks and normalization |
 | `toHash(field, value)` | Encode runtime value to canonical hash string |
 | `fromHash(field, str)` | Decode string from hash back to runtime value |
-| `toStaging(val)` | Convert persisted config value into special-state staging value |
+| `toStaging(val)` | Convert persisted config value into managed `uiState` staging value |
 | `draw(imgui, field, value, width)` | Render regular-module widget and return `(newValue, changed)` |
 
 If a type is missing required methods, later consumers will be inconsistent or fail.
@@ -77,7 +77,7 @@ Requirements:
 
 ### `toStaging(val)`
 
-Used when special modules build managed `specialState.view` from persisted config.
+Used when modules build managed `uiState.view` from persisted config.
 
 Requirements:
 
@@ -230,7 +230,7 @@ If a derived property is used every frame, compute and cache it during `validate
 
 ### Be careful with mutable staging values
 
-If `toStaging(...)` returns a table, make sure special-state staging does not accidentally share a
+If `toStaging(...)` returns a table, make sure managed `uiState` staging does not accidentally share a
 mutable object across fields or modules.
 
 ## Descriptor Mutation and Caches

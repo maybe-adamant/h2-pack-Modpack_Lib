@@ -9,7 +9,7 @@ require('tests/TestFieldTypes')
 require('tests/TestValidation')
 require('tests/TestBackupSystem')
 require('tests/TestMutationPlan')
-require('tests/TestSpecialState')
+require('tests/TestUiState')
 require('tests/TestIsEnabled')
 
 local lu = require('luaunit')

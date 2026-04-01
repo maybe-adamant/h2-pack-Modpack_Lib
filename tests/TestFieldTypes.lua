@@ -327,3 +327,50 @@ function TestLayoutFields:testIndentWarnsWhenNotBoolean()
     RestoreWarnings()
     lu.assertTrue(warned)
 end
+
+TestFieldTypeValidation = {}
+
+function TestFieldTypeValidation:testValidateFieldTypesWarnsOnMissingRequiredMethods()
+    local original = lib.FieldTypes.customBroken
+    lib.FieldTypes.customBroken = {
+        validate = function() end,
+        draw = function() end,
+    }
+
+    CaptureWarnings()
+    local ok = lib.validateFieldTypes()
+    local warnings = Warnings
+    RestoreWarnings()
+
+    lib.FieldTypes.customBroken = original
+
+    lu.assertFalse(ok)
+    lu.assertTrue(#warnings > 0)
+    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'toHash'")
+    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'fromHash'")
+    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'toStaging'")
+end
+
+function TestFieldTypeValidation:testValidateSchemaSkipsBrokenFieldTypeFromConfigFields()
+    local original = lib.FieldTypes.customBroken
+    lib.FieldTypes.customBroken = {
+        validate = function() end,
+        draw = function() end,
+    }
+
+    local schema = {
+        { type = "customBroken", configKey = "Broken", default = false },
+        { type = "checkbox", configKey = "Good", default = false },
+    }
+
+    CaptureWarnings()
+    lib.validateSchema(schema, "BrokenTypeMod")
+    local warnings = Warnings
+    RestoreWarnings()
+
+    lib.FieldTypes.customBroken = original
+
+    lu.assertEquals(#(schema._configFields or {}), 1)
+    lu.assertEquals(schema._configFields[1].configKey, "Good")
+    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'toHash'")
+end
