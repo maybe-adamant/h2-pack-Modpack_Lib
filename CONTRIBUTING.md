@@ -14,18 +14,16 @@ local lib = rom.mods["adamant-ModpackLib"]
 
 | Function | Purpose |
 |---|---|
-| `lib.isEnabled(modConfig, packId)` | True if module plus coordinator master toggle are both on |
+| `lib.isEnabled(store, packId)` | True if module plus coordinator master toggle are both on |
 | `lib.warn(packId, enabled, fmt, ...)` | Framework diagnostic print, printf-style. For framework-detected problems. Do not use for normal module tracing. |
 | `lib.log(name, enabled, fmt, ...)` | Module trace print, printf-style, gated by the caller-supplied boolean |
 | `lib.createBackupSystem()` | Returns `backup, revert` for isolated state save/restore |
-| `lib.standaloneUI(def, config, apply, revert)` | Returns menu-bar callback for standalone regular modules |
+| `lib.standaloneUI(def, store, apply, revert)` | Returns menu-bar callback for standalone regular modules |
 | `lib.readPath(tbl, key)` | Read from table using string or path key |
 | `lib.writePath(tbl, key, value)` | Write to table using string or path key |
 | `lib.drawField(imgui, field, value, width)` | Render a regular-module option widget, returns `(newValue, changed)` |
 | `lib.validateSchema(schema, label)` | Validate field descriptors at declaration time |
-| `lib.createSpecialState(config, schema)` | Returns a managed `specialState` object for special modules |
-| `lib.captureSpecialConfigSnapshot(modConfig, schema)` | Debug helper for detecting direct config writes in special-module UI |
-| `lib.warnIfSpecialConfigBypassedState(name, enabled, specialState, modConfig, schema, before)` | Debug helper that logs when a special writes schema-backed config directly during draw |
+| `lib.createStore(config, schema?)` | Returns the module store; special modules get `store.specialState` |
 | `lib.isFieldVisible(field, values)` | Returns true if `field.visibleIf` is absent or `values[field.visibleIf] == true` |
 | `lib.FieldTypes` | The field type registry table |
 
@@ -74,13 +72,13 @@ Special modules get their own sidebar tab and custom state:
 public.definition.special     = true
 public.definition.tabLabel    = "Hammers"
 public.definition.stateSchema = { ... }
-public.specialState           = lib.createSpecialState(config, public.definition.stateSchema)
+public.store                  = lib.createStore(config, public.definition.stateSchema)
 
 function public.DrawTab(imgui, specialState, theme) ... end
 function public.DrawQuickContent(imgui, specialState, theme) ... end
 ```
 
-`public.specialState` is the managed state object for schema-backed UI state.
+`public.store.specialState` is the managed state object for schema-backed UI state.
 
 It exposes:
 - `specialState.view` - read-only render view
@@ -98,7 +96,7 @@ It exposes:
 
 | Field | Value | Purpose |
 |---|---|---|
-| `field._schemaKey` | `table.concat(configKey, ".")` for path keys, `tostring(configKey)` for strings | Stable hash key used by `captureSpecialConfigSnapshot`, `warnIfSpecialConfigBypassedState`, and the hash encode/decode loops |
+| `field._schemaKey` | `table.concat(configKey, ".")` for path keys, `tostring(configKey)` for strings | Stable hash key used by hash encode/decode and special-state bookkeeping |
 | `field._imguiId` | `"##" .. tostring(configKey)` | Stable ImGui widget ID reused by `drawField` every frame |
 
 These are written once and never recomputed. Do not overwrite them.
@@ -118,7 +116,6 @@ Framework-owned hosted flow:
 Standalone special-module flow:
 - the module renders its own window
 - after `DrawTab` / `DrawQuickContent`, the module should call `specialState.flushToConfig()` if dirty
-- the module may use `lib.captureSpecialConfigSnapshot(...)` and `lib.warnIfSpecialConfigBypassedState(...)` in debug mode to detect direct config writes during draw
 
 ## Field type system
 
@@ -173,7 +170,7 @@ The canonical templates live in the `h2-modpack-template` repo:
 
 Every module works without Core installed.
 - Regular modules get a menu-bar toggle via `lib.standaloneUI()`
-- Special modules render their own window and use `public.specialState` there too
+- Special modules render their own window and use `public.store.specialState` there too
 
 When Core is installed, standalone UI is automatically suppressed.
 
@@ -196,7 +193,7 @@ lib.log("MyMod", config.DebugMode, "hook fired: value=%s", value)
 Console output is visually distinct:
 
 ```text
-[run-director] Skipping special foo: missing public.specialState
+[run-director] Skipping special foo: missing public.store.specialState
 [MyMod] hook fired: value=Always
 ```
 

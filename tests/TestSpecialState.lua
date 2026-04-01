@@ -1,5 +1,40 @@
 local lu = require('luaunit')
 
+TestStore = {}
+
+function TestStore:testCreateStoreReadWriteUsesPersistedConfig()
+    local config = {
+        Enabled = false,
+        Nested = { Mode = "Fast" },
+    }
+
+    local store = lib.createStore(config)
+
+    lu.assertFalse(store.read("Enabled"))
+    lu.assertEquals(store.read({ "Nested", "Mode" }), "Fast")
+
+    store.write("Enabled", true)
+    store.write({ "Nested", "Mode" }, "Slow")
+
+    lu.assertTrue(config.Enabled)
+    lu.assertEquals(config.Nested.Mode, "Slow")
+end
+
+function TestStore:testCreateStoreWithSchemaExposesSpecialState()
+    local config = { Strict = false }
+    local schema = {
+        { type = "checkbox", configKey = "Strict", default = false },
+    }
+
+    local store = lib.createStore(config, schema)
+
+    lu.assertNotNil(store.specialState)
+    lu.assertEquals(store.specialState.view.Strict, false)
+    store.specialState.set("Strict", true)
+    store.specialState.flushToConfig()
+    lu.assertTrue(store.read("Strict"))
+end
+
 TestSpecialState = {}
 
 function TestSpecialState:setUp()
@@ -17,7 +52,7 @@ function TestSpecialState:testStagingMirrorsConfig()
         { type = "checkbox", configKey = "Strict" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
 
     lu.assertEquals(specialState.view.Mode, "Fast")
     lu.assertEquals(specialState.view.Strict, true)
@@ -29,7 +64,7 @@ function TestSpecialState:testSnapshotReReadsConfig()
         { type = "dropdown", configKey = "Mode", values = { "Fast", "Slow" }, default = "Fast" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     lu.assertEquals(specialState.view.Mode, "Fast")
 
     config.Mode = "Slow"
@@ -43,7 +78,7 @@ function TestSpecialState:testSyncFlushesToConfig()
         { type = "dropdown", configKey = "Mode", values = { "Fast", "Slow" }, default = "Fast" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     specialState.set("Mode", "Slow")
 
     lu.assertEquals(config.Mode, "Fast") -- not yet synced
@@ -57,7 +92,7 @@ function TestSpecialState:testNestedConfigKey()
         { type = "dropdown", configKey = {"Parent", "Child"}, values = { "value", "other" }, default = "value" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     lu.assertEquals(specialState.view.Parent.Child, "value")
 
     specialState.set({"Parent", "Child"}, "other")
@@ -75,7 +110,7 @@ function TestSpecialState:testReadonlyViewRejectsWrites()
         { type = "dropdown", configKey = "Mode", values = { "Fast", "Slow" }, default = "Fast" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     local ok = pcall(function()
         specialState.view.Mode = "Slow"
     end)
@@ -89,7 +124,7 @@ function TestSpecialState:testSetMarksDirtyAndSyncClearsDirty()
         { type = "checkbox", configKey = "Strict", default = false },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     lu.assertFalse(specialState.isDirty())
 
     specialState.set("Strict", true)
@@ -107,7 +142,7 @@ function TestSpecialState:testUpdateUsesCurrentValue()
         { type = "dropdown", configKey = "Count", values = { "Fast", "Slow" }, default = "Fast" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     specialState.update("Count", function(current)
         if current == "Fast" then return "Slow" end
         return "Fast"
@@ -126,7 +161,7 @@ function TestSpecialState:testToggleFlipsBooleanField()
         { type = "checkbox", configKey = "Strict", default = false },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     specialState.toggle("Strict")
     lu.assertEquals(specialState.view.Strict, true)
     lu.assertTrue(specialState.isDirty())
@@ -141,7 +176,7 @@ function TestSpecialState:testReloadFromConfigClearsUnsyncedViewChanges()
         { type = "dropdown", configKey = "Mode", values = { "Fast", "Slow" }, default = "Fast" },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     specialState.set("Mode", "Slow")
     lu.assertEquals(specialState.view.Mode, "Slow")
     lu.assertTrue(specialState.isDirty())
@@ -161,7 +196,7 @@ function TestSpecialState:testFlushOnlyWritesDirtyKeys()
         { type = "checkbox", configKey = "FlagB", default = false },
     }
 
-    local specialState = lib.createSpecialState(config, schema)
+    local specialState = lib.createStore(config, schema).specialState
     specialState.set("FlagA", true)
 
     -- Simulate an unrelated runtime update that should not be clobbered by flush.
@@ -217,13 +252,10 @@ function TestSpecialState:testChalkEntryFastPathBypassesWrapperReadsAndWrites()
         { type = "checkbox", configKey = "Strict", default = false },
     }
 
-    local specialState = lib.createSpecialState(wrapper, schema)
+    local specialState = lib.createStore(wrapper, schema).specialState
     local flushed = lib.runSpecialUiPass({
         name = "ChalkFastPath",
-        config = wrapper,
-        schema = schema,
         specialState = specialState,
-        validateEnabled = true,
         draw = function(_, state)
             state.set("Mode", "Slow")
             state.set("Strict", true)
@@ -235,75 +267,4 @@ function TestSpecialState:testChalkEntryFastPathBypassesWrapperReadsAndWrites()
     lu.assertTrue(flushed)
     lu.assertEquals(values.Mode, "Slow")
     lu.assertTrue(values.Strict)
-end
-
-TestSpecialConfigWarnings = {}
-
-function TestSpecialConfigWarnings:setUp()
-    CaptureWarnings()
-end
-
-function TestSpecialConfigWarnings:tearDown()
-    RestoreWarnings()
-end
-
-function TestSpecialConfigWarnings:testCaptureSnapshotTracksSchemaKeys()
-    local config = {
-        Strict = false,
-        Nested = { Mode = "Fast" },
-    }
-    local schema = {
-        { type = "checkbox", configKey = "Strict", default = false },
-        { type = "dropdown", configKey = { "Nested", "Mode" }, values = { "Fast", "Slow" }, default = "Fast" },
-    }
-
-    local snapshot = lib.captureSpecialConfigSnapshot(config, schema)
-    lu.assertEquals(snapshot.Strict, false)
-    lu.assertEquals(snapshot["Nested.Mode"], "Fast")
-end
-
-function TestSpecialConfigWarnings:testWarnsOnDirectConfigWriteWithoutDirtyState()
-    local config = { Strict = false }
-    local schema = {
-        { type = "checkbox", configKey = "Strict", default = false },
-    }
-
-    local specialState = lib.createSpecialState(config, schema)
-    local before = lib.captureSpecialConfigSnapshot(config, schema)
-    config.Strict = true
-
-    lib.warnIfSpecialConfigBypassedState("TestSpecial", true, specialState, config, schema, before)
-
-    lu.assertEquals(#Warnings, 1)
-    lu.assertStrContains(Warnings[1], "special UI modified config directly")
-    lu.assertStrContains(Warnings[1], "Strict")
-end
-
-function TestSpecialConfigWarnings:testDoesNotWarnWhenSpecialStateIsDirty()
-    local config = { Strict = false }
-    local schema = {
-        { type = "checkbox", configKey = "Strict", default = false },
-    }
-
-    local specialState = lib.createSpecialState(config, schema)
-    local before = lib.captureSpecialConfigSnapshot(config, schema)
-    specialState.set("Strict", true)
-
-    lib.warnIfSpecialConfigBypassedState("TestSpecial", true, specialState, config, schema, before)
-
-    lu.assertEquals(#Warnings, 0)
-end
-
-function TestSpecialConfigWarnings:testDoesNotWarnWhenConfigDidNotChange()
-    local config = { Strict = false }
-    local schema = {
-        { type = "checkbox", configKey = "Strict", default = false },
-    }
-
-    local specialState = lib.createSpecialState(config, schema)
-    local before = lib.captureSpecialConfigSnapshot(config, schema)
-
-    lib.warnIfSpecialConfigBypassedState("TestSpecial", true, specialState, config, schema, before)
-
-    lu.assertEquals(#Warnings, 0)
 end

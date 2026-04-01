@@ -22,6 +22,7 @@ internal.shared = {
     libConfig = libConfig,
     FieldTypes = FieldTypes,
     coordinators = _coordinators,
+    chalk = chalk,
 }
 
 import 'core.lua'
@@ -38,7 +39,6 @@ rom.gui.add_to_menu_bar(function()
         if rom.ImGui.IsItemHovered() then
             rom.ImGui.SetTooltip("Print lib-internal diagnostic warnings (schema errors, unknown field types)")
         end
-        public.drawSpecialConfigWriteDebugToggle(rom.ImGui)
         rom.ImGui.EndMenu()
     end
 end)

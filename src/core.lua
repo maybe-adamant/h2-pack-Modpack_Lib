@@ -2,6 +2,7 @@ local internal = AdamantModpackLib_Internal
 local shared = internal.shared
 local libConfig = shared.libConfig
 local _coordinators = shared.coordinators
+local chalk = shared.chalk
 local SpecialFieldKey
 local PrepareSchemaFieldRuntimeMetadata
 local IsSchemaConfigField
@@ -23,14 +24,14 @@ function public.isCoordinated(packId)
     return _coordinators[packId] ~= nil
 end
 
---- Check if a module should be active.
---- @param modConfig table
+--- Check if a store-backed module should be active.
+--- @param store table
 --- @param packId string
 --- @return boolean
-function public.isEnabled(modConfig, packId)
+function public.isEnabled(store, packId)
     local coord = packId and _coordinators[packId]
     if coord and not coord.ModEnabled then return false end
-    return modConfig.Enabled == true
+    return store and type(store.read) == "function" and store.read("Enabled") == true or false
 end
 
 --- Lib-internal diagnostic — gated on lib's own DebugMode.
@@ -56,33 +57,6 @@ end
 function public.log(name, enabled, fmt, ...)
     if not enabled then return end
     print("[" .. name .. "] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
-end
-
---- Return true when direct-config-write detection for special-module UI should run.
---- @return boolean
-function public.isSpecialConfigWriteDebugEnabled()
-    return libConfig.DebugSpecialConfigWrites == true or libConfig.DebugStateValidation == true
-end
-
---- Render the expensive direct-config-write detection toggle.
---- @param imgui table
---- @param label string|nil
---- @return boolean value, boolean changed
-function public.drawSpecialConfigWriteDebugToggle(imgui, label)
-    local value, changed = imgui.Checkbox(
-        label or "Direct Config Write Detection",
-        public.isSpecialConfigWriteDebugEnabled()
-    )
-    if changed then
-        libConfig.DebugSpecialConfigWrites = value
-        libConfig.DebugStateValidation = value
-    end
-    if imgui.IsItemHovered() then
-        imgui.SetTooltip(
-            "Warn when special-module UI writes schema-backed config directly instead of using public.specialState."
-        )
-    end
-    return value, changed
 end
 
 --- Create an isolated backup/restore pair.
@@ -123,11 +97,11 @@ end
 
 --- Build a menu-bar callback for a boolean mod.
 --- @param def table
---- @param modConfig table
+--- @param store table
 --- @param apply function
 --- @param revert function
 --- @return function
-function public.standaloneUI(def, modConfig, apply, revert)
+function public.standaloneUI(def, store, apply, revert)
     local function onOptionChanged()
         if def.dataMutation then
             revert()
@@ -136,8 +110,15 @@ function public.standaloneUI(def, modConfig, apply, revert)
         end
     end
 
+    local function IsOptionVisible(opt)
+        if not opt.visibleIf then
+            return true
+        end
+        return store.read(opt.visibleIf) == true
+    end
+
     local function DrawOption(imgui, opt, index)
-        if not public.isFieldVisible(opt, modConfig) then
+        if not IsOptionVisible(opt) then
             return
         end
 
@@ -149,11 +130,11 @@ function public.standaloneUI(def, modConfig, apply, revert)
 
         local currentValue = nil
         if opt.configKey ~= nil then
-            currentValue = modConfig[opt.configKey]
+            currentValue = store.read(opt.configKey)
         end
         local newVal, newChg = public.drawField(imgui, opt, currentValue)
         if newChg and opt.configKey then
-            modConfig[opt.configKey] = newVal
+            store.write(opt.configKey, newVal)
             onOptionChanged()
         end
 
@@ -167,9 +148,10 @@ function public.standaloneUI(def, modConfig, apply, revert)
         if def.modpack and _coordinators[def.modpack] then return end
         if rom.ImGui.BeginMenu(def.name) then
             local imgui = rom.ImGui
-            local val, chg = imgui.Checkbox(def.name, modConfig.Enabled)
+            local enabled = store.read("Enabled") == true
+            local val, chg = imgui.Checkbox(def.name, enabled)
             if chg then
-                modConfig.Enabled = val
+                store.write("Enabled", val)
                 if val then apply() else revert() end
                 if def.dataMutation then rom.game.SetupRunData() end
             end
@@ -177,15 +159,15 @@ function public.standaloneUI(def, modConfig, apply, revert)
                 imgui.SetTooltip(def.tooltip)
             end
 
-            local dbgVal, dbgChg = imgui.Checkbox("Debug Mode", modConfig.DebugMode == true)
+            local dbgVal, dbgChg = imgui.Checkbox("Debug Mode", store.read("DebugMode") == true)
             if dbgChg then
-                modConfig.DebugMode = dbgVal
+                store.write("DebugMode", dbgVal)
             end
             if imgui.IsItemHovered() then
                 imgui.SetTooltip("Print diagnostic warnings to the console for this module.")
             end
 
-            if modConfig.Enabled and def.options then
+            if enabled and def.options then
                 imgui.Separator()
                 for index, opt in ipairs(def.options) do
                     DrawOption(imgui, opt, index)
@@ -227,6 +209,42 @@ function public.writePath(tbl, key, value)
         return
     end
     tbl[key] = value
+end
+
+--- Create the module-owned store facade around persisted Chalk-backed config.
+--- Regular modules call createStore(config); special modules pass stateSchema too.
+--- @param modConfig table
+--- @param schema table|nil
+--- @return table
+function public.createStore(modConfig, schema)
+    local backend = public.getConfigBackend(modConfig)
+    local store = {
+        _config = modConfig,
+        _backend = backend,
+    }
+
+    function store.read(key)
+        if backend then
+            local value = backend.readValue(key)
+            if value ~= nil then
+                return value
+            end
+        end
+        return public.readPath(modConfig, key)
+    end
+
+    function store.write(key, value)
+        if backend and backend.writeValue(key, value) then
+            return
+        end
+        public.writePath(modConfig, key, value)
+    end
+
+    if schema then
+        store.specialState = shared.CreateSpecialState(store, schema)
+    end
+
+    return store
 end
 
 PrepareSchemaFieldRuntimeMetadata = function(field)
@@ -336,12 +354,11 @@ local function GetChalkSectionAndKey(configKey)
 end
 
 function public.getConfigBackend(config)
-    local chalkMod = rom and rom.mods and rom.mods["SGG_Modding-Chalk"]
-    if not chalkMod or type(chalkMod.original) ~= "function" then
+    if not chalk or type(chalk.original) ~= "function" then
         return nil
     end
 
-    local ok, rawConfig = pcall(chalkMod.original, config)
+    local ok, rawConfig = pcall(chalk.original, config)
     if not ok or type(rawConfig) ~= "table" or type(rawConfig.entries) ~= "table" then
         return nil
     end
@@ -406,10 +423,6 @@ function public.getConfigBackend(config)
     backend.rawConfig = rawConfig
     ConfigBackendCache[rawConfig] = backend
     return backend
-end
-
-function public.prepareConfigBackend(config)
-    return public.getConfigBackend(config)
 end
 
 SpecialFieldKey = function(configKey)

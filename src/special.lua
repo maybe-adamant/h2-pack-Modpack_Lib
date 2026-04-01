@@ -5,6 +5,7 @@ local _coordinators = shared.coordinators
 local SpecialFieldKey = shared.SpecialFieldKey
 local PrepareSchemaFieldRuntimeMetadata = shared.PrepareSchemaFieldRuntimeMetadata
 local IsSchemaConfigField = shared.IsSchemaConfigField
+local CreateSpecialState
 
 local function GetSchemaConfigFields(schema)
     if type(schema) ~= "table" then
@@ -58,22 +59,12 @@ local function WriteConfigFieldValue(field, modConfig, value, configEntries)
     field._writeValue(modConfig, value)
 end
 
-local function ResolveDebugFieldState(modConfig, schema, specialState)
-    if specialState then
-        return specialState._schemaConfigFields or GetSchemaConfigFields(schema),
-            specialState._configEntries
-    end
-    local configFields = GetSchemaConfigFields(schema)
-    local configEntries = BuildConfigEntries(configFields, public.getConfigBackend(modConfig))
-    return configFields, configEntries
-end
-
 --- Create managed staging state for a special module.
---- @param modConfig table
 --- @param schema table
 --- @return table
 
-function public.createSpecialState(modConfig, schema)
+CreateSpecialState = function(store, schema)
+    local modConfig = store._config
     public.validateSchema(schema, _PLUGIN.guid or "unknown module")
 
     local staging = {}
@@ -81,7 +72,7 @@ function public.createSpecialState(modConfig, schema)
     local dirtyKeys = {}
     local fieldByKey = {}
     local configFields = GetSchemaConfigFields(schema)
-    local configEntries = BuildConfigEntries(configFields, public.getConfigBackend(modConfig))
+    local configEntries = BuildConfigEntries(configFields, store._backend)
     for _, field in ipairs(configFields) do
         local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
         fieldByKey[schemaKey] = field
@@ -239,52 +230,10 @@ function public.createSpecialState(modConfig, schema)
         isDirty = function()
             return dirty
         end,
-        _configEntries = configEntries,
-        _schemaConfigFields = configFields,
-        _debugSnapshot = {},
     }
 end
-
---- Capture the current config values for a special module's schema-backed fields.
---- @param modConfig table
---- @param schema table
---- @param snapshot table|nil
---- @param specialState table|nil
---- @return table
-function public.captureSpecialConfigSnapshot(modConfig, schema, snapshot, specialState)
-    local configFields, configEntries = ResolveDebugFieldState(modConfig, schema, specialState)
-    snapshot = snapshot or {}
-    for _, field in ipairs(configFields) do
-        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-        snapshot[schemaKey] = ReadConfigFieldValue(field, modConfig, configEntries)
-    end
-    return snapshot
-end
-
---- Debug helper: warn if schema-backed config changed during draw without going through specialState.
---- @param name string
---- @param enabled boolean
---- @param specialState table
---- @param modConfig table
---- @param schema table
---- @param before table
-function public.warnIfSpecialConfigBypassedState(name, enabled, specialState, modConfig, schema, before)
-    if not enabled then return end
-    local configFields, configEntries = ResolveDebugFieldState(modConfig, schema, specialState)
-    for _, field in ipairs(configFields) do
-        local key = field._schemaKey or SpecialFieldKey(field.configKey)
-        local current = ReadConfigFieldValue(field, modConfig, configEntries)
-        if current ~= before[key] then
-            public.log(name, true,
-                "special UI modified config directly at '%s'; use public.specialState for schema-backed state",
-                key)
-            return
-        end
-    end
-end
-
---- Run one special-module UI draw pass with optional direct-config-write detection
---- and managed-state flush.
+shared.CreateSpecialState = CreateSpecialState
+--- Run one special-module UI draw pass and flush managed state if dirty.
 --- @param opts table
 --- @return boolean
 function public.runSpecialUiPass(opts)
@@ -294,32 +243,7 @@ function public.runSpecialUiPass(opts)
     end
 
     local specialState = opts.specialState
-    local validateEnabled = opts.validateEnabled
-    if validateEnabled == nil then
-        validateEnabled = public.isSpecialConfigWriteDebugEnabled()
-    end
-
-    local before = nil
-    if validateEnabled then
-        local snapshot = specialState and specialState._debugSnapshot or nil
-        before = public.captureSpecialConfigSnapshot(opts.config, opts.schema, snapshot, specialState)
-        if specialState then
-            specialState._debugSnapshot = before
-        end
-    end
-
     draw(opts.imgui or rom.ImGui, specialState, opts.theme)
-
-    if validateEnabled then
-        public.warnIfSpecialConfigBypassedState(
-            opts.name or "special",
-            true,
-            specialState,
-            opts.config,
-            opts.schema,
-            before
-        )
-    end
 
     if specialState.isDirty() then
         specialState.flushToConfig()
@@ -334,13 +258,13 @@ end
 
 --- Build standalone window + menu-bar callbacks for a special module.
 --- @param def table
---- @param modConfig table
+--- @param store table
 --- @param specialState table
 --- @param apply function
 --- @param revert function
 --- @param opts table|nil
 --- @return table
-function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert, opts)
+function public.standaloneSpecialUI(def, store, specialState, apply, revert, opts)
     opts = opts or {}
 
     local function getDrawQuickContent()
@@ -358,7 +282,7 @@ function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert,
     end
 
     local function onStateFlushed()
-        if def.dataMutation and modConfig.Enabled then
+        if def.dataMutation and store.read("Enabled") == true then
             revert()
             apply()
             rom.game.SetupRunData()
@@ -374,9 +298,10 @@ function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert,
         local imgui = rom.ImGui
         local title = (opts.windowTitle or def.name) .. "###" .. tostring(def.id)
         if imgui.Begin(title) then
-            local enabledValue, enabledChanged = imgui.Checkbox("Enabled", modConfig.Enabled)
+            local enabled = store.read("Enabled") == true
+            local enabledValue, enabledChanged = imgui.Checkbox("Enabled", enabled)
             if enabledChanged then
-                modConfig.Enabled = enabledValue
+                store.write("Enabled", enabledValue)
                 if enabledValue then
                     apply()
                 else
@@ -387,12 +312,10 @@ function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert,
                 end
             end
 
-            local debugValue, debugChanged = imgui.Checkbox("Debug Mode", modConfig.DebugMode == true)
+            local debugValue, debugChanged = imgui.Checkbox("Debug Mode", store.read("DebugMode") == true)
             if debugChanged then
-                modConfig.DebugMode = debugValue
+                store.write("DebugMode", debugValue)
             end
-
-            public.drawSpecialConfigWriteDebugToggle(imgui)
 
             local drawQuickContent = getDrawQuickContent()
             local drawTab = getDrawTab()
@@ -406,12 +329,9 @@ function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert,
                 public.runSpecialUiPass({
                     name = def.name,
                     imgui = imgui,
-                    config = modConfig,
-                    schema = def.stateSchema,
                     specialState = specialState,
                     theme = opts.theme,
                     draw = drawQuickContent,
-                    validateEnabled = false,
                     onFlushed = onStateFlushed,
                 })
             end
@@ -425,8 +345,6 @@ function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert,
                 public.runSpecialUiPass({
                     name = def.name,
                     imgui = imgui,
-                    config = modConfig,
-                    schema = def.stateSchema,
                     specialState = specialState,
                     theme = opts.theme,
                     draw = drawTab,

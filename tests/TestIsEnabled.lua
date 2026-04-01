@@ -6,6 +6,10 @@ local lu = require('luaunit')
 
 TestIsEnabled = {}
 
+local function makeStore(enabled)
+    return lib.createStore({ Enabled = enabled })
+end
+
 -- Reset the "test-pack" coordinator slot before each test.
 function TestIsEnabled:setUp()
     lib.registerCoordinator("test-pack", nil)
@@ -13,38 +17,38 @@ end
 
 -- no coordinator registered
 function TestIsEnabled:testEnabledStandalone()
-    lu.assertTrue(lib.isEnabled({ Enabled = true }, "test-pack"))
+    lu.assertTrue(lib.isEnabled(makeStore(true), "test-pack"))
 end
 
 function TestIsEnabled:testDisabledStandalone()
-    lu.assertFalse(lib.isEnabled({ Enabled = false }, "test-pack"))
+    lu.assertFalse(lib.isEnabled(makeStore(false), "test-pack"))
 end
 
 function TestIsEnabled:testEnabledNoPackId()
-    lu.assertTrue(lib.isEnabled({ Enabled = true }))
-    lu.assertFalse(lib.isEnabled({ Enabled = false }))
+    lu.assertTrue(lib.isEnabled(makeStore(true)))
+    lu.assertFalse(lib.isEnabled(makeStore(false)))
 end
 
 -- coordinator registered with ModEnabled = true
 function TestIsEnabled:testEnabledWithCoordEnabled()
     lib.registerCoordinator("test-pack", { ModEnabled = true })
-    lu.assertTrue(lib.isEnabled({ Enabled = true }, "test-pack"))
+    lu.assertTrue(lib.isEnabled(makeStore(true), "test-pack"))
 end
 
 function TestIsEnabled:testDisabledWithCoordEnabled()
     lib.registerCoordinator("test-pack", { ModEnabled = true })
-    lu.assertFalse(lib.isEnabled({ Enabled = false }, "test-pack"))
+    lu.assertFalse(lib.isEnabled(makeStore(false), "test-pack"))
 end
 
 -- coordinator registered with ModEnabled = false (pack-level off overrides module)
 function TestIsEnabled:testEnabledWithCoordDisabled()
     lib.registerCoordinator("test-pack", { ModEnabled = false })
-    lu.assertFalse(lib.isEnabled({ Enabled = true }, "test-pack"))
+    lu.assertFalse(lib.isEnabled(makeStore(true), "test-pack"))
 end
 
 function TestIsEnabled:testDisabledWithCoordDisabled()
     lib.registerCoordinator("test-pack", { ModEnabled = false })
-    lu.assertFalse(lib.isEnabled({ Enabled = false }, "test-pack"))
+    lu.assertFalse(lib.isEnabled(makeStore(false), "test-pack"))
 end
 
 -- =============================================================================
@@ -94,6 +98,6 @@ function TestRegisterCoordinator:testMultiplePacksIndependent()
     lib.registerCoordinator("pack-b", { ModEnabled = false })
     lu.assertTrue(lib.isCoordinated("pack-a"))
     lu.assertTrue(lib.isCoordinated("pack-b"))
-    lu.assertTrue(lib.isEnabled({ Enabled = true }, "pack-a"))
-    lu.assertFalse(lib.isEnabled({ Enabled = true }, "pack-b"))
+    lu.assertTrue(lib.isEnabled(makeStore(true), "pack-a"))
+    lu.assertFalse(lib.isEnabled(makeStore(true), "pack-b"))
 end
