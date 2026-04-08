@@ -146,6 +146,60 @@ function TestUiNodes:testDrawCheckboxNodeWritesAliasBackIntoUiState()
     lu.assertFalse(store.uiState.get("Enabled"))
 end
 
+function TestUiNodes:testCheckboxCanUseControlSlotGeometry()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            {
+                type = "checkbox",
+                binds = { value = "Enabled" },
+                label = "Enabled",
+                geometry = {
+                    slots = {
+                        { name = "control", start = 120 },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Enabled = true })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(imgui._state.setCursorPosXCalls[1], 120)
+end
+
+function TestUiNodes:testTextWidgetCanUseValueSlotGeometryAndColor()
+    local imgui = makeBasicImgui()
+    local coloredCalls = {}
+    imgui.TextColored = function(r, g, b, a, text)
+        table.insert(coloredCalls, { r = r, g = g, b = b, a = a, text = text })
+    end
+    local node = {
+        type = "text",
+        text = "Epic",
+        color = { 1, 0.5, 0.25, 1 },
+        geometry = {
+            slots = {
+                { name = "value", start = 20, width = 100, align = "center" },
+            },
+        },
+    }
+
+    lib.prepareWidgetNode(node, "TextWidget")
+    local changed = lib.drawUiNode(imgui, node, { view = {} })
+
+    lu.assertFalse(changed)
+    lu.assertEquals(#coloredCalls, 1)
+    lu.assertEquals(coloredCalls[1].text, "Epic")
+    lu.assertEquals(imgui._state.setCursorPosXCalls[1], 20)
+    lu.assertEquals(imgui._state.setCursorPosXCalls[2], 54)
+end
+
 function TestUiNodes:testDrawUiNodeRespectsVisibleIfAlias()
     local definition = {
         storage = {
@@ -232,6 +286,7 @@ function TestUiNodes:testDrawSteppedRangeNodeWritesBothAliases()
     lu.assertTrue(changed)
     lu.assertEquals(store.uiState.get("MinDepth"), 3)
     lu.assertEquals(store.uiState.get("MaxDepth"), 7)
+    lu.assertEquals(imgui._state.newLineCalls, 0)
 end
 
 function TestUiNodes:testCollectQuickUiNodesRecursesThroughLayoutChildren()
@@ -326,6 +381,192 @@ function TestUiNodes:testCustomWidgetCanRenderThroughDraw()
     lu.assertFalse(store.uiState.get("Enabled"))
 end
 
+function TestUiNodes:testCustomWidgetCanUsePublicDrawWidgetSlotsHelper()
+    local definition = {
+        storage = {
+            { type = "int", alias = "Count", configKey = "Count", default = 2, min = 0, max = 9 },
+        },
+        customTypes = {
+            widgets = {
+                fancyStepper = {
+                    binds = { value = { storageType = "int" } },
+                    slots = { "decrement", "value", "increment" },
+                    validate = function() end,
+                    draw = function(imgui, node, bound)
+                        local current = bound.value:get() or 0
+                        local nextValue = current
+                        local changed = lib.drawWidgetSlots(imgui, node, {
+                            {
+                                name = "decrement",
+                                draw = function()
+                                    if imgui.Button("-") and current > 0 then
+                                        nextValue = current - 1
+                                    end
+                                    return false
+                                end,
+                            },
+                            {
+                                name = "value",
+                                sameLine = true,
+                                draw = function()
+                                    imgui.Text(tostring(current))
+                                    return false
+                                end,
+                            },
+                            {
+                                name = "increment",
+                                sameLine = true,
+                                draw = function()
+                                    if imgui.Button("+") and current < 9 then
+                                        nextValue = current + 1
+                                    end
+                                    return false
+                                end,
+                            },
+                        })
+                        if nextValue ~= current then
+                            bound.value:set(nextValue)
+                            return true
+                        end
+                        return changed
+                    end,
+                },
+            },
+        },
+        ui = {
+            {
+                type = "fancyStepper",
+                binds = { value = "Count" },
+                geometry = {
+                    slots = {
+                        { name = "decrement", start = 0 },
+                        { name = "value", start = 40, width = 40, align = "center" },
+                        { name = "increment", start = 100 },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Count = 2 })
+    local imgui = makeBasicImgui()
+    imgui._state.buttonResponses = { false, true }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, definition.customTypes)
+
+    lu.assertTrue(changed)
+    lu.assertEquals(store.uiState.get("Count"), 3)
+end
+
+function TestUiNodes:testDrawWidgetSlotsHelperCanUseLooseGeometryFromDirectNodeStub()
+    local imgui = makeBasicImgui()
+    local node = {
+        geometry = {
+            slots = {
+                { name = "left", start = 0 },
+                { name = "right", start = 80 },
+            },
+        },
+    }
+
+    local changed = lib.drawWidgetSlots(imgui, node, {
+        {
+            name = "left",
+            draw = function()
+                imgui.Text("L")
+                return false
+            end,
+        },
+        {
+            name = "right",
+            draw = function()
+                imgui.Text("R")
+                return false
+            end,
+        },
+    })
+
+    lu.assertFalse(changed)
+    lu.assertNil(node._slotGeometry)
+
+    local saw0 = false
+    local saw80 = false
+    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 0 then
+            saw0 = true
+        elseif x == 80 then
+            saw80 = true
+        end
+    end
+    lu.assertTrue(saw0)
+    lu.assertTrue(saw80)
+end
+
+function TestUiNodes:testPrepareWidgetNodeCachesSlotGeometryForDirectCustomWidget()
+    local customTypes = {
+        widgets = {
+            rarityBadge = {
+                binds = { value = { storageType = "int" } },
+                slots = { "decrement", "value", "increment" },
+                defaultGeometry = {
+                    slots = {
+                        { name = "decrement", start = 0 },
+                        { name = "value", start = 24, width = 60, align = "center" },
+                        { name = "increment", start = 92 },
+                    },
+                },
+                validate = function() end,
+                draw = function() end,
+            },
+        },
+    }
+    local node = {
+        type = "rarityBadge",
+    }
+
+    lib.prepareWidgetNode(node, "DirectRarityBadge", customTypes)
+
+    lu.assertTrue(type(node._slotGeometry) == "table")
+    lu.assertNotNil(node._defaultSlotGeometry)
+    lu.assertEquals(node._defaultSlotGeometry.increment.start, 92)
+    lu.assertEquals(node._defaultSlotGeometry.value.width, 60)
+    lu.assertEquals(node._defaultSlotGeometry.value.align, "center")
+end
+
+function TestUiNodes:testNodeGeometryOverridesWidgetDefaultGeometry()
+    local customTypes = {
+        widgets = {
+            fancyStepper = {
+                binds = { value = { storageType = "int" } },
+                slots = { "decrement", "value", "increment" },
+                defaultGeometry = {
+                    slots = {
+                        { name = "value", start = 24, width = 60, align = "center" },
+                    },
+                },
+                validate = function() end,
+                draw = function() end,
+            },
+        },
+    }
+    local node = {
+        type = "fancyStepper",
+        geometry = {
+            slots = {
+                { name = "value", width = 80, align = "right" },
+            },
+        },
+    }
+
+    lib.prepareWidgetNode(node, "FancyStepperOverride", customTypes)
+
+    local valueSlot = node._slotGeometry.value
+    lu.assertNotNil(valueSlot)
+    lu.assertEquals(valueSlot.width, 80)
+    lu.assertEquals(valueSlot.align, "right")
+    lu.assertEquals(node._defaultSlotGeometry.value.start, 24)
+    lu.assertEquals(valueSlot.align, "right")
+end
+
 function TestUiNodes:testGetQuickUiNodeIdFallsBackToBinds()
     local node = {
         type = "checkbox",
@@ -372,6 +613,73 @@ function TestUiNodes:testDrawUiNodeReturnsChangedWhenLayoutChildChanges()
 
     lu.assertTrue(changed)
     lu.assertFalse(store.uiState.get("Enabled"))
+end
+
+function TestUiNodes:testPanelLayoutCanPlaceChildrenIntoColumnsAndLines()
+    local definition = {
+        storage = {
+            { type = "string", alias = "ModeA", configKey = "ModeA", default = "A" },
+            { type = "string", alias = "ModeB", configKey = "ModeB", default = "A" },
+            { type = "string", alias = "ModeC", configKey = "ModeC", default = "A" },
+        },
+        ui = {
+            {
+                type = "panel",
+                columns = {
+                    { name = "left", start = 0, width = 100 },
+                    { name = "right", start = 120, width = 140 },
+                },
+                children = {
+                    {
+                        type = "dropdown",
+                        binds = { value = "ModeA" },
+                        values = { "A", "B" },
+                        panel = { column = "left", line = 1, slots = { "control" } },
+                    },
+                    {
+                        type = "dropdown",
+                        binds = { value = "ModeB" },
+                        values = { "A", "B" },
+                        panel = { column = "right", line = 1, slots = { "control" } },
+                    },
+                    {
+                        type = "dropdown",
+                        binds = { value = "ModeC" },
+                        values = { "A", "B" },
+                        panel = { column = "left", line = 2, slots = { "control" } },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, {
+        ModeA = "A",
+        ModeB = "A",
+        ModeC = "A",
+    })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(imgui._state.newLineCalls, 1)
+
+    local saw0 = false
+    local saw120 = false
+    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 0 then
+            saw0 = true
+        elseif x == 120 then
+            saw120 = true
+        end
+    end
+    lu.assertTrue(saw0)
+    lu.assertTrue(saw120)
+
+    lu.assertEquals(#imgui._state.pushItemWidths, 3)
+    lu.assertEquals(imgui._state.pushItemWidths[1], 100)
+    lu.assertEquals(imgui._state.pushItemWidths[2], 140)
+    lu.assertEquals(imgui._state.pushItemWidths[3], 100)
 end
 
 function TestUiNodes:testDropdownGeometryControlsStartAndWidth()

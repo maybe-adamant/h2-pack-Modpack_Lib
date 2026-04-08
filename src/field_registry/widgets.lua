@@ -7,6 +7,8 @@ local registry = shared.fieldRegistry
 
 local NormalizeInteger = registry.NormalizeInteger
 local NormalizeChoiceValue = registry.NormalizeChoiceValue
+local NormalizeColor = registry.NormalizeColor
+local PrepareWidgetText = registry.PrepareWidgetText
 local ChoiceDisplay = registry.ChoiceDisplay
 local GetCursorPosXSafe = registry.GetCursorPosXSafe
 local GetStyleMetricX = registry.GetStyleMetricX
@@ -14,22 +16,19 @@ local CalcTextWidth = registry.CalcTextWidth
 local EstimateButtonWidth = registry.EstimateButtonWidth
 local DrawWidgetSlots = registry.DrawWidgetSlots
 local GetSlotGeometry = registry.GetSlotGeometry
+local ShowPreparedTooltip = registry.ShowPreparedTooltip
+local AlignSlotContent = registry.AlignSlotContent
 
-local function BuildStepperSlots(imgui, node, boundValue, value, options)
+local DEFAULT_PACKED_SLOT_COUNT = 32
+
+local function CreateStepperSlotTemplate(node, options)
     options = options or {}
-    local current = NormalizeInteger(node, value)
-    local step = node._step or 1
     local fastStep = node._fastStep
-    local renderedValue = current
-
-    local style = type(imgui.GetStyle) == "function" and imgui.GetStyle() or nil
-    local itemSpacingX = GetStyleMetricX(style, "ItemSpacing", 0)
-    local label = node.label or ""
+    local label = node._label or ""
     local hasLabel = options.drawLabel ~= false and label ~= ""
+    local firstSlotSameLine = options.firstSlotSameLine == true or hasLabel
     local slotPrefix = options.slotPrefix or ""
     local labelSlotName = options.labelSlotName or "label"
-    local valueSlotStart = nil
-    local valueSlotWidth = nil
 
     local function SlotName(name)
         if slotPrefix ~= "" then
@@ -39,10 +38,14 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
     end
 
     local function CommitValue(nextValue)
+        local ctx = node._stepperCtx
+        if not ctx or not ctx.boundValue then
+            return false
+        end
         local normalized = NormalizeInteger(node, nextValue)
-        if normalized ~= renderedValue then
-            renderedValue = normalized
-            boundValue:set(normalized)
+        if normalized ~= ctx.renderedValue then
+            ctx.renderedValue = normalized
+            ctx.boundValue:set(normalized)
             return true
         end
         return false
@@ -53,11 +56,9 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
     if hasLabel then
         table.insert(slots, {
             name = labelSlotName,
-            draw = function()
+            draw = function(imgui)
                 imgui.Text(label)
-                if imgui.IsItemHovered() and (node.tooltip or "") ~= "" then
-                    imgui.SetTooltip(node.tooltip)
-                end
+                ShowPreparedTooltip(imgui, node)
                 return false
             end,
         })
@@ -65,10 +66,12 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
 
     table.insert(slots, {
         name = SlotName("decrement"),
-        sameLine = hasLabel,
-        draw = function()
+        sameLine = firstSlotSameLine,
+        draw = function(imgui)
+            local ctx = node._stepperCtx
+            local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
             if imgui.Button("-") and renderedValue > node.min then
-                return CommitValue(renderedValue - step)
+                return CommitValue(renderedValue - (node._step or 1))
             end
             return false
         end,
@@ -77,22 +80,17 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
     table.insert(slots, {
         name = SlotName("value"),
         sameLine = true,
-        draw = function(_, slot)
-            valueSlotStart = GetCursorPosXSafe(imgui)
-            valueSlotWidth = slot.width
+        draw = function(imgui, slot)
+            local ctx = node._stepperCtx
+            local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
+            ctx.valueSlotStart = GetCursorPosXSafe(imgui)
+            ctx.valueSlotWidth = slot.width
             if node._lastStepperVal ~= renderedValue then
                 node._lastStepperStr = tostring(renderedValue)
                 node._lastStepperVal = renderedValue
             end
             local valueText = node._lastStepperStr
-            if slot.width and slot.align ~= nil
-                and type(imgui.SetCursorPosX) == "function" then
-                local textWidth = CalcTextWidth(imgui, valueText)
-                local alignOffset = slot.align == "center"
-                    and math.max((slot.width - textWidth) / 2, 0)
-                    or math.max(slot.width - textWidth, 0)
-                imgui.SetCursorPosX(valueSlotStart + alignOffset)
-            end
+            AlignSlotContent(imgui, slot, CalcTextWidth(imgui, valueText))
             imgui.Text(valueText)
             return false
         end,
@@ -101,13 +99,16 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
     table.insert(slots, {
         name = SlotName("increment"),
         sameLine = true,
-        draw = function(_, slot)
-            if slot.start == nil and valueSlotWidth and valueSlotStart ~= nil
-                and type(imgui.SetCursorPosX) == "function" then
-                imgui.SetCursorPosX(valueSlotStart + valueSlotWidth + itemSpacingX)
+        draw = function(imgui, slot)
+            local ctx = node._stepperCtx
+            local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
+            local style = imgui.GetStyle()
+            local itemSpacingX = GetStyleMetricX(style, "ItemSpacing", 0)
+            if slot.start == nil and ctx.valueSlotWidth and ctx.valueSlotStart ~= nil then
+                imgui.SetCursorPosX(ctx.valueSlotStart + ctx.valueSlotWidth + itemSpacingX)
             end
             if imgui.Button("+") and renderedValue < node.max then
-                return CommitValue(renderedValue + step)
+                return CommitValue(renderedValue + (node._step or 1))
             end
             return false
         end,
@@ -117,7 +118,9 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
         table.insert(slots, {
             name = SlotName("fastDecrement"),
             sameLine = true,
-            draw = function()
+            draw = function(imgui)
+                local ctx = node._stepperCtx
+                local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
                 if imgui.Button("<<") and renderedValue > node.min then
                     return CommitValue(renderedValue - fastStep)
                 end
@@ -127,7 +130,9 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
         table.insert(slots, {
             name = SlotName("fastIncrement"),
             sameLine = true,
-            draw = function()
+            draw = function(imgui)
+                local ctx = node._stepperCtx
+                local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
                 if imgui.Button(">>") and renderedValue < node.max then
                     return CommitValue(renderedValue + fastStep)
                 end
@@ -139,22 +144,98 @@ local function BuildStepperSlots(imgui, node, boundValue, value, options)
     return slots
 end
 
+local function PrepareStepperDrawContext(node, boundValue)
+    local ctx = node._stepperCtx or {}
+    ctx.boundValue = boundValue
+    ctx.renderedValue = NormalizeInteger(node, boundValue:get())
+    ctx.valueSlotStart = nil
+    ctx.valueSlotWidth = nil
+    node._stepperCtx = ctx
+end
+
 WidgetTypes.checkbox = {
     binds = { value = { storageType = "bool" } },
+    slots = { "control" },
     validate = function(node, prefix)
         if node.default ~= nil and type(node.default) ~= "boolean" then
             libWarn("%s: checkbox default must be boolean, got %s", prefix, type(node.default))
         end
+        PrepareWidgetText(node, node.binds and node.binds.value)
+        node._checkboxSlots = {
+            {
+                name = "control",
+                draw = function(imgui)
+                    local value = node._checkboxValue == true
+                    local newVal, changed = imgui.Checkbox((node._label or "") .. (node._imguiId or ""), value)
+                    ShowPreparedTooltip(imgui, node)
+                    if changed then
+                        node._checkboxBound:set(newVal)
+                        return true
+                    end
+                    return false
+                end,
+            },
+        }
     end,
     draw = function(imgui, node, bound)
-        local value = bound.value:get()
-        if value == nil then value = node.default == true end
-        local label = tostring(node.label or (node.binds and node.binds.value) or "")
-        local newVal, changed = imgui.Checkbox(label .. (node._imguiId or ""), value == true)
-        if imgui.IsItemHovered() and (node.tooltip or "") ~= "" then
-            imgui.SetTooltip(node.tooltip)
+        node._checkboxBound = bound.value
+        node._checkboxValue = bound.value:get()
+        if node._checkboxValue == nil then node._checkboxValue = node.default == true end
+        return DrawWidgetSlots(imgui, node, node._checkboxSlots, GetCursorPosXSafe(imgui))
+    end,
+}
+
+WidgetTypes.text = {
+    binds = {},
+    slots = { "value" },
+    validate = function(node, prefix)
+        if node.text ~= nil and type(node.text) ~= "string" then
+            libWarn("%s: text text must be string", prefix)
         end
-        if changed then bound.value:set(newVal) end
+        if node.label ~= nil and type(node.label) ~= "string" then
+            libWarn("%s: text label must be string", prefix)
+        end
+        if node.color ~= nil then
+            if type(node.color) ~= "table" then
+                libWarn("%s: text color must be a table", prefix)
+            else
+                local count = 0
+                for i = 1, 4 do
+                    if node.color[i] ~= nil then
+                        count = count + 1
+                        if type(node.color[i]) ~= "number" then
+                            libWarn("%s: text color[%d] must be a number", prefix, i)
+                        end
+                    end
+                end
+                if count ~= 3 and count ~= 4 then
+                    libWarn("%s: text color must have 3 or 4 numeric entries", prefix)
+                end
+            end
+        end
+        node._text = tostring(node.text or node.label or "")
+        node._color = NormalizeColor(node.color)
+        PrepareWidgetText(node)
+        node._textSlots = {
+            {
+                name = "value",
+                draw = function(imgui, slot)
+                    local text = node._text or ""
+                    local color = node._color
+                    AlignSlotContent(imgui, slot, CalcTextWidth(imgui, text))
+                    if type(color) == "table" then
+                        imgui.TextColored(color[1], color[2], color[3], color[4], text)
+                    else
+                        imgui.Text(text)
+                    end
+                    ShowPreparedTooltip(imgui, node)
+                    return false
+                end,
+            },
+        }
+    end,
+    draw = function(imgui, node)
+        return DrawWidgetSlots(imgui, node, node._textSlots, GetCursorPosXSafe(imgui))
     end,
 }
 
@@ -176,6 +257,38 @@ WidgetTypes.dropdown = {
         if node.displayValues ~= nil and type(node.displayValues) ~= "table" then
             libWarn("%s: dropdown displayValues must be a table", prefix)
         end
+        PrepareWidgetText(node, node.binds and node.binds.value)
+        local hasLabel = (node._label or "") ~= ""
+        node._dropdownSlots = {
+            {
+                name = "label",
+                hidden = not hasLabel,
+                draw = function(imgui)
+                    imgui.Text(node._label or "")
+                    ShowPreparedTooltip(imgui, node)
+                    return false
+                end,
+            },
+            {
+                name = "control",
+                sameLine = hasLabel,
+                draw = function(imgui)
+                    local ctx = node._dropdownCtx or {}
+                    if imgui.BeginCombo(node._imguiId, ChoiceDisplay(node, ctx.previewValue or "")) then
+                        for index, candidate in ipairs(node.values or {}) do
+                            if imgui.Selectable(ChoiceDisplay(node, candidate), index == ctx.currentIdx) then
+                                if candidate ~= ctx.current then
+                                    ctx.boundValue:set(candidate)
+                                    return true
+                                end
+                            end
+                        end
+                        imgui.EndCombo()
+                    end
+                    return false
+                end,
+            },
+        }
     end,
     draw = function(imgui, node, bound, width)
         local current = NormalizeChoiceValue(node, bound.value:get())
@@ -184,45 +297,15 @@ WidgetTypes.dropdown = {
             if candidate == current then currentIdx = index; break end
         end
 
-        local previewValue = (node.values and node.values[currentIdx]) or ""
-        local label = node.label or (node.binds and node.binds.value) or ""
-        local hasLabel = label ~= ""
+        local ctx = node._dropdownCtx or {}
+        ctx.boundValue = bound.value
+        ctx.current = current
+        ctx.currentIdx = currentIdx
+        ctx.previewValue = (node.values and node.values[currentIdx]) or ""
+        node._dropdownCtx = ctx
+        node._dropdownSlots[2].width = width
 
-        local slots = {}
-        if hasLabel then
-            table.insert(slots, {
-                name = "label",
-                draw = function()
-                    imgui.Text(label)
-                    if imgui.IsItemHovered() and (node.tooltip or "") ~= "" then
-                        imgui.SetTooltip(node.tooltip)
-                    end
-                    return false
-                end,
-            })
-        end
-
-        table.insert(slots, {
-            name = "control",
-            sameLine = hasLabel,
-            width = width,
-            draw = function()
-                if imgui.BeginCombo(node._imguiId, ChoiceDisplay(node, previewValue)) then
-                    for index, candidate in ipairs(node.values or {}) do
-                        if imgui.Selectable(ChoiceDisplay(node, candidate), index == currentIdx) then
-                            if candidate ~= current then
-                                bound.value:set(candidate)
-                                return true
-                            end
-                        end
-                    end
-                    imgui.EndCombo()
-                end
-                return false
-            end,
-        })
-
-        return DrawWidgetSlots(imgui, node, slots, GetCursorPosXSafe(imgui))
+        return DrawWidgetSlots(imgui, node, node._dropdownSlots, GetCursorPosXSafe(imgui))
     end,
 }
 
@@ -256,19 +339,15 @@ WidgetTypes.radio = {
         if node.displayValues ~= nil and type(node.displayValues) ~= "table" then
             libWarn("%s: radio displayValues must be a table", prefix)
         end
-    end,
-    draw = function(imgui, node, bound)
-        local current = NormalizeChoiceValue(node, bound.value:get())
+        PrepareWidgetText(node, node.binds and node.binds.value)
+        local label = node._label or ""
         local slots = {}
-        local label = node.label or (node.binds and node.binds.value) or ""
         if label ~= "" then
             table.insert(slots, {
                 name = "label",
-                draw = function()
+                draw = function(imgui)
                     imgui.Text(label)
-                    if imgui.IsItemHovered() and (node.tooltip or "") ~= "" then
-                        imgui.SetTooltip(node.tooltip)
-                    end
+                    ShowPreparedTooltip(imgui, node)
                     return false
                 end,
             })
@@ -277,10 +356,11 @@ WidgetTypes.radio = {
             table.insert(slots, {
                 name = "option:" .. tostring(index),
                 sameLine = label == "" and index > 1,
-                draw = function()
-                    if imgui.RadioButton(ChoiceDisplay(node, candidate), current == candidate) then
-                        if candidate ~= current then
-                            bound.value:set(candidate)
+                draw = function(imgui)
+                    local ctx = node._radioCtx or {}
+                    if imgui.RadioButton(ChoiceDisplay(node, candidate), ctx.current == candidate) then
+                        if candidate ~= ctx.current then
+                            ctx.boundValue:set(candidate)
                             return true
                         end
                     end
@@ -288,8 +368,15 @@ WidgetTypes.radio = {
                 end,
             })
         end
-        local changed = DrawWidgetSlots(imgui, node, slots, GetCursorPosXSafe(imgui))
-        if label == "" then
+        node._radioSlots = slots
+    end,
+    draw = function(imgui, node, bound)
+        local ctx = node._radioCtx or {}
+        ctx.boundValue = bound.value
+        ctx.current = NormalizeChoiceValue(node, bound.value:get())
+        node._radioCtx = ctx
+        local changed = DrawWidgetSlots(imgui, node, node._radioSlots, GetCursorPosXSafe(imgui))
+        if (node._label or "") == "" then
             imgui.NewLine()
         end
         return changed
@@ -306,6 +393,8 @@ local function ValidateStepper(node, prefix)
     end
     node._step = math.floor(tonumber(node.step) or 1)
     node._fastStep = node.fastStep and math.floor(node.fastStep) or nil
+    PrepareWidgetText(node, node.binds and node.binds.value)
+    node._slotTemplate = CreateStepperSlotTemplate(node)
 end
 
 WidgetTypes.stepper = {
@@ -313,7 +402,8 @@ WidgetTypes.stepper = {
     slots = { "label", "decrement", "value", "increment", "fastDecrement", "fastIncrement" },
     validate = ValidateStepper,
     draw = function(imgui, node, bound)
-        return DrawWidgetSlots(imgui, node, BuildStepperSlots(imgui, node, bound.value, bound.value:get()), GetCursorPosXSafe(imgui))
+        PrepareStepperDrawContext(node, bound.value)
+        return DrawWidgetSlots(imgui, node, node._slotTemplate, GetCursorPosXSafe(imgui))
     end,
 }
 
@@ -342,8 +432,47 @@ WidgetTypes.steppedRange = {
         }
         ValidateStepper(minStepper, prefix .. " min")
         ValidateStepper(maxStepper, prefix .. " max")
+        minStepper._slotTemplate = CreateStepperSlotTemplate(minStepper, {
+            drawLabel = true,
+            slotPrefix = "min.",
+            labelSlotName = "label",
+        })
+        maxStepper._slotTemplate = CreateStepperSlotTemplate(maxStepper, {
+            drawLabel = false,
+            slotPrefix = "max.",
+            firstSlotSameLine = true,
+        })
         node._minStepper = minStepper
         node._maxStepper = maxStepper
+        node._rangeSlots = {}
+        for _, slot in ipairs(minStepper._slotTemplate) do
+            table.insert(node._rangeSlots, slot)
+        end
+        table.insert(node._rangeSlots, {
+            name = "separator",
+            sameLine = true,
+            draw = function(imgui, slot)
+                local ctx = node._rangeCtx or {}
+                local maxStepperNode = node._maxStepper
+                if ctx.boundMin ~= nil then
+                    maxStepperNode.min = ctx.boundMin:get()
+                end
+                if slot.start == nil then
+                    local beforeMax = GetSlotGeometry(node, "max.decrement")
+                    if beforeMax and type(beforeMax.start) == "number" then
+                        local TO_HALF_WIDTH = 7
+                        local afterMin = GetCursorPosXSafe(imgui)
+                        local separatorX = afterMin + math.max(((ctx.rowStart + beforeMax.start) - afterMin) / 2 - TO_HALF_WIDTH, 0)
+                        imgui.SetCursorPosX(separatorX)
+                    end
+                end
+                imgui.Text("to")
+                return false
+            end,
+        })
+        for _, slot in ipairs(maxStepper._slotTemplate) do
+            table.insert(node._rangeSlots, slot)
+        end
     end,
     draw = function(imgui, node, bound)
         local minStepper = node._minStepper
@@ -359,37 +488,13 @@ WidgetTypes.steppedRange = {
         maxStepper.min = minValue
 
         local rowStart = GetCursorPosXSafe(imgui)
-        local slots = BuildStepperSlots(imgui, minStepper, bound.min, bound.min:get(), {
-            drawLabel = true,
-            slotPrefix = "min.",
-            labelSlotName = "label",
-        })
-
-        table.insert(slots, {
-            name = "separator",
-            sameLine = true,
-            draw = function(_, slot)
-                maxStepper.min = bound.min:get()
-                if slot.start == nil and type(imgui.SetCursorPosX) == "function" then
-                    local beforeMax = GetSlotGeometry(node, "max.decrement")
-                    if beforeMax and type(beforeMax.start) == "number" then
-                        local TO_HALF_WIDTH = 7
-                        local afterMin = GetCursorPosXSafe(imgui)
-                        local separatorX = afterMin + math.max(((rowStart + beforeMax.start) - afterMin) / 2 - TO_HALF_WIDTH, 0)
-                        imgui.SetCursorPosX(separatorX)
-                    end
-                end
-                imgui.Text("to")
-                return false
-            end,
-        })
-        for _, slot in ipairs(BuildStepperSlots(imgui, maxStepper, bound.max, bound.max:get(), {
-            drawLabel = false,
-            slotPrefix = "max.",
-        })) do
-            table.insert(slots, slot)
-        end
-        return DrawWidgetSlots(imgui, node, slots, rowStart)
+        node._rangeCtx = node._rangeCtx or {}
+        node._rangeCtx.boundMin = bound.min
+        node._rangeCtx.boundMax = bound.max
+        node._rangeCtx.rowStart = rowStart
+        PrepareStepperDrawContext(minStepper, bound.min)
+        PrepareStepperDrawContext(maxStepper, bound.max)
+        return DrawWidgetSlots(imgui, node, node._rangeSlots, rowStart)
     end,
 }
 
@@ -400,10 +505,7 @@ WidgetTypes.packedCheckboxList = {
         if itemIndex == nil then
             return false, nil
         end
-        local slotCount = tonumber(node.slotCount)
-        if slotCount == nil or slotCount < 1 then
-            return false, "packedCheckboxList dynamic item slots require a positive slotCount"
-        end
+        local slotCount = tonumber(node.slotCount) or DEFAULT_PACKED_SLOT_COUNT
         slotCount = math.floor(slotCount)
         if itemIndex < 1 or itemIndex > slotCount then
             return false, ("geometry slot '%s' is out of range for packedCheckboxList slotCount %d"):format(
@@ -412,14 +514,37 @@ WidgetTypes.packedCheckboxList = {
         return true, nil
     end,
     validate = function(node, prefix)
-        if node.slotCount ~= nil then
-            if type(node.slotCount) ~= "number" then
-                libWarn("%s: packedCheckboxList slotCount must be a number", prefix)
-            elseif node.slotCount < 1 or math.floor(node.slotCount) ~= node.slotCount then
-                libWarn("%s: packedCheckboxList slotCount must be a positive integer", prefix)
-            else
-                node.slotCount = math.floor(node.slotCount)
-            end
+        if node.slotCount == nil then
+            node.slotCount = DEFAULT_PACKED_SLOT_COUNT
+        elseif type(node.slotCount) ~= "number" then
+            libWarn("%s: packedCheckboxList slotCount must be a number", prefix)
+            node.slotCount = DEFAULT_PACKED_SLOT_COUNT
+        elseif node.slotCount < 1 or math.floor(node.slotCount) ~= node.slotCount then
+            libWarn("%s: packedCheckboxList slotCount must be a positive integer", prefix)
+            node.slotCount = DEFAULT_PACKED_SLOT_COUNT
+        else
+            node.slotCount = math.floor(node.slotCount)
+        end
+
+        node._packedSlots = {}
+        for index = 1, node.slotCount do
+            node._packedSlots[index] = {
+                name = "item:" .. tostring(index),
+                line = index,
+                hidden = false,
+                draw = function(imgui)
+                    local ctx = node._packedCtx or {}
+                    local child = ctx.children and ctx.children[index] or nil
+                    if not child then
+                        return false
+                    end
+                    local val = child.get()
+                    if val == nil then val = false end
+                    local newVal, changed = imgui.Checkbox(child.label, val == true)
+                    if changed then child.set(newVal) end
+                    return changed
+                end,
+            }
         end
     end,
     draw = function(imgui, node, bound)
@@ -430,33 +555,12 @@ WidgetTypes.packedCheckboxList = {
             return
         end
 
-        if type(node.slotCount) == "number" and node.slotCount >= 1 then
-            local slots = {}
-            for index = 1, node.slotCount do
-                local child = children[index]
-                table.insert(slots, {
-                    name = "item:" .. tostring(index),
-                    line = index,
-                    hidden = child == nil,
-                    draw = function()
-                        local val = child.get()
-                        if val == nil then val = false end
-                        local newVal, changed = imgui.Checkbox(child.label, val == true)
-                        if changed then child.set(newVal) end
-                        return changed
-                    end,
-                })
-            end
-            return DrawWidgetSlots(imgui, node, slots, GetCursorPosXSafe(imgui))
+        node._packedCtx = node._packedCtx or {}
+        node._packedCtx.children = children
+        for index = 1, node.slotCount do
+            local child = children[index]
+            node._packedSlots[index].hidden = child == nil
         end
-
-        for index, child in ipairs(children) do
-            local val = child.get()
-            if val == nil then val = false end
-            imgui.PushID(child.alias or tostring(index))
-            local newVal, changed = imgui.Checkbox(child.label, val == true)
-            if changed then child.set(newVal) end
-            imgui.PopID()
-        end
+        return DrawWidgetSlots(imgui, node, node._packedSlots, GetCursorPosXSafe(imgui))
     end,
 }

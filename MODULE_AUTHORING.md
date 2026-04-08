@@ -183,10 +183,11 @@ If a module only treats a packed value as a raw mask, it can remain a plain root
 Examples:
 
 ```lua
+{ type = "text", text = "Section Title" }
 { type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" }
 { type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1 }
 { type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "Vanilla", "Chaos" } }
-{ type = "packedCheckboxList", binds = { value = "PackedFlags" } }
+{ type = "packedCheckboxList", binds = { value = "PackedFlags" } } -- defaults to slotCount = 32
 { type = "packedCheckboxList", binds = { value = "PackedFlags" }, slotCount = 8 }
 ```
 
@@ -254,8 +255,10 @@ Geometry is now expressed through `geometry.slots`, where each slot descriptor m
 Slots are rendered in ascending `line`.
 Within the same line, slots with explicit `start` values are ordered by `start`.
 Otherwise declaration order breaks ties and preserves slots without explicit `start`.
+`text` supports a single `value` slot.
+`checkbox` supports a single `control` slot.
 `radio` supports `option:N` slot names for each entry in `node.values`.
-`packedCheckboxList` supports `item:N` slot names when `slotCount` is declared.
+`packedCheckboxList` supports `item:N` slot names. If `slotCount` is omitted, Lib defaults it to `32`.
 
 `slotCount` is the declaration-time slot capacity for `packedCheckboxList`. Packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity.
 

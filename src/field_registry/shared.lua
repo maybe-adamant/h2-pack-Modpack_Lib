@@ -47,6 +47,35 @@ end
 
 registry.NormalizeChoiceValue = NormalizeChoiceValue
 
+local function NormalizeColor(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+    local r = tonumber(value[1])
+    local g = tonumber(value[2])
+    local b = tonumber(value[3])
+    local a = value[4] ~= nil and tonumber(value[4]) or 1
+    if r == nil or g == nil or b == nil or a == nil then
+        return nil
+    end
+    return { r, g, b, a }
+end
+
+shared.NormalizeColor = NormalizeColor
+registry.NormalizeColor = NormalizeColor
+
+local function PrepareWidgetText(node, fallbackLabel)
+    if type(node) ~= "table" then
+        return
+    end
+    node._label = tostring(node.label or fallbackLabel or "")
+    node._tooltipText = node.tooltip ~= nil and tostring(node.tooltip) or ""
+    node._hasTooltip = node._tooltipText ~= ""
+end
+
+shared.PrepareWidgetText = PrepareWidgetText
+registry.PrepareWidgetText = PrepareWidgetText
+
 local function ChoiceDisplay(node, value)
     if node.displayValues and node.displayValues[value] ~= nil then
         return tostring(node.displayValues[value])
@@ -58,11 +87,7 @@ shared.ChoiceDisplay = ChoiceDisplay
 registry.ChoiceDisplay = ChoiceDisplay
 
 local function GetCursorPosXSafe(imgui)
-    local getCursorPosX = imgui and imgui.GetCursorPosX
-    if type(getCursorPosX) == "function" then
-        return getCursorPosX() or 0
-    end
-    return 0
+    return imgui.GetCursorPosX() or 0
 end
 
 registry.GetCursorPosXSafe = GetCursorPosXSafe
@@ -190,6 +215,11 @@ local function ParseWidgetGeometry(node, prefix, widgetType, geometry, opts)
 end
 
 local function ValidateWidgetGeometry(node, prefix, widgetType)
+    node._defaultSlotGeometry = ParseWidgetGeometry(
+        node,
+        prefix .. " defaultGeometry",
+        widgetType,
+        type(widgetType) == "table" and widgetType.defaultGeometry or nil)
     node._slotGeometry = ParseWidgetGeometry(node, prefix, widgetType, node.geometry)
 end
 
@@ -201,31 +231,58 @@ end
 
 registry.PrepareRuntimeWidgetGeometry = PrepareRuntimeWidgetGeometry
 
+local function PrepareLooseWidgetGeometry(geometry)
+    if type(geometry) ~= "table" or type(geometry.slots) ~= "table" then
+        return nil
+    end
+    local parsed = {}
+    for _, slotSpec in ipairs(geometry.slots) do
+        if type(slotSpec) == "table" and type(slotSpec.name) == "string" and slotSpec.name ~= "" then
+            parsed[slotSpec.name] = {
+                line = type(slotSpec.line) == "number" and slotSpec.line >= 1 and math.floor(slotSpec.line) == slotSpec.line
+                    and slotSpec.line or nil,
+                start = type(slotSpec.start) == "number" and slotSpec.start or nil,
+                width = type(slotSpec.width) == "number" and slotSpec.width > 0 and slotSpec.width or nil,
+                align = (slotSpec.align == "center" or slotSpec.align == "right") and slotSpec.align or nil,
+                hidden = slotSpec.hidden == true or nil,
+            }
+        end
+    end
+    return parsed
+end
+
+registry.PrepareLooseWidgetGeometry = PrepareLooseWidgetGeometry
+
 local function GetSlotGeometry(node, slotName)
     if type(node) ~= "table" then
         return nil
     end
+    local defaultGeometry = node._defaultSlotGeometry
     local runtimeGeometry = node._runtimeSlotGeometry
     local staticGeometry = node._slotGeometry
+    local defaultSlot = type(defaultGeometry) == "table" and defaultGeometry[slotName] or nil
     local runtimeSlot = type(runtimeGeometry) == "table" and runtimeGeometry[slotName] or nil
     local staticSlot = type(staticGeometry) == "table" and staticGeometry[slotName] or nil
-    if type(runtimeSlot) ~= "table" then
-        if type(staticSlot) == "table" then
-            return staticSlot
-        end
-        return nil
-    end
-    if type(staticSlot) ~= "table" then
-        return runtimeSlot
-    end
     local merged = {}
-    for key, value in pairs(staticSlot) do
-        merged[key] = value
-    end
-    for key, value in pairs(runtimeSlot) do
-        if value ~= nil then
+    if type(defaultSlot) == "table" then
+        for key, value in pairs(defaultSlot) do
             merged[key] = value
         end
+    end
+    if type(staticSlot) == "table" then
+        for key, value in pairs(staticSlot) do
+            merged[key] = value
+        end
+    end
+    if type(runtimeSlot) == "table" then
+        for key, value in pairs(runtimeSlot) do
+            if value ~= nil then
+                merged[key] = value
+            end
+        end
+    end
+    if next(merged) == nil then
+        return nil
     end
     return merged
 end
@@ -243,22 +300,89 @@ end
 registry.GetStyleMetricX = GetStyleMetricX
 
 local function CalcTextWidth(imgui, text)
-    if type(imgui.CalcTextSize) ~= "function" then
-        return #(tostring(text or ""))
-    end
     local width = imgui.CalcTextSize(tostring(text or ""))
     return type(width) == "number" and width or 0
 end
 
 registry.CalcTextWidth = CalcTextWidth
 
+local function ShowPreparedTooltip(imgui, node)
+    if node and node._hasTooltip == true and imgui.IsItemHovered() then
+        imgui.SetTooltip(node._tooltipText)
+    end
+end
+
+registry.ShowPreparedTooltip = ShowPreparedTooltip
+
 local function EstimateButtonWidth(imgui, label)
-    local style = type(imgui.GetStyle) == "function" and imgui.GetStyle() or nil
+    local style = imgui.GetStyle()
     local framePaddingX = GetStyleMetricX(style, "FramePadding", 0)
     return CalcTextWidth(imgui, label) + framePaddingX * 2
 end
 
 registry.EstimateButtonWidth = EstimateButtonWidth
+
+local function AlignSlotContent(imgui, slot, contentWidth)
+    if type(slot) ~= "table" or slot.width == nil or slot.align == nil then
+        return
+    end
+    if type(contentWidth) ~= "number" then
+        return
+    end
+    local slotStart = imgui.GetCursorPosX()
+    local alignOffset = slot.align == "center"
+        and math.max((slot.width - contentWidth) / 2, 0)
+        or math.max(slot.width - contentWidth, 0)
+    imgui.SetCursorPosX(slotStart + alignOffset)
+end
+
+registry.AlignSlotContent = AlignSlotContent
+
+local function BuildSlotOrderKey(entries)
+    local parts = {}
+    for _, entry in ipairs(entries) do
+        parts[#parts + 1] = tostring(entry.slot.name or "")
+        parts[#parts + 1] = "@"
+        parts[#parts + 1] = tostring(entry.index)
+        parts[#parts + 1] = ":"
+        parts[#parts + 1] = tostring(entry.line or 1)
+        parts[#parts + 1] = ":"
+        parts[#parts + 1] = entry.start ~= nil and tostring(entry.start) or "_"
+        parts[#parts + 1] = "|"
+    end
+    return table.concat(parts)
+end
+
+local function GetOrderedSlotPositions(node, entries)
+    local orderKey = BuildSlotOrderKey(entries)
+    if type(node) == "table" and node._slotOrderCacheKey == orderKey
+        and type(node._slotOrderCacheOrder) == "table" then
+        return node._slotOrderCacheOrder
+    end
+
+    local orderedPositions = {}
+    for index = 1, #entries do
+        orderedPositions[index] = index
+    end
+
+    table.sort(orderedPositions, function(leftIndex, rightIndex)
+        local left = entries[leftIndex]
+        local right = entries[rightIndex]
+        if left.line ~= right.line then
+            return left.line < right.line
+        end
+        if type(left.start) == "number" and type(right.start) == "number" and left.start ~= right.start then
+            return left.start < right.start
+        end
+        return left.index < right.index
+    end)
+
+    if type(node) == "table" then
+        node._slotOrderCacheKey = orderKey
+        node._slotOrderCacheOrder = orderedPositions
+    end
+    return orderedPositions
+end
 
 local function DrawWidgetSlots(imgui, node, slots, rowStart)
     if type(slots) ~= "table" then
@@ -273,69 +397,63 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart)
         if type(slot) == "table" and type(slot.draw) == "function" then
             local geometry = type(slot.name) == "string" and GetSlotGeometry(node, slot.name) or nil
             local hidden = slot.hidden == true or (type(geometry) == "table" and geometry.hidden == true)
-            if not hidden then
             table.insert(renderSlots, {
                 slot = slot,
                 index = index,
+                hidden = hidden,
                 line = (geometry and geometry.line) or slot.line or 1,
                 start = (geometry and geometry.start) or slot.start,
                 width = (geometry and geometry.width) or slot.width,
                 align = (geometry and geometry.align) or slot.align,
             })
-            end
         end
     end
 
-    table.sort(renderSlots, function(a, b)
-        if a.line ~= b.line then
-            return a.line < b.line
-        end
-        if type(a.start) == "number" and type(b.start) == "number" and a.start ~= b.start then
-            return a.start < b.start
-        end
-        return a.index < b.index
-    end)
+    local orderedPositions = GetOrderedSlotPositions(node, renderSlots)
 
     local currentLine = nil
     local firstOnLine = true
 
-    for _, entry in ipairs(renderSlots) do
-        local slot = entry.slot
-        local merged = {
-            name = slot.name,
-            hidden = slot.hidden == true,
-            start = entry.start,
-            width = entry.width,
-            align = entry.align,
-            sameLine = slot.sameLine,
-            line = entry.line,
-        }
+    for _, position in ipairs(orderedPositions) do
+        local entry = renderSlots[position]
+        if not entry.hidden then
+            local slot = entry.slot
+            local merged = {
+                name = slot.name,
+                hidden = slot.hidden == true,
+                start = entry.start,
+                width = entry.width,
+                align = entry.align,
+                sameLine = slot.sameLine,
+                line = entry.line,
+            }
 
-        if currentLine ~= entry.line then
-            if currentLine ~= nil then
-                imgui.NewLine()
+            if currentLine ~= entry.line then
+                if currentLine ~= nil then
+                    imgui.NewLine()
+                end
+                currentLine = entry.line
+                firstOnLine = true
+            elseif not firstOnLine and slot.sameLine ~= false then
+                imgui.SameLine()
             end
-            currentLine = entry.line
-            firstOnLine = true
-        elseif not firstOnLine and slot.sameLine ~= false then
-            imgui.SameLine()
-        end
 
-        if type(entry.start) == "number" and type(imgui.SetCursorPosX) == "function" then
-            imgui.SetCursorPosX(rowStart + entry.start)
+            if type(entry.start) == "number" then
+                imgui.SetCursorPosX(rowStart + entry.start)
+            end
+            if type(entry.width) == "number" and entry.width > 0 then
+                imgui.PushItemWidth(entry.width)
+            end
+            imgui.PushID((slot.name or "slot") .. "_" .. tostring(entry.index))
+            if slot.draw(imgui, merged, rowStart) then
+                changed = true
+            end
+            imgui.PopID()
+            if type(entry.width) == "number" and entry.width > 0 then
+                imgui.PopItemWidth()
+            end
+            firstOnLine = false
         end
-        if type(entry.width) == "number" and entry.width > 0 then
-            imgui.PushItemWidth(entry.width)
-        end
-        imgui.PushID((slot.name or "slot") .. "_" .. tostring(entry.index))
-        if slot.draw(imgui, merged, rowStart) then
-            changed = true
-        end
-        imgui.PopID()
-        if type(entry.width) == "number" and entry.width > 0 then
-            imgui.PopItemWidth()
-        end
-        firstOnLine = false
     end
     return changed
 end

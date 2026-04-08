@@ -99,6 +99,7 @@ Required methods:
 - `draw(imgui, node, bound, width?)`
 
 Built-ins:
+- `text`
 - `checkbox`
 - `dropdown`
 - `radio`
@@ -126,11 +127,13 @@ which is how `packedCheckboxList` receives packed child rows.
 Some widgets also support a widget-local `geometry` bag for manual horizontal placement.
 
 First-pass built-in support:
+- `text`: `value`
+- `checkbox`: `control`
 - `dropdown`: `label`, `control`
 - `radio`: `label`, dynamic `option:N`
 - `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
 - `steppedRange`: `label`, `min.*`, `separator`, `max.*`
-- `packedCheckboxList`: dynamic `item:N` when `slotCount` is declared
+- `packedCheckboxList`: dynamic `item:N`; `slotCount` defaults to `32` when omitted
 
 Geometry is expressed through `geometry.slots`, a list of slot descriptors.
 Each slot descriptor may declare:
@@ -148,7 +151,7 @@ Slots are rendered in ascending `line`.
 Within the same line, slots with explicit `start` values are ordered by `start`.
 Otherwise declaration order breaks ties and preserves slots without explicit `start`.
 `radio` supports `option:N` slot names for each entry in `node.values`.
-`packedCheckboxList` supports `item:N` slot names when `slotCount` is declared.
+`packedCheckboxList` supports `item:N` slot names. If `slotCount` is omitted, Lib defaults it to `32`.
 
 `slotCount` is the declaration-time slot capacity for `packedCheckboxList`. Packed children may be omitted at runtime, but the widget does not invent new slots beyond the declared count.
 
@@ -199,6 +202,7 @@ Required methods:
 Built-ins:
 - `separator`
 - `group`
+- `panel`
 
 Layout nodes may carry `children`.
 
@@ -213,6 +217,35 @@ Example:
     },
 }
 ```
+
+`panel` is a first-pass child-placement layout:
+
+```lua
+{
+    type = "panel",
+    columns = {
+        { name = "label", start = 0, width = 220 },
+        { name = "control", start = 240, width = 180 },
+    },
+    children = {
+        {
+            type = "dropdown",
+            binds = { value = "Mode" },
+            values = { "A", "B" },
+            panel = { column = "control", line = 1, slots = { "control" } },
+        },
+    },
+}
+```
+
+Rules:
+- `columns` is a non-empty list
+- each column may declare `name`, `start`, `width`, and `align`
+- child `panel.column` may be a column name or 1-based index
+- child `panel.line` defaults to `1`
+- child `panel.slots` may list child widget slot names that should inherit the column's `width`/`align`
+
+`panel` positions children row-by-row and passes runtime geometry overrides into child widgets without mutating their nodes.
 
 ## Binding Rules
 
@@ -261,6 +294,11 @@ Lib hard-validates registry contracts through:
 ### `string`
 - normalizes to string
 - supports optional `maxLen` validation
+
+### `text`
+- presentational widget with no binds
+- renders `node.text` or `node.label`
+- supports optional `color = { r, g, b }` or `{ r, g, b, a }`
 
 ### `checkbox`
 - expects bool storage
@@ -315,10 +353,12 @@ Rules:
 - custom widgets must declare `binds`
 - custom widgets must implement `validate(...)` and `draw(...)`
 - custom widgets may optionally declare `slots = { ... }` to whitelist supported `node.geometry.slots[*].name` values
+- custom widgets may optionally declare `defaultGeometry = { slots = { ... } }` as their baseline slot layout
 - custom widgets may optionally declare `dynamicSlots(node, slotName) -> ok, err` for declaration-time-dependent slot names
 - custom layouts must implement `validate(...)` and `render(...)`
 
 Today, `slots` is a validation surface. Custom widget `draw(...)` logic still reads `node.geometry` itself when it wants custom placement.
+Custom widgets that want Lib-managed slot placement may call `lib.drawWidgetSlots(...)` from inside `draw(...)`.
 
 Custom types are merged into the registry surface for:
 - `lib.validateUi(...)`

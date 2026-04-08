@@ -184,6 +184,26 @@ function public.prepareUiNode(node, label, storage, customTypes)
     ValidateUiNode(node, prefix, EnsurePreparedStorage(storage, prefix .. " storage"), widgetTypes, layoutTypes)
 end
 
+function public.prepareWidgetNode(node, label, customTypes)
+    local prefix = label or "prepareWidgetNode"
+    if type(node) ~= "table" then
+        libWarn("%s: widget node is not a table", prefix)
+        return
+    end
+    if type(node.type) ~= "string" or node.type == "" then
+        libWarn("%s: widget node missing type", prefix)
+        return
+    end
+    local widgetTypes = select(1, MergeCustomTypes(customTypes))
+    local widgetType = widgetTypes[node.type]
+    if not widgetType then
+        libWarn("%s: unknown widget type '%s'", prefix, tostring(node.type))
+        return
+    end
+    widgetType.validate(node, prefix)
+    ValidateWidgetGeometry(node, prefix, widgetType)
+end
+
 function public.prepareUiNodes(nodes, label, storage, customTypes)
     local prefix = label or "prepareUiNodes"
     local preparedStorage = EnsurePreparedStorage(storage, prefix .. " storage")

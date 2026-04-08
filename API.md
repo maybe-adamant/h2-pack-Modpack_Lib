@@ -157,6 +157,12 @@ The `storage` argument may be:
 
 Store creation is not required before calling this helper.
 
+### `lib.prepareWidgetNode(node, label?, customTypes?)`
+
+Validates and prepares one direct-draw widget node without requiring storage binds.
+
+Useful for transitional custom widgets that are drawn manually with synthetic bound values, but still want cached slot geometry and normal custom-widget validation.
+
 ### `lib.prepareUiNodes(nodes, label?, storage, customTypes?)`
 
 Validates and prepares an ordered UI node list.
@@ -187,6 +193,22 @@ Runtime geometry may override:
 ### `lib.drawUiTree(imgui, nodes, uiState, width?, customTypes?)`
 
 Draws an ordered UI node list.
+
+### `lib.drawWidgetSlots(imgui, node, slots, rowStart?)`
+
+Public helper for custom widget `draw(...)` implementations that want Lib-managed slot placement.
+
+Behavior:
+- uses the prepared slot geometry from `node.geometry`
+- respects runtime geometry overrides already applied to `node`
+- defaults `rowStart` to the current cursor X
+- returns `true` if any slot draw returns `true`
+
+### `lib.alignSlotContent(imgui, slot, contentWidth)`
+
+Applies slot-local `width` / `align` positioning for already-measured content.
+
+Useful inside custom widget slot draws when the widget knows the content width but wants Lib to handle the centering/right-align math.
 
 ### `lib.collectQuickUiNodes(nodes, out?, customTypes?)`
 
@@ -224,6 +246,7 @@ definition.customTypes = {
         myWidget = {
             binds = { value = { storageType = "int" } },
             slots = { "label", "control" }, -- optional supported geometry slot names
+            defaultGeometry = { slots = { ... } }, -- optional widget-owned baseline geometry
             dynamicSlots = function(node, slotName) ... end, -- optional declaration-time slot validator
             validate = function(node, prefix) ... end,
             draw = function(imgui, node, bound, width) ... end,
@@ -243,6 +266,7 @@ Rules:
 - custom widgets must declare `binds`
 - custom widgets must declare `draw(...)`
 - custom widgets may optionally declare `slots = { ... }` to whitelist supported `node.geometry.slots[*].name` values
+- custom widgets may optionally declare `defaultGeometry = { slots = { ... } }` as their baseline slot layout
 - custom widgets may optionally declare `dynamicSlots(node, slotName) -> ok, err` for declaration-time-dependent slot names
 - all UI helpers that accept `customTypes` merge them with built-ins for validation and draw
 
@@ -267,11 +291,13 @@ Certain widgets support a widget-local `geometry` bag for manual horizontal plac
 ```
 
 Current built-in support:
+- `text`: `value`
+- `checkbox`: `control`
 - `dropdown`: `label`, `control`
 - `radio`: `label`, dynamic `option:N`
 - `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
 - `steppedRange`: `label`, `min.*`, `separator`, `max.*`
-- `packedCheckboxList`: dynamic `item:N` when `slotCount` is declared
+- `packedCheckboxList`: dynamic `item:N`; `slotCount` defaults to `32` when omitted
 
 Behavior:
 - `geometry.slots` is a list of slot descriptors
@@ -284,8 +310,9 @@ Behavior:
 - within the same line, slots with explicit `start` values are ordered by `start`
 - otherwise declaration order breaks ties and preserves slots without explicit `start`
 - `radio` supports `option:N` slot names for each entry in `node.values`
-- `packedCheckboxList` supports `item:N` slot names when `slotCount` is declared
-- `slotCount` is the declaration-time slot capacity for `packedCheckboxList`; packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity
+- `packedCheckboxList` supports `item:N` slot names
+- `slotCount` is the declaration-time slot capacity for `packedCheckboxList`; if omitted, Lib defaults it to `32`
+- packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity
 - runtime geometry overrides may additionally set `hidden = true` on a slot to skip rendering it without reflow
 - if a slot is omitted, the widget falls back to its default rendering for that slot
 - unknown top-level geometry keys and unsupported slot names warn during validation
@@ -407,6 +434,7 @@ Built-ins:
 Lib-owned widget registry.
 
 Built-ins:
+- `text`
 - `checkbox`
 - `dropdown`
 - `radio`
@@ -421,6 +449,7 @@ Lib-owned layout registry.
 Built-ins:
 - `separator`
 - `group`
+- `panel`
 
 ### `lib.validateRegistries()`
 

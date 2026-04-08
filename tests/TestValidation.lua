@@ -519,3 +519,57 @@ function TestUiValidation:testPackedCheckboxListItemSlotMustBeWithinDeclaredSlot
 
     assertWarningContains("geometry slot 'item:3' is out of range for packedCheckboxList slotCount 2")
 end
+
+function TestUiValidation:testPackedCheckboxListUsesDefaultSlotCountWhenOmitted()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+            },
+        },
+    }
+    lib.validateStorage(storage, "PackedImplicitSlotCount")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags" },
+            geometry = {
+                slots = {
+                    { name = "item:33", line = 1, start = 0 },
+                },
+            },
+        },
+    }, "PackedImplicitSlotCount", storage)
+
+    assertWarningContains("geometry slot 'item:33' is out of range for packedCheckboxList slotCount 32")
+end
+
+function TestUiValidation:testPanelChildColumnMustExist()
+    local storage = {
+        { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
+    }
+    lib.validateStorage(storage, "PanelColumn")
+
+    lib.validateUi({
+        {
+            type = "panel",
+            columns = {
+                { name = "left", start = 0, width = 100 },
+            },
+            children = {
+                {
+                    type = "dropdown",
+                    binds = { value = "Mode" },
+                    values = { "A", "B" },
+                    panel = { column = "right", line = 1, slots = { "control" } },
+                },
+            },
+        },
+    }, "PanelColumn", storage)
+
+    assertWarningContains("panel.column references unknown column 'right'")
+end
