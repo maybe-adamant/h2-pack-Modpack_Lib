@@ -858,7 +858,7 @@ function public.createStore(modConfig, definition, dataDefaults)
 
     if storage and type(dataDefaults) == "table" then
         for _, node in ipairs(storage) do
-            if node.default == nil then
+            if node.lifetime ~= "transient" and node.default == nil then
                 local key = node.configKey or node.alias
                 if key ~= nil then
                     node.default = public.readPath(dataDefaults, key)
@@ -884,6 +884,7 @@ function public.createStore(modConfig, definition, dataDefaults)
     end
 
     local aliasNodes = storage and public.getStorageAliases(storage) or {}
+    local persistedAliasNodes = storage and (rawget(storage, "_persistedAliasNodes") or {}) or {}
     local rootByKey = storage and (rawget(storage, "_rootByKey") or {}) or {}
 
     local function readRaw(configKey)
@@ -920,6 +921,10 @@ function public.createStore(modConfig, definition, dataDefaults)
         if type(keyOrAlias) == "string" then
             local node = aliasNodes[keyOrAlias]
             if node then
+                if node._lifetime == "transient" then
+                    libWarnAlways("store.read: alias '%s' is transient; use store.uiState for UI-only state", tostring(keyOrAlias))
+                    return nil
+                end
                 if node._isBitAlias then
                     local packed = readRootNode(node.parent)
                     local rawValue = public.readBitsValue(packed, node.offset, node.width)
@@ -943,6 +948,10 @@ function public.createStore(modConfig, definition, dataDefaults)
         if type(keyOrAlias) == "string" then
             local node = aliasNodes[keyOrAlias]
             if node then
+                if node._lifetime == "transient" then
+                    libWarnAlways("store.write: alias '%s' is transient; use store.uiState for UI-only state", tostring(keyOrAlias))
+                    return
+                end
                 if node._isBitAlias then
                     local parent = node.parent
                     local currentPacked = readRootNode(parent)
@@ -977,6 +986,7 @@ function public.createStore(modConfig, definition, dataDefaults)
 
     store.storage = storage
     store.ui = type(definition) == "table" and definition.ui or nil
+    store._persistedAliasNodes = persistedAliasNodes
 
     if storage then
         store.uiState = shared.CreateUiState(modConfig, backend, storage)

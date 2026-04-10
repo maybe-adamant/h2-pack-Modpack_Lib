@@ -234,6 +234,29 @@ rom.gui.add_to_menu_bar(specialUi.addMenuBar)
 { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 64 }
 ```
 
+### Transient UI storage
+
+Use `lifetime = "transient"` for alias-backed UI state that should not persist to Chalk, hashes, or profiles:
+
+```lua
+{ type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 }
+{ type = "string", alias = "FilterMode", lifetime = "transient", default = "all", maxLen = 16 }
+```
+
+Rules:
+- persisted roots use `configKey`
+- transient roots use `lifetime = "transient"`
+- `configKey` and `lifetime` are mutually exclusive
+- transient roots must declare an explicit `alias`
+- transient roots are UI-only and must be accessed through `store.uiState`
+- transient `packedInt` roots are not supported in v1
+
+When to use transient aliases:
+- use transient aliases when multiple UI elements need to coordinate through the same state
+- use transient aliases when planners, `visibleIf`, or layout decisions need to read the same UI state generically
+- keep state module-local when it is only internal navigation or scratch for one contained widget/view
+- do not promote purely local widget navigation into transient storage unless another UI surface actually needs to read it
+
 ### Packed storage
 
 Use `packedInt` when you want alias-addressable packed children:
@@ -260,7 +283,9 @@ Examples:
 
 ```lua
 { type = "text", text = "Section Title" }
+{ type = "button", label = "Reset Filter", onClick = function(uiState) uiState.reset("FilterText") end }
 { type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" }
+{ type = "inputText", binds = { value = "FilterText" }, label = "Filter" }
 { type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1 }
 { type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "Vanilla", "Chaos" } }
 { type = "packedCheckboxList", binds = { value = "PackedFlags" } } -- defaults to slotCount = 32
@@ -295,14 +320,14 @@ public.definition.customTypes = {
             slots = { "label", "control" }, -- optional supported geometry slot names
             dynamicSlots = function(node, slotName) end, -- optional declaration-time slot validator
             validate = function(node, prefix) end,
-            draw = function(imgui, node, bound, width) end,
+            draw = function(imgui, node, bound, width, uiState) end,
         },
     },
     layouts = {
         myLayout = {
             handlesChildren = true, -- optional: layout owns child drawing
             validate = function(node, prefix) end,
-            render = function(imgui, node, drawChild) return true end,
+            render = function(imgui, node, drawChild, runtimeLayout) return true end,
         },
     },
 }
@@ -316,9 +341,9 @@ These custom types can be used by:
 
 Today, `slots` is a validation surface. Custom widget `draw(...)` logic still reads `node.geometry` itself when it wants custom placement.
 `dynamicSlots(...)` is the optional escape hatch for declaration-time-dependent slot names like `option:N`.
-Custom layout `render(...)` always receives `drawChild`.
+Custom layout `render(...)` always receives `drawChild` and optional `runtimeLayout`.
 Simple layouts can ignore it and return just `open`.
-Layouts that want to own child placement should declare `handlesChildren = true`, return `open, changed`, and call `drawChild(child, runtimeGeometry?)` themselves.
+Layouts that want to own child placement should declare `handlesChildren = true`, return `open, changed`, and call `drawChild(child, runtimeGeometry?, runtimeLayout?)` themselves.
 
 Built-in widgets may also accept a widget-local `geometry` bag for manual horizontal placement.
 Geometry is now expressed through `geometry.slots`, where each slot descriptor may declare:
@@ -336,7 +361,9 @@ Slots are rendered in ascending `line`.
 Within the same line, slots with explicit `start` values are ordered by `start`.
 Otherwise declaration order breaks ties and preserves slots without explicit `start`.
 `text` supports a single `value` slot.
+`button` supports a single `control` slot.
 `checkbox` supports a single `control` slot.
+`inputText` supports `label` and `control`.
 `radio` supports `option:N` slot names for each entry in `node.values`.
 `packedCheckboxList` supports `item:N` slot names. If `slotCount` is omitted, Lib defaults it to `32`.
 
@@ -344,7 +371,9 @@ Otherwise declaration order breaks ties and preserves slots without explicit `st
 
 Meaningful built-in slot intent:
 - `text.value`: use `start`, and optional `width` + `align` when you want text aligned inside a slot
+- `button.control`: use `line` / `start`; optional `width` + `align` can be used to place the button inside a fixed slot
 - `checkbox.control`: use `start` to move the whole checkbox row
+- `inputText.control`: use `start` and `width`; `label` is mainly a text-position slot
 - `dropdown.control`: use `start` and `width`; `label` is mainly a text-position slot
 - `radio.option:N`: use `line` / `start` to place each option; do not expect `width` / `align` to do anything useful
 - `stepper.value`: this is the slot where `width` + `align` matter
@@ -352,6 +381,24 @@ Meaningful built-in slot intent:
 - `steppedRange.min.value` / `max.value`: these are the meaningful aligned value slots
 - `steppedRange.separator`: may also use `width` + `align` if you want the separator text in a fixed slot
 - `packedCheckboxList.item:N`: use `line` / `start` to place rows; do not expect `width` / `align` to do anything useful
+
+`lib.drawUiNode(...)` may also receive a separate layout-side `runtimeLayout`
+override. In v1, only `panel` consumes it:
+
+```lua
+{
+    children = {
+        rowA = { hidden = true },
+        [7] = { line = 3 },
+    },
+}
+```
+
+`panel` child placement metadata may now also declare:
+- `panel.key`
+
+Use `panel.key` when you want a stable runtime override target for child
+visibility or row remapping.
 
 ### `steppedRange`
 
@@ -442,6 +489,54 @@ Use:
 - `uiState.set(alias, value)` for edits
 - `uiState.update(alias, fn)` for derived edits
 - `uiState.toggle(alias)` for bool edits
+
+Notes:
+- persisted aliases stage in `uiState` and flush to Chalk on commit
+- transient aliases also live in `uiState`, but never flush to Chalk
+- `uiState.reloadFromConfig()` resets transient aliases to defaults
+- `uiState.reset(alias)` resets one alias to its declared default
+- `store.read/write(...)` remain persisted/runtime-facing; transient aliases are UI-state only
+
+Example filter row:
+
+```lua
+public.definition.storage = {
+    { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+    { type = "string", alias = "FilterMode", lifetime = "transient", default = "all", maxLen = 16 },
+}
+
+public.definition.ui = {
+    {
+        type = "panel",
+        columns = {
+            { name = "label", start = 0, width = 80 },
+            { name = "field", start = 88, width = 180 },
+            { name = "action", start = 276, width = 90 },
+        },
+        children = {
+            {
+                type = "text",
+                text = "Filter",
+                panel = { line = 1, column = "label" },
+            },
+            {
+                type = "inputText",
+                binds = { value = "FilterText" },
+                panel = { line = 1, column = "field", slots = { control = true } },
+            },
+            {
+                type = "button",
+                label = "Clear",
+                onClick = function(uiState)
+                    uiState.reset("FilterText")
+                    uiState.reset("FilterMode")
+                end,
+                panel = { line = 1, column = "action" },
+            },
+        },
+    },
+}
+```
 
 Do not write alias-backed config directly during draw.
 

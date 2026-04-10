@@ -73,6 +73,8 @@ Reads:
 - a packed child alias
 - or a raw config key fallback
 
+Transient aliases are UI-only and are not readable through `store.read(...)`; use `store.uiState`.
+
 Examples:
 
 ```lua
@@ -90,6 +92,8 @@ Writes:
 - or a raw config key fallback
 
 Packed child writes re-encode the owning packed root automatically.
+
+Transient aliases are UI-only and are not writable through `store.write(...)`; use `store.uiState`.
 
 ### `store.readBits(configKey, offset, width)`
 
@@ -117,6 +121,7 @@ Validation covers:
 - root `configKey` uniqueness
 - packed bit overlap
 - packed child alias registration
+- root lifetime validation
 
 ### `lib.getStorageRoots(storage)`
 
@@ -126,6 +131,8 @@ Only root nodes:
 - persist directly
 - hash directly
 - flush directly
+
+Transient roots declared with `lifetime = "transient"` are intentionally excluded.
 
 ### `lib.getStorageAliases(storage)`
 
@@ -139,6 +146,7 @@ local node = aliases.AttackBanned
 Includes:
 - root aliases
 - packed child aliases
+- transient root aliases
 
 ### `lib.valuesEqual(node, a, b)`
 
@@ -191,7 +199,7 @@ Validates and prepares an ordered UI node list.
 
 Evaluates `visibleIf` against the current alias-value table.
 
-### `lib.drawUiNode(imgui, node, uiState, width?, customTypes?, runtimeGeometry?)`
+### `lib.drawUiNode(imgui, node, uiState, width?, customTypes?, runtimeGeometry?, runtimeLayout?)`
 
 Draws one prepared UI node against alias-backed `uiState`.
 
@@ -209,6 +217,31 @@ Runtime geometry may override:
 - `width`
 - `align`
 - `hidden`
+
+`runtimeLayout` is a separate layout-side override surface.
+In v1, `panel` and `verticalTabs` consume it:
+
+```lua
+{
+    children = {
+        rowA = { hidden = true },
+        [7] = { line = 3 },
+    },
+}
+```
+
+Supported child override fields in v1:
+- `hidden`
+- `line`
+
+For `verticalTabs`, only `hidden` is implemented in v1.
+Targets may use:
+- child `tabId`
+- otherwise child `tabLabel`
+- or the 1-based child index as a fallback
+
+`verticalTabs` keeps declaration order in v1.
+`runtimeLayout.children[*].order` is reserved for future support and currently warns.
 
 ### `lib.drawUiTree(imgui, nodes, uiState, width?, customTypes?)`
 
@@ -229,6 +262,40 @@ Behavior:
 Applies slot-local `width` / `align` positioning for already-measured content.
 
 Useful inside custom widget slot draws when the widget knows the content width but wants Lib to handle the centering/right-align math.
+
+### `lib.buildIndexedHiddenSlotGeometry(items, slotPrefix, opts?)`
+
+Planner-side helper for prefixed indexed widget slots such as:
+- `item:1`, `item:2`, ...
+- `option:1`, `option:2`, ...
+
+This helper is mainly for building runtime geometry that hides some indexed slots without moving slot-assignment logic into the widget itself.
+
+Returns:
+- `runtimeGeometry`
+- `visibleCount`
+
+Example:
+
+```lua
+local runtimeGeometry, visibleCount = lib.buildIndexedHiddenSlotGeometry(rows, "item:", {
+    isHidden = function(row)
+        return row.visible ~= true
+    end,
+    line = function(_, _, visibleIndex, hidden)
+        return hidden and nil or visibleIndex
+    end,
+})
+```
+
+Rules:
+- `items` may be a list or a non-negative integer count
+- `slotPrefix` must be a non-empty string
+- `opts.isHidden(item, index, nextVisibleIndex)` may decide per-slot hiding
+- `nextVisibleIndex` means "the visible slot index this item would receive if shown", not "the number of already-confirmed visible items"
+- if `opts.isHidden` is omitted, list items with `item.hidden == true` are hidden
+- `opts.line(item, index, visibleIndexOrNil, hidden)` may supply a runtime `line`
+- the helper does not assign `start`, `width`, or `align`
 
 ### `lib.collectQuickUiNodes(nodes, out?, customTypes?)`
 
@@ -269,14 +336,14 @@ definition.customTypes = {
             defaultGeometry = { slots = { ... } }, -- optional widget-owned baseline geometry
             dynamicSlots = function(node, slotName) ... end, -- optional declaration-time slot validator
             validate = function(node, prefix) ... end,
-            draw = function(imgui, node, bound, width) ... end,
+            draw = function(imgui, node, bound, width, uiState) ... end,
         },
     },
     layouts = {
         myLayout = {
             handlesChildren = true, -- optional: layout owns child drawing
             validate = function(node, prefix) ... end,
-            render = function(imgui, node, drawChild) ... end,
+            render = function(imgui, node, drawChild, runtimeLayout) ... end,
         },
     },
 }
@@ -294,11 +361,11 @@ Rules:
 Today, `slots` is a validation surface. Custom widget `draw(...)` logic still reads `node.geometry` itself when it wants custom placement.
 
 Custom layout `render(...)` contract:
-- `render(imgui, node, drawChild)` always receives `drawChild`
+- `render(imgui, node, drawChild, runtimeLayout?)` always receives `drawChild`
 - return `open` for simple layouts that let Lib recurse children normally
 - layouts that own child placement should declare `handlesChildren = true`
 - when `handlesChildren = true`, `render(...)` should return `open, changed`
-- when `handlesChildren = true`, the layout owns child rendering and should call `drawChild(child, runtimeGeometry?)` itself
+- when `handlesChildren = true`, the layout owns child rendering and should call `drawChild(child, runtimeGeometry?, runtimeLayout?)` itself
 - when `handlesChildren = true`, `changed` must include any child-driven state change
 
 ## Widget Geometry
@@ -321,8 +388,13 @@ Certain widgets support a widget-local `geometry` bag for manual horizontal plac
 
 Current built-in support:
 - `text`: `value`
+- `dynamicText`: `value`
+- `button`: `control`
+- `confirmButton`: `control`
 - `checkbox`: `control`
+- `inputText`: `label`, `control`
 - `dropdown`: `label`, `control`
+- `mappedDropdown`: `label`, `control`
 - `radio`: `label`, dynamic `option:N`
 - `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
 - `steppedRange`: `label`, `min.*`, `separator`, `max.*`
@@ -349,9 +421,16 @@ Behavior:
 
 Built-in slot intent:
 - `text.value`: use `line` / `start`; `width` + `align` are meaningful
+- `dynamicText.value`: use `line` / `start`; `width` + `align` are meaningful
+- `button.control`: use `line` / `start`; `width` + `align` are meaningful when you want to place the button inside a fixed slot
+- `confirmButton.control`: use `line` / `start`; `width` + `align` are most meaningful for the idle button placement; the armed confirm row expands inline
 - `checkbox.control`: use `line` / `start`; `width` / `align` are not meaningful
+- `inputText.label`: use `line` / `start`; `width` / `align` are not meaningful
+- `inputText.control`: use `line` / `start`; `width` is meaningful; `align` is not and currently warns
 - `dropdown.label`: use `line` / `start`; `width` / `align` are not meaningful
 - `dropdown.control`: use `line` / `start`; `width` is meaningful; `align` is not
+- `mappedDropdown.label`: use `line` / `start`; `width` / `align` are not meaningful
+- `mappedDropdown.control`: use `line` / `start`; `width` is meaningful; `align` is not
 - `radio.option:N`: use `line` / `start`; `width` / `align` are not meaningful and currently warn
 - `stepper.value`: use `line` / `start`; `width` + `align` are meaningful
 - `stepper` button slots: use `line` / `start`; `width` / `align` are not meaningful
@@ -368,6 +447,7 @@ Surface:
 - `uiState.view`
 - `uiState.get(alias)`
 - `uiState.set(alias, value)`
+- `uiState.reset(alias)`
 - `uiState.update(alias, fn)`
 - `uiState.toggle(alias)`
 - `uiState.reloadFromConfig()`
@@ -376,7 +456,11 @@ Surface:
 
 Behavior:
 - packed child alias writes update the owning packed root in staging
+- `reset(alias)` restores the declared default for that alias
 - flush writes only dirty root storage nodes
+- transient aliases never flush to config
+- `reloadFromConfig()` reloads persisted aliases and resets transient aliases to defaults
+- `isDirty()` reflects persisted dirty state only
 - `view` is read-only
 
 ### `lib.runUiStatePass(opts)`
@@ -478,12 +562,48 @@ Lib-owned widget registry.
 
 Built-ins:
 - `text`
+- `dynamicText`
+- `button`
+- `confirmButton`
 - `checkbox`
+- `inputText`
 - `dropdown`
+- `mappedDropdown`
 - `radio`
 - `stepper`
 - `steppedRange`
 - `packedCheckboxList`
+
+Widget definitions may also declare optional flat capability functions such as:
+- `dynamicSlots(node, slotName)`
+- `defaultGeometry(node)`
+- `summary(node, bound, runtimeGeometry, uiState)`
+
+`summary(...)` is an optional query capability for widgets. Lib does not call it during normal draw.
+It is dispatched through `lib.getWidgetSummary(...)` and works for both built-in and custom widgets.
+
+### `lib.WidgetHelpers`
+
+Reserved public namespace for future widget-specific authoring/tooling helpers.
+
+Current status:
+- intentionally empty
+- not part of the runtime widget contract
+- reserved so future widget helper APIs do not need a breaking top-level naming change
+
+### `lib.getWidgetSummary(node, uiState, runtimeGeometry, customTypes)`
+
+Queries a widget's optional `summary(...)` capability through the merged widget registry.
+
+Behavior:
+- returns `nil` when the node is not a widget, is hidden by `visibleIf`, or the widget type does not define `summary`
+- passes the same bound surface widgets receive in `draw(...)`
+- applies prepared runtime geometry before calling `summary(...)`
+- works for both built-in widgets and `definition.customTypes.widgets`
+- returns a fixed outer table when summary data exists:
+  - `type`: widget type name
+  - `data`: widget-specific summary payload
+- `data` is intentionally widget-specific; callers are expected to know the widget type they declared and interpret `data` accordingly
 
 ### `lib.LayoutTypes`
 
@@ -492,6 +612,8 @@ Lib-owned layout registry.
 Built-ins:
 - `separator`
 - `group`
+- `horizontalTabs`
+- `verticalTabs`
 - `panel`
 
 ### `lib.validateRegistries()`

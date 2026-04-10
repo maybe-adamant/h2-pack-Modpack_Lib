@@ -33,6 +33,20 @@ local function makePackedDefinition()
     }
 end
 
+local function makeTransientDefinition()
+    return {
+        storage = {
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
+            { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+            { type = "string", alias = "FilterMode", lifetime = "transient", default = "all", maxLen = 16 },
+        },
+        ui = {
+            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
+            { type = "text", text = "Filter" },
+        },
+    }
+end
+
 TestStore = {}
 
 function TestStore:testCreateStoreReadsAndWritesScalarAliasesAndRawKeys()
@@ -80,6 +94,32 @@ function TestStore:testReadBitsAndWriteBitsAreRawNumeric()
 
     lu.assertEquals(config.Packed, 48)
     lu.assertEquals(store.readBits("Packed", 4, 2), 3)
+end
+
+function TestStore:testTransientAliasesAreNotReadableThroughStore()
+    CaptureWarnings()
+    local config = { Enabled = false }
+    local store = lib.createStore(config, makeTransientDefinition())
+
+    lu.assertNil(store.read("FilterText"))
+    store.write("FilterText", "Aphrodite")
+
+    lu.assertEquals(store.uiState.view.FilterText, "")
+
+    local sawReadWarning = false
+    local sawWriteWarning = false
+    for _, warning in ipairs(Warnings) do
+        if string.find(warning, "store.read: alias 'FilterText' is transient", 1, true) then
+            sawReadWarning = true
+        end
+        if string.find(warning, "store.write: alias 'FilterText' is transient", 1, true) then
+            sawWriteWarning = true
+        end
+    end
+    RestoreWarnings()
+
+    lu.assertTrue(sawReadWarning)
+    lu.assertTrue(sawWriteWarning)
 end
 
 TestUiState = {}
@@ -158,4 +198,107 @@ function TestUiState:testReadonlyViewRejectsWrites()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "read-only")
+end
+
+function TestUiState:testTransientAliasesLiveOnlyInUiState()
+    local config = { Enabled = false }
+    local store = lib.createStore(config, makeTransientDefinition())
+    local uiState = store.uiState
+
+    lu.assertEquals(uiState.view.FilterText, "")
+    lu.assertEquals(uiState.view.FilterMode, "all")
+    lu.assertFalse(uiState.isDirty())
+
+    uiState.set("FilterText", "Poseidon")
+    uiState.set("FilterMode", "allowed")
+
+    lu.assertEquals(uiState.view.FilterText, "Poseidon")
+    lu.assertEquals(uiState.view.FilterMode, "allowed")
+    lu.assertFalse(uiState.isDirty())
+
+    uiState.flushToConfig()
+    lu.assertFalse(uiState.isDirty())
+    lu.assertNil(config.FilterText)
+end
+
+function TestUiState:testReloadFromConfigResetsTransientAliasesToDefaults()
+    local config = { Enabled = true }
+    local store = lib.createStore(config, makeTransientDefinition())
+    local uiState = store.uiState
+
+    uiState.set("FilterText", "Hera")
+    uiState.set("FilterMode", "banned")
+    config.Enabled = false
+
+    uiState.reloadFromConfig()
+
+    lu.assertFalse(uiState.view.Enabled)
+    lu.assertEquals(uiState.view.FilterText, "")
+    lu.assertEquals(uiState.view.FilterMode, "all")
+end
+
+function TestUiState:testResetRestoresTransientAliasDefault()
+    local config = { Enabled = true }
+    local store = lib.createStore(config, makeTransientDefinition())
+    local uiState = store.uiState
+
+    uiState.set("FilterText", "Hermes")
+    uiState.reset("FilterText")
+
+    lu.assertEquals(uiState.view.FilterText, "")
+    lu.assertFalse(uiState.isDirty())
+end
+
+function TestUiState:testResetRestoresPersistedAliasDefaultAndMarksDirty()
+    local config = { Enabled = true, MaxGodsPerRun = 5 }
+    local store = lib.createStore(config, makeScalarDefinition())
+    local uiState = store.uiState
+
+    uiState.reset("Enabled")
+
+    lu.assertFalse(uiState.view.Enabled)
+    lu.assertTrue(uiState.isDirty())
+
+    uiState.flushToConfig()
+    lu.assertFalse(config.Enabled)
+end
+
+function TestUiState:testResetRestoresPackedChildDefault()
+    local config = { Packed = 0 }
+    local store = lib.createStore(config, makePackedDefinition())
+    local uiState = store.uiState
+
+    uiState.set("EnabledBit", true)
+    uiState.set("ModeBits", 3)
+    uiState.reset("ModeBits")
+
+    lu.assertEquals(uiState.view.ModeBits, 0)
+    lu.assertTrue(uiState.view.EnabledBit)
+    lu.assertEquals(uiState.view.Packed, 1)
+end
+
+function TestUiState:testRunUiStatePassIgnoresTransientOnlyEdits()
+    local config = { Enabled = false }
+    local store = lib.createStore(config, makeTransientDefinition())
+    local commitCalls = 0
+    local flushedCalls = 0
+
+    local changed = lib.runUiStatePass({
+        uiState = store.uiState,
+        draw = function(_, uiState)
+            uiState.set("FilterText", "Apollo")
+        end,
+        commit = function()
+            commitCalls = commitCalls + 1
+            return true, nil
+        end,
+        onFlushed = function()
+            flushedCalls = flushedCalls + 1
+        end,
+    })
+
+    lu.assertFalse(changed)
+    lu.assertEquals(commitCalls, 0)
+    lu.assertEquals(flushedCalls, 0)
+    lu.assertEquals(store.uiState.view.FilterText, "Apollo")
 end

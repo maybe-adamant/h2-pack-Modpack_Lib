@@ -46,12 +46,13 @@ local function WriteConfigValue(root, modConfig, value, configEntries)
 end
 
 function shared.CreateUiState(modConfig, configBackend, storage)
-    local rootNodes = public.getStorageRoots(storage)
+    local persistedRootNodes = public.getStorageRoots(storage)
+    local transientRootNodes = type(storage) == "table" and (rawget(storage, "_transientRootNodes") or {}) or {}
     local aliasNodes = public.getStorageAliases(storage)
     local staging = {}
     local dirty = false
     local dirtyRoots = {}
-    local configEntries = BuildConfigEntries(rootNodes, configBackend)
+    local configEntries = BuildConfigEntries(persistedRootNodes, configBackend)
 
     local function syncPackedChildren(root, packedValue)
         for _, child in ipairs(root._bitAliases or {}) do
@@ -69,11 +70,13 @@ function shared.CreateUiState(modConfig, configBackend, storage)
         if root.type == "packedInt" then
             syncPackedChildren(root, normalized)
         end
-        dirtyRoots[root.alias] = true
-        dirty = true
+        if root._lifetime ~= "transient" then
+            dirtyRoots[root.alias] = true
+            dirty = true
+        end
     end
 
-    local function loadRootIntoStaging(root)
+    local function loadPersistedRootIntoStaging(root)
         local value = ReadConfigValue(root, modConfig, configEntries)
         if value == nil then
             value = ClonePersistedValue(root.default)
@@ -85,14 +88,25 @@ function shared.CreateUiState(modConfig, configBackend, storage)
         end
     end
 
+    local function loadTransientRootIntoStaging(root)
+        local value = ClonePersistedValue(root.default)
+        staging[root.alias] = NormalizeNodeValue(root, value)
+    end
+
     local function copyConfigToStaging()
-        for _, root in ipairs(rootNodes) do
-            loadRootIntoStaging(root)
+        for _, root in ipairs(persistedRootNodes) do
+            loadPersistedRootIntoStaging(root)
+        end
+    end
+
+    local function resetTransientToDefaults()
+        for _, root in ipairs(transientRootNodes) do
+            loadTransientRootIntoStaging(root)
         end
     end
 
     local function copyStagingToConfig()
-        for _, root in ipairs(rootNodes) do
+        for _, root in ipairs(persistedRootNodes) do
             if dirtyRoots[root.alias] then
                 WriteConfigValue(root, modConfig, staging[root.alias], configEntries)
             end
@@ -101,7 +115,7 @@ function shared.CreateUiState(modConfig, configBackend, storage)
 
     local function captureDirtyConfigSnapshot()
         local snapshot = {}
-        for _, root in ipairs(rootNodes) do
+        for _, root in ipairs(persistedRootNodes) do
             if dirtyRoots[root.alias] then
                 table.insert(snapshot, {
                     root = root,
@@ -152,7 +166,11 @@ function shared.CreateUiState(modConfig, configBackend, storage)
             local parent = node.parent
             local packedValue = staging[parent.alias]
             if packedValue == nil then
-                loadRootIntoStaging(parent)
+                if parent._lifetime == "transient" then
+                    loadTransientRootIntoStaging(parent)
+                else
+                    loadPersistedRootIntoStaging(parent)
+                end
                 packedValue = staging[parent.alias]
             end
             local normalized = NormalizeNodeValue(node, value)
@@ -166,11 +184,26 @@ function shared.CreateUiState(modConfig, configBackend, storage)
         writeRootToStaging(node, value)
     end
 
+    local function resetAliasValue(alias)
+        local node = aliasNodes[alias]
+        if not node then
+            if shared.libWarn then
+                shared.libWarn("uiState.reset: unknown alias '%s'; value will not be reset", tostring(alias))
+            end
+            return
+        end
+
+        local defaultValue = ClonePersistedValue(node.default)
+        writeStagingValue(alias, defaultValue)
+    end
+
     copyConfigToStaging()
+    resetTransientToDefaults()
     clearDirty()
 
     local function snapshot()
         copyConfigToStaging()
+        resetTransientToDefaults()
         clearDirty()
     end
 
@@ -186,6 +219,9 @@ function shared.CreateUiState(modConfig, configBackend, storage)
         end,
         set = function(alias, value)
             writeStagingValue(alias, value)
+        end,
+        reset = function(alias)
+            resetAliasValue(alias)
         end,
         update = function(alias, updater)
             local current = readStagingValue(alias)
@@ -207,7 +243,7 @@ function shared.CreateUiState(modConfig, configBackend, storage)
         end,
         collectConfigMismatches = function()
             local mismatches = {}
-            for _, root in ipairs(rootNodes) do
+            for _, root in ipairs(persistedRootNodes) do
                 local persistedValue = ReadConfigValue(root, modConfig, configEntries)
                 if persistedValue == nil then
                     persistedValue = ClonePersistedValue(root.default)

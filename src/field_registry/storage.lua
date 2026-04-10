@@ -184,8 +184,8 @@ StorageTypes.packedInt = {
 }
 
 local function PrepareRootNodeMetadata(node)
-    node._storageKey = shared.StorageKey(node.configKey)
-    if not node.alias then
+    node._storageKey = node.configKey ~= nil and shared.StorageKey(node.configKey) or nil
+    if not node.alias and node._storageKey ~= nil then
         node.alias = node._storageKey
     end
 end
@@ -239,7 +239,9 @@ function public.validateStorage(storage, label)
     end
 
     storage._rootNodes = {}
+    storage._transientRootNodes = {}
     storage._aliasNodes = {}
+    storage._persistedAliasNodes = {}
     storage._rootByKey = {}
 
     local seenAliases = {}
@@ -253,33 +255,50 @@ function public.validateStorage(storage, label)
             libWarn("%s: missing type", prefix)
         else
             local storageType = StorageTypes[node.type]
+            local isTransient = node.lifetime == "transient"
             if not storageType then
                 libWarn("%s: unknown storage type '%s'", prefix, tostring(node.type))
-            elseif node.type == "packedInt" and node.configKey == nil then
+            elseif node.lifetime ~= nil and not isTransient then
+                libWarn("%s: unknown lifetime '%s'", prefix, tostring(node.lifetime))
+            elseif node.configKey ~= nil and node.lifetime ~= nil then
+                libWarn("%s: configKey and lifetime are mutually exclusive", prefix)
+            elseif node.configKey == nil and node.lifetime == nil then
+                libWarn("%s: storage root must declare configKey or lifetime = 'transient'", prefix)
+            elseif isTransient and node.type == "packedInt" then
+                libWarn("%s: transient packedInt roots are not supported", prefix)
+            elseif not isTransient and node.type == "packedInt" and node.configKey == nil then
                 libWarn("%s: packedInt is missing configKey", prefix)
-            elseif node.configKey == nil then
+            elseif not isTransient and node.configKey == nil then
                 libWarn("%s: missing configKey", prefix)
             else
                 storageType.validate(node, prefix)
                 PrepareRootNodeMetadata(node)
                 node._isRoot = true
+                node._lifetime = isTransient and "transient" or "persistent"
                 node._valueKind = storageType.valueKind
                 node._bitAliases = {}
 
-                if seenRootKeys[node._storageKey] then
-                    libWarn("%s: duplicate configKey '%s'", prefix, node._storageKey)
-                else
-                    seenRootKeys[node._storageKey] = node._storageKey
-                    storage._rootByKey[node._storageKey] = node
+                if node._storageKey ~= nil then
+                    if seenRootKeys[node._storageKey] then
+                        libWarn("%s: duplicate configKey '%s'", prefix, node._storageKey)
+                    else
+                        seenRootKeys[node._storageKey] = node._storageKey
+                        storage._rootByKey[node._storageKey] = node
+                    end
                 end
 
+                local aliasValid = false
                 if type(node.alias) ~= "string" or node.alias == "" then
                     libWarn("%s: missing alias", prefix)
                 elseif seenAliases[node.alias] then
                     libWarn("%s: duplicate alias '%s'", prefix, node.alias)
                 else
+                    aliasValid = true
                     seenAliases[node.alias] = true
                     storage._aliasNodes[node.alias] = node
+                    if node._lifetime == "persistent" then
+                        storage._persistedAliasNodes[node.alias] = node
+                    end
                 end
 
                 if node.type == "packedInt" then
@@ -319,7 +338,11 @@ function public.validateStorage(storage, label)
                     end
                 end
 
-                table.insert(storage._rootNodes, node)
+                if node._lifetime == "transient" and aliasValid then
+                    table.insert(storage._transientRootNodes, node)
+                elseif node._lifetime ~= "transient" then
+                    table.insert(storage._rootNodes, node)
+                end
             end
         end
     end

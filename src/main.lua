@@ -16,6 +16,7 @@ public.config = libConfig
 
 local StorageTypes = {}
 local WidgetTypes = {}
+local WidgetHelpers = {}
 local LayoutTypes = {}
 local _coordinators = {}
 AdamantModpackLib_Internal = AdamantModpackLib_Internal or {}
@@ -24,6 +25,7 @@ internal.shared = {
     libConfig = libConfig,
     StorageTypes = StorageTypes,
     WidgetTypes = WidgetTypes,
+    WidgetHelpers = WidgetHelpers,
     LayoutTypes = LayoutTypes,
     coordinators = _coordinators,
     chalk = chalk,

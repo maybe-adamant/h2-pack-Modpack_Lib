@@ -258,16 +258,27 @@ end
 
 registry.PrepareLooseWidgetGeometry = PrepareLooseWidgetGeometry
 
-local function GetSlotGeometry(node, slotName)
+local function ResolveSlotGeometry(node, slotName, runtimeGeometryOverride)
     if type(node) ~= "table" then
         return nil
     end
     local defaultGeometry = node._defaultSlotGeometry
-    local runtimeGeometry = node._runtimeSlotGeometry
+    local runtimeGeometry = runtimeGeometryOverride ~= nil and runtimeGeometryOverride or node._runtimeSlotGeometry
     local staticGeometry = node._slotGeometry
     local defaultSlot = type(defaultGeometry) == "table" and defaultGeometry[slotName] or nil
     local runtimeSlot = type(runtimeGeometry) == "table" and runtimeGeometry[slotName] or nil
     local staticSlot = type(staticGeometry) == "table" and staticGeometry[slotName] or nil
+
+    if type(defaultSlot) ~= "table" and type(staticSlot) ~= "table" then
+        return type(runtimeSlot) == "table" and runtimeSlot or nil
+    end
+    if type(defaultSlot) ~= "table" and type(runtimeSlot) ~= "table" then
+        return type(staticSlot) == "table" and staticSlot or nil
+    end
+    if type(staticSlot) ~= "table" and type(runtimeSlot) ~= "table" then
+        return type(defaultSlot) == "table" and defaultSlot or nil
+    end
+
     local merged = {}
     if type(defaultSlot) == "table" then
         for key, value in pairs(defaultSlot) do
@@ -290,6 +301,12 @@ local function GetSlotGeometry(node, slotName)
         return nil
     end
     return merged
+end
+
+registry.ResolveSlotGeometry = ResolveSlotGeometry
+
+local function GetSlotGeometry(node, slotName)
+    return ResolveSlotGeometry(node, slotName, nil)
 end
 
 registry.GetSlotGeometry = GetSlotGeometry
@@ -396,22 +413,36 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart)
 
     local changed = false
     rowStart = rowStart or GetCursorPosXSafe(imgui)
-    local renderSlots = {}
+    local renderSlots = type(node) == "table" and node._renderSlotCache or nil
+    if type(renderSlots) ~= "table" then
+        renderSlots = {}
+        if type(node) == "table" then
+            node._renderSlotCache = renderSlots
+        end
+    end
+    local renderCount = 0
 
     for index, slot in ipairs(slots) do
         if type(slot) == "table" and type(slot.draw) == "function" then
+            renderCount = renderCount + 1
+            local entry = renderSlots[renderCount]
+            if type(entry) ~= "table" then
+                entry = {}
+                renderSlots[renderCount] = entry
+            end
             local geometry = type(slot.name) == "string" and GetSlotGeometry(node, slot.name) or nil
             local hidden = slot.hidden == true or (type(geometry) == "table" and geometry.hidden == true)
-            table.insert(renderSlots, {
-                slot = slot,
-                index = index,
-                hidden = hidden,
-                line = (geometry and geometry.line) or slot.line or 1,
-                start = (geometry and geometry.start) or slot.start,
-                width = (geometry and geometry.width) or slot.width,
-                align = (geometry and geometry.align) or slot.align,
-            })
+            entry.slot = slot
+            entry.index = index
+            entry.hidden = hidden
+            entry.line = (geometry and geometry.line) or slot.line or 1
+            entry.start = (geometry and geometry.start) or slot.start
+            entry.width = (geometry and geometry.width) or slot.width
+            entry.align = (geometry and geometry.align) or slot.align
         end
+    end
+    for index = renderCount + 1, #renderSlots do
+        renderSlots[index] = nil
     end
 
     local orderedPositions = GetOrderedSlotPositions(node, renderSlots)
@@ -422,15 +453,18 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart)
         local entry = renderSlots[position]
         if not entry.hidden then
             local slot = entry.slot
-            local merged = {
-                name = slot.name,
-                hidden = slot.hidden == true,
-                start = entry.start,
-                width = entry.width,
-                align = entry.align,
-                sameLine = slot.sameLine,
-                line = entry.line,
-            }
+            local merged = entry.merged
+            if type(merged) ~= "table" then
+                merged = {}
+                entry.merged = merged
+            end
+            merged.name = slot.name
+            merged.hidden = slot.hidden == true
+            merged.start = entry.start
+            merged.width = entry.width
+            merged.align = entry.align
+            merged.sameLine = slot.sameLine
+            merged.line = entry.line
 
             if currentLine ~= entry.line then
                 if currentLine ~= nil then

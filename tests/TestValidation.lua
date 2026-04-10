@@ -49,6 +49,70 @@ function TestStorageValidation:testRootAliasDefaultsToConfigKey()
     lu.assertEquals(aliases.Enabled.configKey, "Enabled")
 end
 
+function TestStorageValidation:testTransientRootRegistersAliasButNotPersistedRoots()
+    local storage = {
+        { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+    }
+
+    lib.validateStorage(storage, "TransientRoot")
+
+    local aliases = lib.getStorageAliases(storage)
+    lu.assertNotNil(aliases.FilterText)
+    lu.assertEquals(aliases.FilterText._lifetime, "transient")
+    lu.assertEquals(#lib.getStorageRoots(storage), 0)
+end
+
+function TestStorageValidation:testTransientRootWithConfigKeyWarns()
+    lib.validateStorage({
+        { type = "bool", alias = "FilterMode", configKey = "FilterMode", lifetime = "transient", default = false },
+    }, "TransientConfigKey")
+
+    assertWarningContains("configKey and lifetime are mutually exclusive")
+end
+
+function TestStorageValidation:testStorageRootRequiresConfigKeyOrTransientLifetime()
+    lib.validateStorage({
+        { type = "bool", alias = "FilterMode", default = false },
+    }, "StorageLifetime")
+
+    assertWarningContains("must declare configKey or lifetime = 'transient'")
+end
+
+function TestStorageValidation:testUnknownStorageLifetimeWarns()
+    lib.validateStorage({
+        { type = "bool", alias = "FilterMode", lifetime = "session", default = false },
+    }, "UnknownLifetime")
+
+    assertWarningContains("unknown lifetime 'session'")
+end
+
+function TestStorageValidation:testTransientPackedIntWarns()
+    lib.validateStorage({
+        {
+            type = "packedInt",
+            alias = "PackedFilter",
+            lifetime = "transient",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+            },
+        },
+    }, "TransientPacked")
+
+    assertWarningContains("transient packedInt roots are not supported")
+end
+
+function TestStorageValidation:testTransientRootMissingAliasIsRejectedFromPreparedRoots()
+    local storage = {
+        { type = "string", lifetime = "transient", default = "", maxLen = 64 },
+    }
+
+    lib.validateStorage(storage, "TransientMissingAlias")
+
+    lu.assertEquals(#lib.getStorageRoots(storage), 0)
+    lu.assertEquals(#(rawget(storage, "_transientRootNodes") or {}), 0)
+    assertWarningContains("missing alias")
+end
+
 function TestStorageValidation:testPackedOverlapWarns()
     lib.validateStorage({
         {
@@ -102,6 +166,25 @@ function TestUiValidation:testWidgetStorageTypeMismatchWarns()
     }, "WidgetType", storage)
 
     assertWarningContains("bound alias 'Count' is int, expected bool")
+end
+
+function TestUiValidation:testConfirmButtonValidatesContractFields()
+    lib.validateUi({
+        {
+            type = "confirmButton",
+            label = "",
+            confirmLabel = 42,
+            cancelLabel = false,
+            timeoutSeconds = 0,
+            onConfirm = "reset",
+        },
+    }, "ConfirmButton", {})
+
+    assertWarningContains("confirmButton requires non-empty label")
+    assertWarningContains("confirmButton confirmLabel must be string")
+    assertWarningContains("confirmButton cancelLabel must be string")
+    assertWarningContains("confirmButton timeoutSeconds must be a positive number")
+    assertWarningContains("confirmButton onConfirm must be function")
 end
 
 function TestUiValidation:testVisibleIfRequiresBoolAlias()
@@ -283,6 +366,20 @@ function TestUiValidation:testCustomWidgetGeometryIsValidated()
     lu.assertEquals(#Warnings, 0)
 end
 
+function TestUiValidation:testDynamicTextRequiresGetTextFunction()
+    lib.validateUi({
+        {
+            type = "dynamicText",
+            getColor = "bad",
+            getTooltip = {},
+        },
+    }, "DynamicTextValidation", {})
+
+    assertWarningContains("dynamicText getText must be function")
+    assertWarningContains("dynamicText getColor must be function")
+    assertWarningContains("dynamicText getTooltip must be function")
+end
+
 function TestUiValidation:testMergeCustomTypesCachesByTableIdentity()
     local mergeCustomTypes = AdamantModpackLib_Internal.shared.fieldRegistry.MergeCustomTypes
     local customTypes = {
@@ -430,6 +527,72 @@ function TestUiValidation:testSlotLineMustBePositiveInteger()
     }, "SlotLine", storage)
 
     assertWarningContains("geometry.slots[1].line must be a positive integer")
+end
+
+function TestUiValidation:testPanelDuplicateChildKeyWarns()
+    lib.validateUi({
+        {
+            type = "panel",
+            columns = {
+                { name = "left", start = 0 },
+            },
+            children = {
+                { type = "text", text = "A", panel = { key = "rowA", column = "left", line = 1, slots = { "value" } } },
+                { type = "text", text = "B", panel = { key = "rowA", column = "left", line = 2, slots = { "value" } } },
+            },
+        },
+    }, "PanelDuplicateKey", {})
+
+    assertWarningContains("duplicate panel child key 'rowA'")
+end
+
+function TestUiValidation:testPanelRuntimeLayoutWarnsOnMalformedOverrides()
+    local node = {
+        type = "panel",
+        columns = {
+            { name = "left", start = 0 },
+        },
+        children = {
+            { type = "text", text = "A", panel = { key = "rowA", column = "left", line = 1, slots = { "value" } } },
+        },
+    }
+    local imgui = {
+        Text = function() end,
+        TextColored = function() end,
+        CalcTextSize = function(text) return #(tostring(text or "")) * 8 end,
+        SameLine = function() end,
+        NewLine = function() end,
+        IsItemHovered = function() return false end,
+        SetTooltip = function() end,
+        PushItemWidth = function() end,
+        PopItemWidth = function() end,
+        PushID = function() end,
+        PopID = function() end,
+        Indent = function() end,
+        Unindent = function() end,
+        Separator = function() end,
+        CollapsingHeader = function() return true end,
+        GetCursorPosX = function() return 0 end,
+        SetCursorPosX = function() end,
+    }
+
+    lib.prepareUiNode(node, "PanelRuntimeLayoutWarn", {})
+    lib.drawUiNode(imgui, node, { view = {} }, nil, nil, nil, {
+        foo = true,
+        children = {
+            rowA = { line = 0, bogus = true },
+            missing = { hidden = true },
+            [1] = "bad",
+            [2] = { hidden = true },
+        },
+    })
+
+    assertWarningContains("unknown runtime layout key 'foo'")
+    assertWarningContains("children[rowA].line must be a positive integer")
+    assertWarningContains("children[rowA]: unknown child override key 'bogus'")
+    assertWarningContains("children[1] override must be a table")
+    assertWarningContains("children[2] does not match any child index")
+    assertWarningContains("children[missing] does not match any child.panel.key")
 end
 
 function TestUiValidation:testRadioOptionSlotMustBeInRange()
@@ -655,4 +818,88 @@ function TestUiValidation:testPanelChildColumnMustExist()
     }, "PanelColumn", storage)
 
     assertWarningContains("panel.column references unknown column 'right'")
+end
+
+function TestUiValidation:testHorizontalTabsRequiresIdAndChildTabLabels()
+    lib.validateUi({
+        {
+            type = "horizontalTabs",
+            children = {
+                { type = "text", text = "A" },
+                { type = "text", text = "B", tabLabel = "Second", tabId = "" },
+            },
+        },
+    }, "HorizontalTabsValidation", {})
+
+    assertWarningContains("horizontalTabs id must be a non-empty string")
+    assertWarningContains("horizontalTabs child tabLabel must be a non-empty string")
+    assertWarningContains("horizontalTabs child tabId must be a non-empty string")
+end
+
+function TestUiValidation:testVerticalTabsRequiresIdAndValidSidebarWidth()
+    lib.validateUi({
+        {
+            type = "verticalTabs",
+            sidebarWidth = 0,
+            children = {
+                { type = "text", text = "A" },
+                { type = "text", text = "B", tabLabel = "Second", tabId = "" },
+            },
+        },
+    }, "VerticalTabsValidation", {})
+
+    assertWarningContains("verticalTabs id must be a non-empty string")
+    assertWarningContains("verticalTabs sidebarWidth must be a positive number")
+    assertWarningContains("verticalTabs child tabLabel must be a non-empty string")
+    assertWarningContains("verticalTabs child tabId must be a non-empty string")
+end
+
+function TestUiValidation:testVerticalTabsRuntimeLayoutWarnsOnMalformedOverrides()
+    local node = {
+        type = "verticalTabs",
+        id = "VerticalTabsWarn",
+        children = {
+            { type = "text", text = "A", tabLabel = "First", tabId = "a" },
+            { type = "text", text = "B", tabLabel = "Second", tabId = "b" },
+        },
+    }
+    local imgui = {
+        BeginChild = function() return true end,
+        EndChild = function() end,
+        Selectable = function() return false end,
+        SameLine = function() end,
+        Text = function() end,
+        TextColored = function() end,
+        CalcTextSize = function(text) return #(tostring(text or "")) * 8 end,
+        IsItemHovered = function() return false end,
+        SetTooltip = function() end,
+        PushItemWidth = function() end,
+        PopItemWidth = function() end,
+        PushID = function() end,
+        PopID = function() end,
+        Indent = function() end,
+        Unindent = function() end,
+        Separator = function() end,
+        CollapsingHeader = function() return true end,
+        GetCursorPosX = function() return 0 end,
+        SetCursorPosX = function() end,
+    }
+
+    lib.prepareUiNode(node, "VerticalTabsRuntimeLayoutWarn", {})
+    lib.drawUiNode(imgui, node, { view = {} }, nil, nil, nil, {
+        foo = true,
+        children = {
+            a = { hidden = "yes", order = 1 },
+            missing = { hidden = true },
+            [3] = { hidden = true },
+            [1] = "bad",
+        },
+    })
+
+    assertWarningContains("unknown runtime layout key 'foo'")
+    assertWarningContains("children[a].hidden must be boolean")
+    assertWarningContains("children[a].order is reserved for future vertical/horizontal tab ordering support")
+    assertWarningContains("children[missing] does not match any tab child key")
+    assertWarningContains("children[3] does not match any child index")
+    assertWarningContains("children[1] override must be a table")
 end
