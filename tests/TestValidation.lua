@@ -175,7 +175,6 @@ function TestUiValidation:testConfirmButtonValidatesContractFields()
             label = "",
             confirmLabel = 42,
             cancelLabel = false,
-            timeoutSeconds = 0,
             onConfirm = "reset",
         },
     }, "ConfirmButton", {})
@@ -183,7 +182,6 @@ function TestUiValidation:testConfirmButtonValidatesContractFields()
     assertWarningContains("confirmButton requires non-empty label")
     assertWarningContains("confirmButton confirmLabel must be string")
     assertWarningContains("confirmButton cancelLabel must be string")
-    assertWarningContains("confirmButton timeoutSeconds must be a positive number")
     assertWarningContains("confirmButton onConfirm must be function")
 end
 

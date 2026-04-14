@@ -34,6 +34,12 @@ local function makeBasicImgui()
         beginChildren = {},
         endChildCalls = 0,
         selectableCalls = {},
+        openPopups = {},
+        currentPopup = nil,
+        beginPopupCalls = {},
+        openPopupCalls = {},
+        closeCurrentPopupCalls = 0,
+        endPopupCalls = 0,
     }
 
     local imgui = {
@@ -49,6 +55,31 @@ local function makeBasicImgui()
             return false
         end,
         EndCombo = function() end,
+        OpenPopup = function(id)
+            state.openPopups[id] = true
+            table.insert(state.openPopupCalls, id)
+        end,
+        BeginPopup = function(id)
+            table.insert(state.beginPopupCalls, id)
+            if state.openPopups[id] == true then
+                state.currentPopup = id
+                return true
+            end
+            return false
+        end,
+        EndPopup = function()
+            state.endPopupCalls = state.endPopupCalls + 1
+            state.currentPopup = nil
+        end,
+        CloseCurrentPopup = function()
+            state.closeCurrentPopupCalls = state.closeCurrentPopupCalls + 1
+            if state.currentPopup ~= nil then
+                state.openPopups[state.currentPopup] = nil
+            end
+        end,
+        IsPopupOpen = function(id)
+            return state.openPopups[id] == true
+        end,
         Selectable = function(label, selected)
             table.insert(state.selectableCalls, { label = label, selected = selected == true })
             local nextResponse = table.remove(state.selectables, 1)
@@ -394,7 +425,7 @@ function TestUiNodes:testButtonWidgetInvokesOnClickWithUiState()
     lu.assertStrContains(imgui._state.buttonLabels[1], "Apply")
 end
 
-function TestUiNodes:testConfirmButtonArmsAndConfirmsWithNodeLocalState()
+function TestUiNodes:testConfirmButtonOpensPopupAndConfirmsWithNodeLocalState()
     local definition = {
         storage = {
             { type = "bool", alias = "Triggered", lifetime = "transient", default = false },
@@ -404,7 +435,6 @@ function TestUiNodes:testConfirmButtonArmsAndConfirmsWithNodeLocalState()
                 type = "confirmButton",
                 label = "Reset",
                 confirmLabel = "Confirm Reset",
-                timeoutSeconds = 5,
                 onConfirm = function(uiState)
                     uiState.set("Triggered", true)
                 end,
@@ -413,38 +443,47 @@ function TestUiNodes:testConfirmButtonArmsAndConfirmsWithNodeLocalState()
     }
     local store = makeStore(definition, {})
     local imgui = makeBasicImgui()
-    imgui._state.buttonResponses = { true, true }
+    imgui._state.buttonResponses = { true, false, false, false, true }
 
-    local changedArm = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+    local changedOpen = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
     local changedConfirm = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
 
-    lu.assertFalse(changedArm)
+    lu.assertFalse(changedOpen)
     lu.assertTrue(changedConfirm)
     lu.assertTrue(store.uiState.get("Triggered"))
     lu.assertStrContains(imgui._state.buttonLabels[1], "Reset")
     lu.assertStrContains(imgui._state.buttonLabels[2], "Confirm Reset")
-    lu.assertFalse(definition.ui[1]._confirmButtonState.armed == true)
+    lu.assertEquals(#imgui._state.openPopupCalls, 1)
+    lu.assertEquals(imgui._state.closeCurrentPopupCalls, 1)
 end
 
-function TestUiNodes:testConfirmButtonExpiresBackToIdle()
+function TestUiNodes:testConfirmButtonCanCancelPopupWithoutChangingState()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "Triggered", lifetime = "transient", default = false },
+        },
+        ui = {
+            {
+                type = "confirmButton",
+                label = "Reset",
+                onConfirm = function(uiState)
+                    uiState.set("Triggered", true)
+                end,
+            },
+        },
+    }
+    local store = makeStore(definition, {})
     local imgui = makeBasicImgui()
-    local node = {
-        type = "confirmButton",
-        label = "Reset",
-        timeoutSeconds = 5,
-    }
+    imgui._state.buttonResponses = { true, false, true, false }
 
-    lib.prepareWidgetNode(node, "ConfirmButtonWidget")
-    node._confirmButtonState = {
-        armed = true,
-        expiresAt = os.clock() - 1,
-    }
+    local changedOpen = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+    local changedCancel = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
 
-    local changed = lib.drawUiNode(imgui, node, { view = {} })
-
-    lu.assertFalse(changed)
-    lu.assertFalse(node._confirmButtonState.armed == true)
-    lu.assertStrContains(imgui._state.buttonLabels[1], "Reset")
+    lu.assertFalse(changedOpen)
+    lu.assertFalse(changedCancel)
+    lu.assertFalse(store.uiState.get("Triggered"))
+    lu.assertEquals(#imgui._state.openPopupCalls, 1)
+    lu.assertEquals(imgui._state.closeCurrentPopupCalls, 1)
 end
 
 function TestUiNodes:testInputTextWidgetWritesTransientAliasAndUsesStorageMaxLen()
@@ -750,148 +789,6 @@ function TestUiNodes:testCustomWidgetCanRenderThroughDraw()
 
     lu.assertTrue(changed)
     lu.assertFalse(store.uiState.get("Enabled"))
-end
-
-function TestUiNodes:testCustomWidgetCanUsePublicDrawWidgetSlotsHelper()
-    local definition = {
-        storage = {
-            { type = "int", alias = "Count", configKey = "Count", default = 2, min = 0, max = 9 },
-        },
-        customTypes = {
-            widgets = {
-                fancyStepper = {
-                    binds = { value = { storageType = "int" } },
-                    slots = { "decrement", "value", "increment" },
-                    validate = function() end,
-                    draw = function(imgui, node, bound)
-                        local current = bound.value:get() or 0
-                        local nextValue = current
-                        local changed = lib.drawWidgetSlots(imgui, node, {
-                            {
-                                name = "decrement",
-                                draw = function()
-                                    if imgui.Button("-") and current > 0 then
-                                        nextValue = current - 1
-                                    end
-                                    return false
-                                end,
-                            },
-                            {
-                                name = "value",
-                                sameLine = true,
-                                draw = function()
-                                    imgui.Text(tostring(current))
-                                    return false
-                                end,
-                            },
-                            {
-                                name = "increment",
-                                sameLine = true,
-                                draw = function()
-                                    if imgui.Button("+") and current < 9 then
-                                        nextValue = current + 1
-                                    end
-                                    return false
-                                end,
-                            },
-                        })
-                        if nextValue ~= current then
-                            bound.value:set(nextValue)
-                            return true
-                        end
-                        return changed
-                    end,
-                },
-            },
-        },
-        ui = {
-            {
-                type = "fancyStepper",
-                binds = { value = "Count" },
-                geometry = {
-                    slots = {
-                        { name = "decrement", start = 0 },
-                        { name = "value", start = 40, width = 40, align = "center" },
-                        { name = "increment", start = 100 },
-                    },
-                },
-            },
-        },
-    }
-    local store = makeStore(definition, { Count = 2 })
-    local imgui = makeBasicImgui()
-    imgui._state.buttonResponses = { false, true }
-
-    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, definition.customTypes)
-
-    lu.assertTrue(changed)
-    lu.assertEquals(store.uiState.get("Count"), 3)
-end
-
-function TestUiNodes:testCustomWidgetCanPassExplicitRowStartYToDrawWidgetSlots()
-    local definition = {
-        storage = {
-            { type = "int", alias = "Count", configKey = "Count", default = 2, min = 0, max = 9 },
-        },
-        customTypes = {
-            widgets = {
-                fancyStepper = {
-                    binds = { value = { storageType = "int" } },
-                    slots = { "decrement", "value", "increment" },
-                    validate = function() end,
-                    draw = function(imgui, node, bound)
-                        local current = bound.value:get() or 0
-                        return lib.drawWidgetSlots(imgui, node, {
-                            {
-                                name = "decrement",
-                                draw = function()
-                                    imgui.Button("-")
-                                    return false
-                                end,
-                            },
-                            {
-                                name = "value",
-                                sameLine = true,
-                                draw = function()
-                                    imgui.Text(tostring(current))
-                                    return false
-                                end,
-                            },
-                            {
-                                name = "increment",
-                                sameLine = true,
-                                draw = function()
-                                    imgui.Button("+")
-                                    return false
-                                end,
-                            },
-                        }, 12, 48)
-                    end,
-                },
-            },
-        },
-        ui = {
-            {
-                type = "fancyStepper",
-                binds = { value = "Count" },
-                geometry = {
-                    slots = {
-                        { name = "decrement", start = 0 },
-                        { name = "value", start = 20, width = 40, align = "center" },
-                        { name = "increment", start = 70 },
-                    },
-                },
-            },
-        },
-    }
-    local store = makeStore(definition, { Count = 2 })
-    local imgui = makeBasicImgui()
-
-    lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, definition.customTypes)
-
-    lu.assertTrue(#imgui._state.setCursorPosCalls >= 1)
-    lu.assertEquals(imgui._state.setCursorPosCalls[1].x, 12)
-    lu.assertEquals(imgui._state.setCursorPosCalls[1].y, 48)
 end
 
 function TestUiNodes:testWidgetHelpersExposeStructuredPositionedDrawHelper()
@@ -2153,6 +2050,38 @@ function TestUiNodes:testPackedCheckboxListRendersAllItemsWithEmptyFilter()
     lu.assertEquals(checkboxLabels[1], "Alpha")
     lu.assertEquals(checkboxLabels[2], "Beta")
     lu.assertEquals(checkboxLabels[3], "Gamma")
+end
+
+function TestUiNodes:testPackedCheckboxListDefaultsToOneItemPerLine()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false, label = "Beta" },
+                    { alias = "FlagC", offset = 2, width = 1, type = "bool", default = false, label = "Gamma" },
+                },
+            },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0 })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertTrue(sawCursorPosition(imgui, 0, 0))
+    lu.assertTrue(sawCursorPosition(imgui, 0, 26))
+    lu.assertTrue(sawCursorPosition(imgui, 0, 52))
 end
 
 function TestUiNodes:testPackedCheckboxListFiltersItemsByLabelSubstring()

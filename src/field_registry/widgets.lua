@@ -17,10 +17,8 @@ local CalcTextWidth = registry.CalcTextWidth
 local EstimateButtonWidth = registry.EstimateButtonWidth
 local EstimateStructuredRowAdvanceY = registry.EstimateStructuredRowAdvanceY
 local DrawStructuredAt = registry.DrawStructuredAt
-local DrawWidgetSlots = registry.DrawWidgetSlots
 local GetSlotGeometry = registry.GetSlotGeometry
 local ShowPreparedTooltip = registry.ShowPreparedTooltip
-local AlignSlotContent = registry.AlignSlotContent
 
 local DEFAULT_PACKED_SLOT_COUNT = 32
 
@@ -98,18 +96,6 @@ local function DrawWithValueColor(imgui, color, drawFn)
     return a, b, c, d
 end
 
-local function CaptureMeasuredWidth(slot, width)
-    if type(slot) == "table" and type(width) == "number" and width > 0 then
-        slot.measuredWidth = width
-    end
-end
-
-local function CaptureMeasuredHeight(slot, height)
-    if type(slot) == "table" and type(height) == "number" and height > 0 then
-        slot.measuredHeight = height
-    end
-end
-
 local function EstimateToggleWidth(imgui, label)
     local frameHeight = type(imgui.GetFrameHeight) == "function" and imgui.GetFrameHeight() or nil
     if type(frameHeight) ~= "number" or frameHeight <= 0 then
@@ -118,6 +104,28 @@ local function EstimateToggleWidth(imgui, label)
     local style = type(imgui.GetStyle) == "function" and imgui.GetStyle() or nil
     local itemInnerSpacingX = GetStyleMetricX(style, "ItemInnerSpacing", 4)
     return frameHeight + itemInnerSpacingX + CalcTextWidth(imgui, label)
+end
+
+local function ResolveSingleSlotPlacement(node, slotName, startX, contentWidth)
+    local geometry = type(slotName) == "string" and GetSlotGeometry(node, slotName) or nil
+    local slotX = type(geometry) == "table" and type(geometry.start) == "number"
+        and (startX + geometry.start)
+        or startX
+    local drawX = slotX
+    local slotWidth = type(geometry) == "table" and geometry.width or nil
+    local align = type(geometry) == "table" and geometry.align or nil
+
+    if type(slotWidth) == "number" and type(contentWidth) == "number" then
+        local offset = 0
+        if align == "center" then
+            offset = math.max((slotWidth - contentWidth) / 2, 0)
+        elseif align == "right" then
+            offset = math.max(slotWidth - contentWidth, 0)
+        end
+        drawX = slotX + offset
+    end
+
+    return slotX, drawX, slotWidth
 end
 
 local function MakeSelectableId(label, uniqueId)
@@ -262,20 +270,48 @@ local function ValidatePackedChoiceWidget(node, prefix, widgetName)
     ValidateValueColorsTable(node, prefix, widgetName)
 end
 
-local function CreateStepperSlotTemplate(node, options)
+local function PrepareStepperDrawContext(node, boundValue, limits)
+    local ctx = node._stepperCtx or {}
+    ctx.boundValue = boundValue
+    ctx.renderedValue = NormalizeInteger(node, boundValue:get())
+    ctx.min = limits and limits.min or node.min
+    ctx.max = limits and limits.max or node.max
+    ctx.valueSlotStart = nil
+    ctx.valueSlotWidth = nil
+    node._stepperCtx = ctx
+end
+
+local function BuildOrderedStepperEntries(node, options)
     options = options or {}
-    local fastStep = node._fastStep
     local label = node._label or ""
     local hasLabel = options.drawLabel ~= false and label ~= ""
-    local firstSlotSameLine = options.firstSlotSameLine == true or hasLabel
     local slotPrefix = options.slotPrefix or ""
     local labelSlotName = options.labelSlotName or "label"
+    local firstSlotSameLine = options.firstSlotSameLine == true or hasLabel
+    local geometryOwner = options.geometryOwner or node
+    local entries = {}
 
     local function SlotName(name)
-        if slotPrefix ~= "" then
-            return slotPrefix .. name
-        end
-        return name
+        return slotPrefix ~= "" and (slotPrefix .. name) or name
+    end
+
+    local function GeometryFor(name)
+        return GetSlotGeometry(geometryOwner, name)
+    end
+
+    local function AddEntry(name, config)
+        local geometry = GeometryFor(name)
+        entries[#entries + 1] = {
+            index = #entries + 1,
+            name = name,
+            line = (geometry and geometry.line) or config.line or 1,
+            start = (geometry and geometry.start) or config.start,
+            width = (geometry and geometry.width) or config.width,
+            align = (geometry and geometry.align) or config.align,
+            sameLine = config.sameLine,
+            estimateWidth = config.estimateWidth,
+            render = config.render,
+        }
     end
 
     local function GetStepperLimits()
@@ -306,130 +342,216 @@ local function CreateStepperSlotTemplate(node, options)
         return false
     end
 
-    local slots = {}
+    local function GetValueText()
+        local ctx = node._stepperCtx
+        local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
+        if ctx._lastStepperVal ~= renderedValue or ctx._lastStepperStr == nil then
+            local displayValue = node.displayValues and node.displayValues[renderedValue]
+            ctx._lastStepperStr = tostring(displayValue ~= nil and displayValue or renderedValue)
+            ctx._lastStepperVal = renderedValue
+        end
+        return ctx._lastStepperStr, renderedValue
+    end
 
     if hasLabel then
-        table.insert(slots, {
-            name = labelSlotName,
-            draw = function(imgui, slot)
-                CaptureMeasuredWidth(slot, CalcTextWidth(imgui, label))
-                CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
+        AddEntry(labelSlotName, {
+            estimateWidth = function(imgui)
+                return CalcTextWidth(imgui, label)
+            end,
+            render = function(imgui)
                 imgui.Text(label)
                 ShowPreparedTooltip(imgui, node)
-                return false
+                return false, CalcTextWidth(imgui, label), EstimateStructuredRowAdvanceY(imgui)
             end,
         })
     end
 
-    table.insert(slots, {
-        name = SlotName("decrement"),
+    AddEntry(SlotName("decrement"), {
         sameLine = firstSlotSameLine,
-        draw = function(imgui, slot)
-            CaptureMeasuredWidth(slot, EstimateButtonWidth(imgui, "-"))
-            CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
+        estimateWidth = function(imgui)
+            return EstimateButtonWidth(imgui, "-")
+        end,
+        render = function(imgui)
             local ctx = node._stepperCtx
             local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
             local minValue = GetStepperLimits()
-            if imgui.Button("-") and renderedValue > minValue then
-                return CommitValue(renderedValue - (node._step or 1))
-            end
-            return false
+            local changed = imgui.Button("-") and renderedValue > minValue and CommitValue(renderedValue - (node._step or 1)) or false
+            return changed, EstimateButtonWidth(imgui, "-"), EstimateStructuredRowAdvanceY(imgui)
         end,
     })
 
-    table.insert(slots, {
-        name = SlotName("value"),
+    AddEntry(SlotName("value"), {
         sameLine = true,
-        draw = function(imgui, slot)
-            local ctx = node._stepperCtx
-            local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
-            ctx.valueSlotStart = GetCursorPosXSafe(imgui)
-            ctx.valueSlotWidth = slot.width
-            if ctx._lastStepperVal ~= renderedValue or ctx._lastStepperStr == nil then
-                local displayValue = node.displayValues and node.displayValues[renderedValue]
-                ctx._lastStepperStr = tostring(displayValue ~= nil and displayValue or renderedValue)
-                ctx._lastStepperVal = renderedValue
-            end
-            local valueText = ctx._lastStepperStr
-            CaptureMeasuredWidth(slot, slot.width or CalcTextWidth(imgui, valueText))
-            CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-            AlignSlotContent(imgui, slot, CalcTextWidth(imgui, valueText))
+        estimateWidth = function(imgui)
+            local valueText = GetValueText()
+            return CalcTextWidth(imgui, valueText)
+        end,
+        render = function(imgui, entry)
+            local valueText, renderedValue = GetValueText()
+            local textWidth = CalcTextWidth(imgui, valueText)
             local color = node._valueColors and node._valueColors[renderedValue] or nil
+            local ctx = node._stepperCtx or {}
+            ctx.valueSlotWidth = entry.width
+            node._stepperCtx = ctx
             if type(color) == "table" then
                 imgui.TextColored(color[1], color[2], color[3], color[4], valueText)
             else
                 imgui.Text(valueText)
             end
-            return false
+            return false, entry.width or textWidth, EstimateStructuredRowAdvanceY(imgui)
         end,
     })
 
-    table.insert(slots, {
-        name = SlotName("increment"),
+    AddEntry(SlotName("increment"), {
         sameLine = true,
-        draw = function(imgui, slot)
+        estimateWidth = function(imgui)
+            return EstimateButtonWidth(imgui, "+")
+        end,
+        render = function(imgui)
             local ctx = node._stepperCtx
             local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
             local _, maxValue = GetStepperLimits()
-            local style = imgui.GetStyle()
-            local itemSpacingX = GetStyleMetricX(style, "ItemSpacing", 0)
-            CaptureMeasuredWidth(slot, EstimateButtonWidth(imgui, "+"))
-            CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-            if slot.start == nil and ctx.valueSlotWidth and ctx.valueSlotStart ~= nil then
-                imgui.SetCursorPosX(ctx.valueSlotStart + ctx.valueSlotWidth + itemSpacingX)
-            end
-            if imgui.Button("+") and renderedValue < maxValue then
-                return CommitValue(renderedValue + (node._step or 1))
-            end
-            return false
+            local changed = imgui.Button("+") and renderedValue < maxValue and CommitValue(renderedValue + (node._step or 1)) or false
+            return changed, EstimateButtonWidth(imgui, "+"), EstimateStructuredRowAdvanceY(imgui)
         end,
     })
 
-    if fastStep then
-        table.insert(slots, {
-            name = SlotName("fastDecrement"),
+    if node._fastStep then
+        AddEntry(SlotName("fastDecrement"), {
             sameLine = true,
-            draw = function(imgui, slot)
-                CaptureMeasuredWidth(slot, EstimateButtonWidth(imgui, "<<"))
-                CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
+            estimateWidth = function(imgui)
+                return EstimateButtonWidth(imgui, "<<")
+            end,
+            render = function(imgui)
                 local ctx = node._stepperCtx
                 local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
                 local minValue = GetStepperLimits()
-                if imgui.Button("<<") and renderedValue > minValue then
-                    return CommitValue(renderedValue - fastStep)
-                end
-                return false
+                local changed = imgui.Button("<<")
+                    and renderedValue > minValue
+                    and CommitValue(renderedValue - node._fastStep)
+                    or false
+                return changed, EstimateButtonWidth(imgui, "<<"), EstimateStructuredRowAdvanceY(imgui)
             end,
         })
-        table.insert(slots, {
-            name = SlotName("fastIncrement"),
+        AddEntry(SlotName("fastIncrement"), {
             sameLine = true,
-            draw = function(imgui, slot)
-                CaptureMeasuredWidth(slot, EstimateButtonWidth(imgui, ">>"))
-                CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
+            estimateWidth = function(imgui)
+                return EstimateButtonWidth(imgui, ">>")
+            end,
+            render = function(imgui)
                 local ctx = node._stepperCtx
                 local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
                 local _, maxValue = GetStepperLimits()
-                if imgui.Button(">>") and renderedValue < maxValue then
-                    return CommitValue(renderedValue + fastStep)
-                end
-                return false
+                local changed = imgui.Button(">>")
+                    and renderedValue < maxValue
+                    and CommitValue(renderedValue + node._fastStep)
+                    or false
+                return changed, EstimateButtonWidth(imgui, ">>"), EstimateStructuredRowAdvanceY(imgui)
             end,
         })
     end
 
-    return slots
+    table.sort(entries, function(left, right)
+        if left.line ~= right.line then
+            return left.line < right.line
+        end
+        if type(left.start) == "number" and type(right.start) == "number" and left.start ~= right.start then
+            return left.start < right.start
+        end
+        return left.index < right.index
+    end)
+
+    return entries
 end
 
-local function PrepareStepperDrawContext(node, boundValue, limits)
-    local ctx = node._stepperCtx or {}
-    ctx.boundValue = boundValue
-    ctx.renderedValue = NormalizeInteger(node, boundValue:get())
-    ctx.min = limits and limits.min or node.min
-    ctx.max = limits and limits.max or node.max
-    ctx.valueSlotStart = nil
-    ctx.valueSlotWidth = nil
-    node._stepperCtx = ctx
+local function DrawOrderedEntries(imgui, entries, startX, startY, fallbackHeight)
+    local currentLine = nil
+    local currentRowY = startY
+    local currentRowAdvance = fallbackHeight
+    local maxRight = startX
+    local maxBottom = startY
+    local changed = false
+
+    for _, entry in ipairs(entries or {}) do
+        local isNewLine = currentLine ~= entry.line
+        if isNewLine then
+            if currentLine ~= nil then
+                currentRowY = currentRowY + currentRowAdvance
+            end
+            currentLine = entry.line
+            currentRowAdvance = fallbackHeight
+        elseif entry.sameLine ~= false and type(entry.start) ~= "number" then
+            imgui.SameLine()
+        end
+
+        local slotX
+        if type(entry.start) == "number" then
+            slotX = startX + entry.start
+        elseif isNewLine then
+            slotX = startX
+        else
+            slotX = GetCursorPosXSafe(imgui)
+        end
+
+        local estimatedWidth = type(entry.estimateWidth) == "function"
+            and entry.estimateWidth(imgui, entry)
+            or 0
+        local drawX = slotX
+        if type(entry.width) == "number" and type(estimatedWidth) == "number" then
+            local offset = 0
+            if entry.align == "center" then
+                offset = math.max((entry.width - estimatedWidth) / 2, 0)
+            elseif entry.align == "right" then
+                offset = math.max(entry.width - estimatedWidth, 0)
+            end
+            drawX = slotX + offset
+        end
+
+        local measuredWidth = estimatedWidth
+        local measuredHeight = fallbackHeight
+        local entryChanged, _, _, consumedHeight = DrawStructuredAt(
+            imgui,
+            slotX,
+            currentRowY,
+            fallbackHeight,
+            function()
+                if drawX ~= slotX then
+                    if type(imgui.SetCursorPosX) == "function" then
+                        imgui.SetCursorPosX(drawX)
+                    else
+                        SetCursorPosSafe(imgui, drawX, currentRowY)
+                    end
+                end
+                local widgetChanged, contentWidth, contentHeight = entry.render(imgui, entry)
+                if type(contentWidth) == "number" and contentWidth > 0 then
+                    measuredWidth = contentWidth
+                end
+                if type(contentHeight) == "number" and contentHeight > 0 then
+                    measuredHeight = contentHeight
+                end
+                return widgetChanged == true
+            end)
+        if entryChanged then
+            changed = true
+        end
+
+        local slotConsumedHeight = measuredHeight > 0 and measuredHeight or consumedHeight
+        if slotConsumedHeight > currentRowAdvance then
+            currentRowAdvance = slotConsumedHeight
+        end
+
+        local slotConsumedWidth = type(entry.width) == "number" and entry.width or measuredWidth or 0
+        local slotRight = slotX + math.max(slotConsumedWidth, 0)
+        if slotRight > maxRight then
+            maxRight = slotRight
+        end
+        local slotBottom = currentRowY + math.max(slotConsumedHeight or 0, 0)
+        if slotBottom > maxBottom then
+            maxBottom = slotBottom
+        end
+    end
+
+    return math.max(maxRight - startX, 0), math.max(maxBottom - startY, 0), changed
 end
 
 WidgetTypes.checkbox = {
@@ -440,29 +562,37 @@ WidgetTypes.checkbox = {
             libWarn("%s: checkbox default must be boolean, got %s", prefix, type(node.default))
         end
         PrepareWidgetText(node, node.binds and node.binds.value)
-        node._checkboxSlots = {
-            {
-                name = "control",
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, EstimateToggleWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    local value = node._checkboxValue == true
-                    local newVal, changed = imgui.Checkbox((node._label or "") .. (node._imguiId or ""), value)
-                    ShowPreparedTooltip(imgui, node)
-                    if changed then
-                        node._checkboxBound:set(newVal)
-                        return true
-                    end
-                    return false
-                end,
-            },
-        }
     end,
     draw = function(imgui, node, bound, x, y)
         node._checkboxBound = bound.value
         node._checkboxValue = bound.value:get()
         if node._checkboxValue == nil then node._checkboxValue = node.default == true end
-        return DrawWidgetSlots(imgui, node, node._checkboxSlots, x, y)
+        local contentWidth = EstimateToggleWidth(imgui, node._label or "")
+        local slotX, drawX, slotWidth = ResolveSingleSlotPlacement(node, "control", x, contentWidth)
+        local changed, _, _, consumedHeight = DrawStructuredAt(
+            imgui,
+            slotX,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                if drawX ~= slotX then
+                    if type(imgui.SetCursorPosX) == "function" then
+                        imgui.SetCursorPosX(drawX)
+                    else
+                        SetCursorPosSafe(imgui, drawX, y)
+                    end
+                end
+                local value = node._checkboxValue == true
+                local newVal, widgetChanged = imgui.Checkbox((node._label or "") .. (node._imguiId or ""), value)
+                ShowPreparedTooltip(imgui, node)
+                if widgetChanged then
+                    node._checkboxBound:set(newVal)
+                    return true
+                end
+                return false
+            end)
+        local consumedWidth = type(slotWidth) == "number" and slotWidth or math.max(contentWidth, (drawX - slotX) + contentWidth)
+        return consumedWidth, consumedHeight, changed
     end,
 }
 
@@ -497,29 +627,36 @@ WidgetTypes.text = {
         node._text = tostring(node.text or node.label or "")
         node._color = NormalizeColor(node.color)
         PrepareWidgetText(node)
-        node._textSlots = {
-            {
-                name = "value",
-                draw = function(imgui, slot)
-                    local text = node._boundText ~= nil and tostring(node._boundText) or node._text or ""
-                    local color = node._color
-                    CaptureMeasuredWidth(slot, slot.width or CalcTextWidth(imgui, text))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    AlignSlotContent(imgui, slot, CalcTextWidth(imgui, text))
-                    if type(color) == "table" then
-                        imgui.TextColored(color[1], color[2], color[3], color[4], text)
-                    else
-                        imgui.Text(text)
-                    end
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-        }
     end,
     draw = function(imgui, node, bound, x, y)
         node._boundText = bound.value and bound.value:get() or nil
-        return DrawWidgetSlots(imgui, node, node._textSlots, x, y)
+        local text = node._boundText ~= nil and tostring(node._boundText) or node._text or ""
+        local contentWidth = CalcTextWidth(imgui, text)
+        local slotX, drawX, slotWidth = ResolveSingleSlotPlacement(node, "value", x, contentWidth)
+        local color = node._color
+        local changed, _, _, consumedHeight = DrawStructuredAt(
+            imgui,
+            slotX,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                if drawX ~= slotX then
+                    if type(imgui.SetCursorPosX) == "function" then
+                        imgui.SetCursorPosX(drawX)
+                    else
+                        SetCursorPosSafe(imgui, drawX, y)
+                    end
+                end
+                if type(color) == "table" then
+                    imgui.TextColored(color[1], color[2], color[3], color[4], text)
+                else
+                    imgui.Text(text)
+                end
+                ShowPreparedTooltip(imgui, node)
+                return false
+            end)
+        local consumedWidth = type(slotWidth) == "number" and slotWidth or math.max(contentWidth, (drawX - slotX) + contentWidth)
+        return consumedWidth, consumedHeight, changed
     end,
 }
 
@@ -534,26 +671,32 @@ WidgetTypes.button = {
         if node.onClick ~= nil and type(node.onClick) ~= "function" then
             libWarn("%s: button onClick must be function", prefix)
         end
-        node._buttonSlots = {
-            {
-                name = "control",
-                draw = function(imgui, slot)
-                    local label = (node._label or "") .. (node._imguiId or "")
-                    CaptureMeasuredWidth(slot, slot.width or EstimateButtonWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    AlignSlotContent(imgui, slot, EstimateButtonWidth(imgui, node._label or ""))
-                    if imgui.Button(label) then
-                        ShowPreparedTooltip(imgui, node)
-                        return true
-                    end
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-        }
     end,
     draw = function(imgui, node, _, x, y, _, _, uiState)
-        local consumedWidth, consumedHeight, changed = DrawWidgetSlots(imgui, node, node._buttonSlots, x, y)
+        local label = (node._label or "") .. (node._imguiId or "")
+        local contentWidth = EstimateButtonWidth(imgui, node._label or "")
+        local slotX, drawX, slotWidth = ResolveSingleSlotPlacement(node, "control", x, contentWidth)
+        local changed, _, _, consumedHeight = DrawStructuredAt(
+            imgui,
+            slotX,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                if drawX ~= slotX then
+                    if type(imgui.SetCursorPosX) == "function" then
+                        imgui.SetCursorPosX(drawX)
+                    else
+                        SetCursorPosSafe(imgui, drawX, y)
+                    end
+                end
+                if imgui.Button(label) then
+                    ShowPreparedTooltip(imgui, node)
+                    return true
+                end
+                ShowPreparedTooltip(imgui, node)
+                return false
+            end)
+        local consumedWidth = type(slotWidth) == "number" and slotWidth or math.max(contentWidth, (drawX - slotX) + contentWidth)
         if changed and type(node.onClick) == "function" then
             node.onClick(uiState, node, imgui)
         end
@@ -578,83 +721,69 @@ WidgetTypes.confirmButton = {
         if node.cancelLabel ~= nil and type(node.cancelLabel) ~= "string" then
             libWarn("%s: confirmButton cancelLabel must be string", prefix)
         end
-        if node.timeoutSeconds ~= nil and (type(node.timeoutSeconds) ~= "number" or node.timeoutSeconds <= 0) then
-            libWarn("%s: confirmButton timeoutSeconds must be a positive number", prefix)
-        end
         node._confirmLabel = type(node.confirmLabel) == "string" and node.confirmLabel ~= "" and node.confirmLabel or "Confirm"
         node._cancelLabel = type(node.cancelLabel) == "string" and node.cancelLabel ~= "" and node.cancelLabel or "Cancel"
-        node._timeoutSeconds = type(node.timeoutSeconds) == "number" and node.timeoutSeconds > 0 and node.timeoutSeconds or 3
-        node._confirmButtonSlots = {
-            {
-                name = "control",
-                draw = function(imgui, slot)
-                    local state = node._confirmButtonState or {}
-                    if state.armed == true then
-                        local confirmLabel = node._confirmLabel .. (node._imguiId or "")
-                        local remaining = math.max(0, (state.expiresAt or 0) - (state.now or 0))
-                        local statusText = string.format("Confirmation expires in %.1fs", remaining)
-                        local itemSpacingX = GetStyleMetricX(imgui.GetStyle(), "ItemSpacing", 8)
-                        CaptureMeasuredWidth(
-                            slot,
-                            slot.width
-                                or (EstimateButtonWidth(imgui, node._confirmLabel)
-                                    + itemSpacingX
-                                    + EstimateButtonWidth(imgui, node._cancelLabel)
-                                    + itemSpacingX
-                                    + CalcTextWidth(imgui, statusText)))
-                        CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                        if imgui.Button(confirmLabel) then
-                            state.armed = false
-                            state.expiresAt = nil
-                            node._confirmButtonState = state
-                            if type(node.onConfirm) == "function" then
-                                node.onConfirm(state.uiState, node, imgui)
-                            end
-                            ShowPreparedTooltip(imgui, node)
-                            return true
-                        end
-                        ShowPreparedTooltip(imgui, node)
-                        imgui.SameLine()
-                        if imgui.Button(node._cancelLabel .. "##cancel" .. (node._imguiId or "")) then
-                            state.armed = false
-                            state.expiresAt = nil
-                            node._confirmButtonState = state
-                            ShowPreparedTooltip(imgui, node)
-                            return false
-                        end
-                        ShowPreparedTooltip(imgui, node)
-                        imgui.SameLine()
-                        imgui.TextDisabled(statusText)
-                        ShowPreparedTooltip(imgui, node)
-                        return false
-                    end
-
-                    CaptureMeasuredWidth(slot, slot.width or EstimateButtonWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    AlignSlotContent(imgui, slot, EstimateButtonWidth(imgui, node._label or ""))
-                    if imgui.Button((node._label or "") .. (node._imguiId or "")) then
-                        state.armed = true
-                        state.expiresAt = (state.now or os.clock()) + node._timeoutSeconds
-                        node._confirmButtonState = state
-                        ShowPreparedTooltip(imgui, node)
-                        return false
-                    end
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-        }
+        node._confirmPopupId = (node._imguiId or "confirmButton") .. "##popup"
     end,
     draw = function(imgui, node, _, x, y, _, _, uiState)
         local state = node._confirmButtonState or {}
         state.uiState = uiState
-        state.now = os.clock()
-        if state.armed == true and state.expiresAt ~= nil and state.now >= state.expiresAt then
-            state.armed = false
-            state.expiresAt = nil
-        end
         node._confirmButtonState = state
-        return DrawWidgetSlots(imgui, node, node._confirmButtonSlots, x, y)
+
+        local contentWidth = EstimateButtonWidth(imgui, node._label or "")
+        local slotX, drawX, slotWidth = ResolveSingleSlotPlacement(node, "control", x, contentWidth)
+        local changed, _, _, consumedHeight = DrawStructuredAt(
+            imgui,
+            slotX,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                if drawX ~= slotX then
+                    if type(imgui.SetCursorPosX) == "function" then
+                        imgui.SetCursorPosX(drawX)
+                    else
+                        SetCursorPosSafe(imgui, drawX, y)
+                    end
+                end
+
+                if imgui.Button((node._label or "") .. (node._imguiId or "")) then
+                    node._confirmButtonState = state
+                    if type(imgui.OpenPopup) == "function" then
+                        imgui.OpenPopup(node._confirmPopupId)
+                    end
+                end
+                ShowPreparedTooltip(imgui, node)
+
+                local popupChanged = false
+                if type(imgui.BeginPopup) == "function" and imgui.BeginPopup(node._confirmPopupId) then
+                    if imgui.Button(node._confirmLabel .. (node._imguiId or "")) then
+                        node._confirmButtonState = state
+                        if type(node.onConfirm) == "function" then
+                            node.onConfirm(state.uiState, node, imgui)
+                        end
+                        if type(imgui.CloseCurrentPopup) == "function" then
+                            imgui.CloseCurrentPopup()
+                        end
+                        popupChanged = true
+                    end
+                    if type(imgui.SameLine) == "function" then
+                        imgui.SameLine()
+                    end
+                    if imgui.Button(node._cancelLabel .. "##cancel" .. (node._imguiId or "")) then
+                        node._confirmButtonState = state
+                        if type(imgui.CloseCurrentPopup) == "function" then
+                            imgui.CloseCurrentPopup()
+                        end
+                    end
+                    if type(imgui.EndPopup) == "function" then
+                        imgui.EndPopup()
+                    end
+                end
+
+                return popupChanged
+            end)
+        local consumedWidth = type(slotWidth) == "number" and slotWidth or math.max(contentWidth, (drawX - slotX) + contentWidth)
+        return consumedWidth, consumedHeight, changed
     end,
 }
 
@@ -670,37 +799,6 @@ WidgetTypes.inputText = {
             node._maxLen = nil
         end
         PrepareWidgetText(node, node.binds and node.binds.value)
-        local hasLabel = (node._label or "") ~= ""
-        node._inputTextSlots = {
-            {
-                name = "label",
-                hidden = not hasLabel,
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(node._label or "")
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-            {
-                name = "control",
-                sameLine = hasLabel,
-                draw = function(imgui, slot)
-                    local ctx = node._inputTextCtx or {}
-                    local maxLen = ctx.maxLen or node._maxLen or 256
-                    CaptureMeasuredWidth(slot, slot.width or 120)
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    local newValue, changed = imgui.InputText(node._imguiId, ctx.current or "", maxLen)
-                    ShowPreparedTooltip(imgui, node)
-                    if changed then
-                        ctx.boundValue:set(newValue)
-                        return true
-                    end
-                    return false
-                end,
-            },
-        }
     end,
     validateGeometry = function(_, prefix, geometry)
         WarnIgnoredSlotKeys(prefix, geometry, "control", { "align" }, "inputText")
@@ -712,11 +810,296 @@ WidgetTypes.inputText = {
         ctx.current = tostring(bound.value:get() or "")
         ctx.maxLen = node._maxLen or (aliasNode and aliasNode._maxLen) or 256
         node._inputTextCtx = ctx
+
+        local labelText = node._label or ""
+        local hasLabel = labelText ~= ""
+        local labelWidth = hasLabel and CalcTextWidth(imgui, labelText) or 0
         local controlGeometry = GetSlotGeometry(node, "control")
-        node._inputTextSlots[2].width = controlGeometry and controlGeometry.width or availWidth
-        return DrawWidgetSlots(imgui, node, node._inputTextSlots, x, y)
+        local controlWidth = controlGeometry and controlGeometry.width or availWidth or 120
+        local controlStart = controlGeometry and controlGeometry.start or nil
+        local itemSpacingX = GetStyleMetricX(imgui.GetStyle(), "ItemSpacing", 8)
+
+        local controlSlotX
+        if type(controlStart) == "number" then
+            controlSlotX = x + controlStart
+        elseif hasLabel then
+            controlSlotX = x + labelWidth + itemSpacingX
+        else
+            controlSlotX = x
+        end
+
+        local maxHeight = 0
+        local changed = false
+
+        if hasLabel then
+            local _, _, _, labelHeight = DrawStructuredAt(
+                imgui,
+                x,
+                y,
+                EstimateStructuredRowAdvanceY(imgui),
+                function()
+                    imgui.Text(labelText)
+                    ShowPreparedTooltip(imgui, node)
+                    return false
+                end)
+            if type(labelHeight) == "number" and labelHeight > maxHeight then
+                maxHeight = labelHeight
+            end
+        end
+
+        local controlChanged, _, _, controlHeight = DrawStructuredAt(
+            imgui,
+            controlSlotX,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                if type(controlWidth) == "number" and controlWidth > 0 then
+                    imgui.PushItemWidth(controlWidth)
+                end
+                local newValue, widgetChanged = imgui.InputText(node._imguiId, ctx.current or "", ctx.maxLen)
+                if type(controlWidth) == "number" and controlWidth > 0 then
+                    imgui.PopItemWidth()
+                end
+                ShowPreparedTooltip(imgui, node)
+                if widgetChanged then
+                    ctx.boundValue:set(newValue)
+                    return true
+                end
+                return false
+            end)
+        if controlChanged then
+            changed = true
+        end
+        if type(controlHeight) == "number" and controlHeight > maxHeight then
+            maxHeight = controlHeight
+        end
+
+        local consumedWidth
+        if type(controlGeometry) == "table" and type(controlGeometry.width) == "number" then
+            consumedWidth = math.max((controlSlotX - x) + controlGeometry.width, hasLabel and labelWidth or 0)
+        elseif type(controlWidth) == "number" then
+            consumedWidth = math.max((controlSlotX - x) + controlWidth, hasLabel and labelWidth or 0)
+        else
+            consumedWidth = math.max((controlSlotX - x), hasLabel and labelWidth or 0)
+        end
+
+        return consumedWidth, maxHeight, changed
     end,
 }
+
+local function DrawLabeledDropdownControl(imgui, node, x, y, availWidth, estimatedControlWidth, drawControl)
+    local labelText = node._label or ""
+    local hasLabel = labelText ~= ""
+    local labelWidth = hasLabel and CalcTextWidth(imgui, labelText) or 0
+    local controlGeometry = GetSlotGeometry(node, "control")
+    local controlWidth = controlGeometry and controlGeometry.width or availWidth or estimatedControlWidth
+    local controlStart = controlGeometry and controlGeometry.start or nil
+    local itemSpacingX = GetStyleMetricX(imgui.GetStyle(), "ItemSpacing", 8)
+
+    local controlSlotX
+    if type(controlStart) == "number" then
+        controlSlotX = x + controlStart
+    elseif hasLabel then
+        controlSlotX = x + labelWidth + itemSpacingX
+    else
+        controlSlotX = x
+    end
+
+    local maxHeight = 0
+    local changed = false
+
+    if hasLabel then
+        local _, _, _, labelHeight = DrawStructuredAt(
+            imgui,
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                imgui.Text(labelText)
+                ShowPreparedTooltip(imgui, node)
+                return false
+            end)
+        if type(labelHeight) == "number" and labelHeight > maxHeight then
+            maxHeight = labelHeight
+        end
+    end
+
+    local controlChanged, _, _, controlHeight = DrawStructuredAt(
+        imgui,
+        controlSlotX,
+        y,
+        EstimateStructuredRowAdvanceY(imgui),
+        function()
+            if type(controlWidth) == "number" and controlWidth > 0 then
+                imgui.PushItemWidth(controlWidth)
+            end
+            local widgetChanged = drawControl(controlWidth)
+            if type(controlWidth) == "number" and controlWidth > 0 then
+                imgui.PopItemWidth()
+            end
+            ShowPreparedTooltip(imgui, node)
+            return widgetChanged == true
+        end)
+    if controlChanged then
+        changed = true
+    end
+    if type(controlHeight) == "number" and controlHeight > maxHeight then
+        maxHeight = controlHeight
+    end
+
+    local consumedWidth
+    if type(controlGeometry) == "table" and type(controlGeometry.width) == "number" then
+        consumedWidth = math.max((controlSlotX - x) + controlGeometry.width, hasLabel and labelWidth or 0)
+    elseif type(controlWidth) == "number" then
+        consumedWidth = math.max((controlSlotX - x) + controlWidth, hasLabel and labelWidth or 0)
+    else
+        consumedWidth = math.max((controlSlotX - x) + estimatedControlWidth, hasLabel and labelWidth or 0)
+    end
+
+    return consumedWidth, maxHeight, changed
+end
+
+local function BuildOrderedChoiceEntries(node, options)
+    options = options or {}
+    local geometryOwner = options.geometryOwner or node
+    local labelText = options.labelText
+    if labelText == nil then
+        labelText = node._label or ""
+    end
+    local labelSlotName = options.labelSlotName or "label"
+    local firstOptionSameLine = options.firstOptionSameLine
+    if firstOptionSameLine == nil then
+        firstOptionSameLine = labelText ~= ""
+    end
+    local entries = {}
+
+    local function AddEntry(name, config)
+        local geometry = type(name) == "string" and GetSlotGeometry(geometryOwner, name) or nil
+        entries[#entries + 1] = {
+            index = #entries + 1,
+            name = name,
+            line = (geometry and geometry.line) or config.line or 1,
+            start = (geometry and geometry.start) or config.start,
+            width = (geometry and geometry.width) or config.width,
+            align = (geometry and geometry.align) or config.align,
+            sameLine = config.sameLine,
+            estimateWidth = config.estimateWidth,
+            render = config.render,
+        }
+    end
+
+    if labelText ~= "" then
+        AddEntry(labelSlotName, {
+            estimateWidth = function(imgui)
+                return CalcTextWidth(imgui, labelText)
+            end,
+            render = function(imgui)
+                imgui.Text(labelText)
+                ShowPreparedTooltip(imgui, node)
+                return false, CalcTextWidth(imgui, labelText), EstimateStructuredRowAdvanceY(imgui)
+            end,
+        })
+    end
+
+    for index, option in ipairs(options.optionEntries or {}) do
+        local slotName = option.slotName or ("option:" .. tostring(index))
+        local sameLine = option.sameLine
+        if sameLine == nil then
+            sameLine = index > 1 or firstOptionSameLine
+        end
+        AddEntry(slotName, {
+            sameLine = sameLine,
+            line = option.line,
+            start = option.start,
+            width = option.width,
+            align = option.align,
+            estimateWidth = function(imgui)
+                return EstimateToggleWidth(imgui, option.label)
+            end,
+            render = function(imgui)
+                local clicked = DrawWithValueColor(imgui, option.color, function()
+                    return imgui.RadioButton(option.label, option.selected == true)
+                end)
+                if clicked and type(option.onSelect) == "function" then
+                    return option.onSelect() == true, EstimateToggleWidth(imgui, option.label), EstimateStructuredRowAdvanceY(imgui)
+                end
+                return false, EstimateToggleWidth(imgui, option.label), EstimateStructuredRowAdvanceY(imgui)
+            end,
+        })
+    end
+
+    table.sort(entries, function(left, right)
+        if left.line ~= right.line then
+            return left.line < right.line
+        end
+        if type(left.start) == "number" and type(right.start) == "number" and left.start ~= right.start then
+            return left.start < right.start
+        end
+        return left.index < right.index
+    end)
+
+    return entries
+end
+
+local function BuildOrderedCheckboxEntries(node, optionEntries, options)
+    options = options or {}
+    local geometryOwner = options.geometryOwner or node
+    local entries = {}
+
+    local function AddEntry(name, config)
+        local geometry = type(name) == "string" and GetSlotGeometry(geometryOwner, name) or nil
+        entries[#entries + 1] = {
+            index = #entries + 1,
+            name = name,
+            line = (geometry and geometry.line) or config.line or 1,
+            start = (geometry and geometry.start) or config.start,
+            width = (geometry and geometry.width) or config.width,
+            align = (geometry and geometry.align) or config.align,
+            sameLine = config.sameLine,
+            estimateWidth = config.estimateWidth,
+            render = config.render,
+        }
+    end
+
+    for index, option in ipairs(optionEntries or {}) do
+        local slotName = option.slotName or ("item:" .. tostring(index))
+        AddEntry(slotName, {
+            sameLine = option.sameLine,
+            line = option.line,
+            start = option.start,
+            width = option.width,
+            align = option.align,
+            estimateWidth = function(imgui)
+                return EstimateToggleWidth(imgui, option.label)
+            end,
+            render = function(imgui)
+                imgui.PushID((slotName or "item") .. "_" .. tostring(index))
+                local nextValue, clicked = DrawWithValueColor(imgui, option.color, function()
+                    return imgui.Checkbox(option.label, option.current == true)
+                end)
+                imgui.PopID()
+                if clicked and type(option.onToggle) == "function" then
+                    return option.onToggle(nextValue) == true,
+                        EstimateToggleWidth(imgui, option.label),
+                        EstimateStructuredRowAdvanceY(imgui)
+                end
+                return false, EstimateToggleWidth(imgui, option.label), EstimateStructuredRowAdvanceY(imgui)
+            end,
+        })
+    end
+
+    table.sort(entries, function(left, right)
+        if left.line ~= right.line then
+            return left.line < right.line
+        end
+        if type(left.start) == "number" and type(right.start) == "number" and left.start ~= right.start then
+            return left.start < right.start
+        end
+        return left.index < right.index
+    end)
+
+    return entries
+end
 
 WidgetTypes.dropdown = {
     binds = { value = { storageType = { "string", "int" } } },
@@ -740,59 +1123,6 @@ WidgetTypes.dropdown = {
         end
         ValidateValueColorsTable(node, prefix, "dropdown")
         PrepareWidgetText(node, node.binds and node.binds.value)
-        local hasLabel = (node._label or "") ~= ""
-        node._dropdownSlots = {
-            {
-                name = "label",
-                hidden = not hasLabel,
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(node._label or "")
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-            {
-                name = "control",
-                sameLine = hasLabel,
-                draw = function(imgui, slot)
-                    local ctx = node._dropdownCtx or {}
-                    local previewColor = node._valueColors and node._valueColors[ctx.previewValue] or nil
-                    local previewText = ChoiceDisplay(node, ctx.previewValue or "")
-                    CaptureMeasuredWidth(slot, slot.width or (EstimateButtonWidth(imgui, previewText) + 16))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    local opened = DrawWithValueColor(imgui, previewColor, function()
-                        return imgui.BeginCombo(node._imguiId, previewText)
-                    end)
-                    ShowPreparedTooltip(imgui, node)
-                    if opened then
-                        local changed = false
-                        local pendingValue = nil
-                          for index, candidate in ipairs(node.values or {}) do
-                              local optionColor = node._valueColors and node._valueColors[candidate] or nil
-                              local selected = DrawWithValueColor(imgui, optionColor, function()
-                                  return imgui.Selectable(
-                                      MakeSelectableId(ChoiceDisplay(node, candidate), index),
-                                      false)
-                              end)
-                            if selected then
-                                if candidate ~= ctx.current then
-                                    pendingValue = candidate
-                                end
-                            end
-                        end
-                        imgui.EndCombo()
-                        if pendingValue ~= nil then
-                            ctx.boundValue:set(pendingValue)
-                            changed = true
-                        end
-                        return changed
-                    end
-                    return false
-                end,
-            },
-        }
     end,
     draw = function(imgui, node, bound, x, y, availWidth)
         local current = NormalizeChoiceValue(node, bound.value:get())
@@ -807,9 +1137,45 @@ WidgetTypes.dropdown = {
         ctx.currentIdx = currentIdx
         ctx.previewValue = (node.values and node.values[currentIdx]) or ""
         node._dropdownCtx = ctx
-        node._dropdownSlots[2].width = availWidth
+        local previewText = ChoiceDisplay(node, ctx.previewValue or "")
+        local previewColor = node._valueColors and node._valueColors[ctx.previewValue] or nil
+        local estimatedControlWidth = EstimateButtonWidth(imgui, previewText) + 16
 
-        return DrawWidgetSlots(imgui, node, node._dropdownSlots, x, y)
+        return DrawLabeledDropdownControl(
+            imgui,
+            node,
+            x,
+            y,
+            availWidth,
+            estimatedControlWidth,
+            function()
+                local opened = DrawWithValueColor(imgui, previewColor, function()
+                    return imgui.BeginCombo(node._imguiId, previewText)
+                end)
+                if not opened then
+                    return false
+                end
+
+                local changed = false
+                local pendingValue = nil
+                for index, candidate in ipairs(node.values or {}) do
+                    local optionColor = node._valueColors and node._valueColors[candidate] or nil
+                    local selected = DrawWithValueColor(imgui, optionColor, function()
+                        return imgui.Selectable(
+                            MakeSelectableId(ChoiceDisplay(node, candidate), index),
+                            false)
+                    end)
+                    if selected and candidate ~= ctx.current then
+                        pendingValue = candidate
+                    end
+                end
+                imgui.EndCombo()
+                if pendingValue ~= nil then
+                    ctx.boundValue:set(pendingValue)
+                    changed = true
+                end
+                return changed
+            end)
     end,
 }
 
@@ -827,68 +1193,6 @@ WidgetTypes.mappedDropdown = {
             libWarn("%s: mappedDropdown getPreviewColor must be function", prefix)
         end
         PrepareWidgetText(node, node.binds and node.binds.value)
-        local hasLabel = (node._label or "") ~= ""
-        node._mappedDropdownSlots = {
-            {
-                name = "label",
-                hidden = not hasLabel,
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(node._label or "")
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-            {
-                name = "control",
-                sameLine = hasLabel,
-                draw = function(imgui, slot)
-                    local ctx = node._mappedDropdownCtx or {}
-                    CaptureMeasuredWidth(slot, slot.width or (EstimateButtonWidth(imgui, ctx.preview or "") + 16))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    local opened = DrawWithValueColor(imgui, ctx.previewColor, function()
-                        return imgui.BeginCombo(node._imguiId, ctx.preview or "")
-                    end)
-                    ShowPreparedTooltip(imgui, node)
-                    if not opened then
-                        return false
-                    end
-
-                    local changed = false
-                    for _, option in ipairs(ctx.options or {}) do
-                        local label
-                        if type(option) == "table" then
-                            label = tostring(option.label or option.value or "")
-                        else
-                            label = tostring(option or "")
-                        end
-
-                        local optionColor = type(option) == "table" and option.color or nil
-                        local clicked = DrawWithValueColor(imgui, optionColor, function()
-                            local uniqueId = type(option) == "table"
-                                and (option.id or option.value or label)
-                                or option
-                            return imgui.Selectable(MakeSelectableId(label, uniqueId), false)
-                        end)
-                        if clicked then
-                            if type(option) == "table" and type(option.onSelect) == "function" then
-                                changed = option.onSelect(option, ctx.boundValue, ctx.uiState, node) == true or changed
-                            else
-                                local nextValue = type(option) == "table" and option.value or option
-                                if nextValue ~= ctx.current then
-                                    ctx.boundValue:set(nextValue)
-                                    changed = true
-                                end
-                            end
-                        end
-                    end
-
-                    imgui.EndCombo()
-                    return changed
-                end,
-            },
-        }
     end,
     validateGeometry = function(node, prefix, geometry)
         local _ = node
@@ -909,8 +1213,54 @@ WidgetTypes.mappedDropdown = {
             and node.getOptions(node, bound, uiState)
             or {}
         node._mappedDropdownCtx = ctx
-        node._mappedDropdownSlots[2].width = availWidth
-        return DrawWidgetSlots(imgui, node, node._mappedDropdownSlots, x, y)
+        local estimatedControlWidth = EstimateButtonWidth(imgui, ctx.preview or "") + 16
+        return DrawLabeledDropdownControl(
+            imgui,
+            node,
+            x,
+            y,
+            availWidth,
+            estimatedControlWidth,
+            function()
+                local opened = DrawWithValueColor(imgui, ctx.previewColor, function()
+                    return imgui.BeginCombo(node._imguiId, ctx.preview or "")
+                end)
+                if not opened then
+                    return false
+                end
+
+                local changed = false
+                for _, option in ipairs(ctx.options or {}) do
+                    local label
+                    if type(option) == "table" then
+                        label = tostring(option.label or option.value or "")
+                    else
+                        label = tostring(option or "")
+                    end
+
+                    local optionColor = type(option) == "table" and option.color or nil
+                    local clicked = DrawWithValueColor(imgui, optionColor, function()
+                        local uniqueId = type(option) == "table"
+                            and (option.id or option.value or label)
+                            or option
+                        return imgui.Selectable(MakeSelectableId(label, uniqueId), false)
+                    end)
+                    if clicked then
+                        if type(option) == "table" and type(option.onSelect) == "function" then
+                            changed = option.onSelect(option, ctx.boundValue, ctx.uiState, node) == true or changed
+                        else
+                            local nextValue = type(option) == "table" and option.value or option
+                            if nextValue ~= ctx.current then
+                                ctx.boundValue:set(nextValue)
+                                changed = true
+                            end
+                        end
+                    end
+                end
+
+                imgui.EndCombo()
+                return changed
+            end)
     end,
 }
 
@@ -920,64 +1270,6 @@ WidgetTypes.packedDropdown = {
     validate = function(node, prefix)
         PrepareWidgetText(node, node.binds and node.binds.value)
         ValidatePackedChoiceWidget(node, prefix, "packedDropdown")
-        local hasLabel = (node._label or "") ~= ""
-        node._packedDropdownSlots = {
-            {
-                name = "label",
-                hidden = not hasLabel,
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, node._label or ""))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(node._label or "")
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            },
-            {
-                name = "control",
-                sameLine = hasLabel,
-                draw = function(imgui, slot)
-                    local ctx = node._packedDropdownCtx or {}
-                    CaptureMeasuredWidth(slot, slot.width or (EstimateButtonWidth(imgui, ctx.preview or "") + 16))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    local opened = DrawWithValueColor(imgui, ctx.previewColor, function()
-                        return imgui.BeginCombo(node._imguiId, ctx.preview or "")
-                    end)
-                    ShowPreparedTooltip(imgui, node)
-                    if not opened then
-                        return false
-                    end
-
-                    local changed = false
-                    local pendingClear = false
-                    local pendingAlias = nil
-                    if imgui.Selectable(MakeSelectableId(ctx.noneLabel or "None", "none"), false) then
-                        pendingClear = true
-                    end
-
-                    for _, child in ipairs(ctx.children or {}) do
-                        local optionColor = node._valueColors and node._valueColors[child.alias] or nil
-                        local clicked = DrawWithValueColor(imgui, optionColor, function()
-                            return imgui.Selectable(
-                                MakeSelectableId(GetPackedChoiceLabel(node, child), child.alias),
-                                false)
-                        end)
-                        if clicked then
-                            pendingClear = false
-                            pendingAlias = child.alias
-                        end
-                    end
-
-                    imgui.EndCombo()
-                    if pendingAlias ~= nil then
-                        changed = ApplyPackedChoiceSelection(ctx.children, pendingAlias, ctx.selection) or changed
-                    elseif pendingClear then
-                        changed = ClearPackedChoiceSelection(ctx.children, ctx.selection) or changed
-                    end
-                    return changed
-                end,
-            },
-        }
     end,
     validateGeometry = function(node, prefix, geometry)
         local _ = node
@@ -1006,8 +1298,50 @@ WidgetTypes.packedDropdown = {
             ctx.previewColor = nil
         end
         node._packedDropdownCtx = ctx
-        node._packedDropdownSlots[2].width = availWidth
-        return DrawWidgetSlots(imgui, node, node._packedDropdownSlots, x, y)
+        local estimatedControlWidth = EstimateButtonWidth(imgui, ctx.preview or "") + 16
+        return DrawLabeledDropdownControl(
+            imgui,
+            node,
+            x,
+            y,
+            availWidth,
+            estimatedControlWidth,
+            function()
+                local opened = DrawWithValueColor(imgui, ctx.previewColor, function()
+                    return imgui.BeginCombo(node._imguiId, ctx.preview or "")
+                end)
+                if not opened then
+                    return false
+                end
+
+                local changed = false
+                local pendingClear = false
+                local pendingAlias = nil
+                if imgui.Selectable(MakeSelectableId(ctx.noneLabel or "None", "none"), false) then
+                    pendingClear = true
+                end
+
+                for _, child in ipairs(ctx.children or {}) do
+                    local optionColor = node._valueColors and node._valueColors[child.alias] or nil
+                    local clicked = DrawWithValueColor(imgui, optionColor, function()
+                        return imgui.Selectable(
+                            MakeSelectableId(GetPackedChoiceLabel(node, child), child.alias),
+                            false)
+                    end)
+                    if clicked then
+                        pendingClear = false
+                        pendingAlias = child.alias
+                    end
+                end
+
+                imgui.EndCombo()
+                if pendingAlias ~= nil then
+                    changed = ApplyPackedChoiceSelection(ctx.children, pendingAlias, ctx.selection) or changed
+                elseif pendingClear then
+                    changed = ClearPackedChoiceSelection(ctx.children, ctx.selection) or changed
+                end
+                return changed
+            end)
     end,
 }
 
@@ -1045,48 +1379,6 @@ WidgetTypes.radio = {
         end
         ValidateValueColorsTable(node, prefix, "radio")
         PrepareWidgetText(node, node.binds and node.binds.value)
-        local label = node._label or ""
-        local slots = {}
-        if label ~= "" then
-            table.insert(slots, {
-                name = "label",
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, label))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(label)
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            })
-        end
-        local optionValues = node.values or {}
-        local optionSlots = BuildIndexedSlots(#optionValues, function(index)
-            local candidate = optionValues[index]
-            return {
-                name = "option:" .. tostring(index),
-                sameLine = true,
-                draw = function(imgui, slot)
-                    local ctx = node._radioCtx or {}
-                    CaptureMeasuredWidth(slot, EstimateToggleWidth(imgui, ChoiceDisplay(node, candidate)))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    local optionColor = node._valueColors and node._valueColors[candidate] or nil
-                    local selected = DrawWithValueColor(imgui, optionColor, function()
-                        return imgui.RadioButton(ChoiceDisplay(node, candidate), ctx.current == candidate)
-                    end)
-                    if selected then
-                        if candidate ~= ctx.current then
-                            ctx.boundValue:set(candidate)
-                            return true
-                        end
-                    end
-                    return false
-                end,
-            }
-        end)
-        for _, slot in ipairs(optionSlots) do
-            table.insert(slots, slot)
-        end
-        node._radioSlots = slots
     end,
     validateGeometry = function(node, prefix, geometry)
         local _ = node
@@ -1098,36 +1390,54 @@ WidgetTypes.radio = {
         ctx.boundValue = bound.value
         ctx.current = NormalizeChoiceValue(node, bound.value:get())
         node._radioCtx = ctx
-        return DrawWidgetSlots(imgui, node, node._radioSlots, x, y)
+        local optionEntries = {}
+        for index, candidate in ipairs(node.values or {}) do
+            optionEntries[#optionEntries + 1] = {
+                slotName = "option:" .. tostring(index),
+                label = ChoiceDisplay(node, candidate),
+                color = node._valueColors and node._valueColors[candidate] or nil,
+                selected = ctx.current == candidate,
+                onSelect = function()
+                    if candidate ~= ctx.current then
+                        ctx.boundValue:set(candidate)
+                        ctx.current = candidate
+                        return true
+                    end
+                    return false
+                end,
+            }
+        end
+        return DrawOrderedEntries(
+            imgui,
+            BuildOrderedChoiceEntries(node, {
+                optionEntries = optionEntries,
+            }),
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui))
     end,
 }
 
 WidgetTypes.mappedRadio = {
     binds = { value = {} },
     slots = { "label" },
+    dynamicSlots = function(_, slotName)
+        local optionIndex = type(slotName) == "string" and tonumber(string.match(slotName, "^option:(%d+)$")) or nil
+        if optionIndex ~= nil and optionIndex >= 1 then
+            return true, nil
+        end
+        return false, nil
+    end,
     validate = function(node, prefix)
         if type(node.getOptions) ~= "function" then
             libWarn("%s: mappedRadio getOptions must be function", prefix)
         end
         PrepareWidgetText(node, node.binds and node.binds.value)
-        node._mappedRadioSlots = {}
-        local label = node._label or ""
-        if label ~= "" then
-            table.insert(node._mappedRadioSlots, {
-                name = "label",
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, label))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(label)
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            })
-        end
     end,
     validateGeometry = function(node, prefix, geometry)
         local _ = node
         WarnIgnoredSlotKeys(prefix, geometry, "label", { "width", "align" }, "mappedRadio")
+        WarnIgnoredDynamicSlotKeys(prefix, geometry, "^option:%d+$", { "width", "align" }, "mappedRadio")
     end,
     draw = function(imgui, node, bound, x, y, _, _, uiState)
         local ctx = node._mappedRadioCtx or {}
@@ -1139,73 +1449,69 @@ WidgetTypes.mappedRadio = {
             or {}
         node._mappedRadioCtx = ctx
 
-        local hasLabel = (node._label or "") ~= ""
-        local slots = {}
-        for _, slot in ipairs(node._mappedRadioSlots or {}) do
-            slots[#slots + 1] = slot
-        end
+        local optionEntries = {}
         for index, option in ipairs(ctx.options or {}) do
-            slots[#slots + 1] = {
-                name = "option:" .. tostring(index),
-                sameLine = hasLabel or index > 1,
-                draw = function(_, slot)
-                    local label
-                    local selected
-                    if type(option) == "table" then
-                        label = tostring(option.label or option.value or "")
-                        selected = option.selected == true
-                    else
-                        label = tostring(option or "")
-                        selected = ctx.current ~= nil and option == ctx.current or false
+            local label
+            local selected
+            if type(option) == "table" then
+                label = tostring(option.label or option.value or "")
+                selected = option.selected == true
+            else
+                label = tostring(option or "")
+                selected = ctx.current ~= nil and option == ctx.current or false
+            end
+            optionEntries[#optionEntries + 1] = {
+                slotName = "option:" .. tostring(index),
+                label = label,
+                selected = selected,
+                onSelect = function()
+                    if type(option) == "table" and type(option.onSelect) == "function" then
+                        return option.onSelect(option, ctx.boundValue, ctx.uiState, node) == true
                     end
 
-                    CaptureMeasuredWidth(slot, EstimateToggleWidth(imgui, label))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    if imgui.RadioButton(label, selected) then
-                        if type(option) == "table" and type(option.onSelect) == "function" then
-                            return option.onSelect(option, ctx.boundValue, ctx.uiState, node) == true
-                        end
-
-                        local nextValue = type(option) == "table" and option.value or option
-                        if nextValue ~= ctx.current then
-                            ctx.boundValue:set(nextValue)
-                            ctx.current = nextValue
-                            return true
-                        end
+                    local nextValue = type(option) == "table" and option.value or option
+                    if nextValue ~= ctx.current then
+                        ctx.boundValue:set(nextValue)
+                        ctx.current = nextValue
+                        return true
                     end
                     return false
                 end,
             }
         end
 
-        return DrawWidgetSlots(imgui, node, slots, x, y)
+        return DrawOrderedEntries(
+            imgui,
+            BuildOrderedChoiceEntries(node, {
+                optionEntries = optionEntries,
+            }),
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui))
     end,
 }
 
 WidgetTypes.packedRadio = {
     binds = { value = { storageType = "int", rootType = "packedInt" } },
     slots = { "label" },
+    dynamicSlots = function(_, slotName)
+        if slotName == "option:none" then
+            return true, nil
+        end
+        local optionIndex = type(slotName) == "string" and tonumber(string.match(slotName, "^option:(%d+)$")) or nil
+        if optionIndex ~= nil and optionIndex >= 1 then
+            return true, nil
+        end
+        return false, nil
+    end,
     validate = function(node, prefix)
         PrepareWidgetText(node, node.binds and node.binds.value)
         ValidatePackedChoiceWidget(node, prefix, "packedRadio")
-        node._packedRadioSlots = {}
-        local label = node._label or ""
-        if label ~= "" then
-            table.insert(node._packedRadioSlots, {
-                name = "label",
-                draw = function(imgui, slot)
-                    CaptureMeasuredWidth(slot, CalcTextWidth(imgui, label))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                    imgui.Text(label)
-                    ShowPreparedTooltip(imgui, node)
-                    return false
-                end,
-            })
-        end
     end,
     validateGeometry = function(node, prefix, geometry)
         local _ = node
         WarnIgnoredSlotKeys(prefix, geometry, "label", { "width", "align" }, "packedRadio")
+        WarnIgnoredDynamicSlotKeys(prefix, geometry, "^option:(none|%d+)$", { "width", "align" }, "packedRadio")
     end,
     draw = function(imgui, node, bound, x, y)
         local children = GetPackedChoiceChildren(node, bound, "packedRadio")
@@ -1214,45 +1520,36 @@ WidgetTypes.packedRadio = {
         end
 
         local selection = ClassifyPackedChoice(node, children)
-        local hasLabel = (node._label or "") ~= ""
-        local slots = {}
-        for _, slot in ipairs(node._packedRadioSlots or {}) do
-            slots[#slots + 1] = slot
-        end
-        slots[#slots + 1] = {
-            name = "option:none",
-            sameLine = hasLabel,
-            draw = function(_imgui, slot)
-                CaptureMeasuredWidth(slot, EstimateToggleWidth(_imgui, node.noneLabel or "None"))
-                CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(_imgui))
-                if _imgui.RadioButton(node.noneLabel or "None", selection.state == "none") then
+        local optionEntries = {
+            {
+                slotName = "option:none",
+                label = node.noneLabel or "None",
+                selected = selection.state == "none",
+                onSelect = function()
                     return ClearPackedChoiceSelection(children, selection) == true
-                end
-                return false
-            end,
+                end,
+            },
         }
         for index, child in ipairs(children) do
-            slots[#slots + 1] = {
-                name = "option:" .. tostring(index),
-                sameLine = true,
-                draw = function(_imgui, slot)
-                    CaptureMeasuredWidth(slot, EstimateToggleWidth(_imgui, GetPackedChoiceLabel(node, child)))
-                    CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(_imgui))
-                    local optionColor = node._valueColors and node._valueColors[child.alias] or nil
-                    local clicked = DrawWithValueColor(_imgui, optionColor, function()
-                        return _imgui.RadioButton(
-                            GetPackedChoiceLabel(node, child),
-                            selection.selectedChild and selection.selectedChild.alias == child.alias or false)
-                    end)
-                    if clicked then
-                        return ApplyPackedChoiceSelection(children, child.alias, selection) == true
-                    end
-                    return false
+            optionEntries[#optionEntries + 1] = {
+                slotName = "option:" .. tostring(index),
+                label = GetPackedChoiceLabel(node, child),
+                color = node._valueColors and node._valueColors[child.alias] or nil,
+                selected = selection.selectedChild and selection.selectedChild.alias == child.alias or false,
+                onSelect = function()
+                    return ApplyPackedChoiceSelection(children, child.alias, selection) == true
                 end,
             }
         end
 
-        return DrawWidgetSlots(imgui, node, slots, x, y)
+        return DrawOrderedEntries(
+            imgui,
+            BuildOrderedChoiceEntries(node, {
+                optionEntries = optionEntries,
+            }),
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui))
     end,
 }
 
@@ -1271,7 +1568,6 @@ local function ValidateStepper(node, prefix)
     node._step = math.floor(tonumber(node.step) or 1)
     node._fastStep = node.fastStep and math.floor(node.fastStep) or nil
     PrepareWidgetText(node, node.binds and node.binds.value)
-    node._slotTemplate = CreateStepperSlotTemplate(node)
 end
 
 WidgetTypes.stepper = {
@@ -1280,7 +1576,12 @@ WidgetTypes.stepper = {
     validate = ValidateStepper,
     draw = function(imgui, node, bound, x, y)
         PrepareStepperDrawContext(node, bound.value)
-        return DrawWidgetSlots(imgui, node, node._slotTemplate, x, y)
+        return DrawOrderedEntries(
+            imgui,
+            BuildOrderedStepperEntries(node),
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui))
     end,
 }
 
@@ -1309,48 +1610,8 @@ WidgetTypes.steppedRange = {
         }
         ValidateStepper(minStepper, prefix .. " min")
         ValidateStepper(maxStepper, prefix .. " max")
-        minStepper._slotTemplate = CreateStepperSlotTemplate(minStepper, {
-            drawLabel = true,
-            slotPrefix = "min.",
-            labelSlotName = "label",
-        })
-        maxStepper._slotTemplate = CreateStepperSlotTemplate(maxStepper, {
-            drawLabel = false,
-            slotPrefix = "max.",
-            firstSlotSameLine = true,
-        })
         node._minStepper = minStepper
         node._maxStepper = maxStepper
-        node._rangeSlots = {}
-        for _, slot in ipairs(minStepper._slotTemplate) do
-            table.insert(node._rangeSlots, slot)
-        end
-        table.insert(node._rangeSlots, {
-            name = "separator",
-            sameLine = true,
-            draw = function(imgui, slot)
-                local ctx = node._rangeCtx or {}
-                local separatorText = "to"
-                local separatorWidth = CalcTextWidth(imgui, separatorText)
-                CaptureMeasuredWidth(slot, slot.width or separatorWidth)
-                CaptureMeasuredHeight(slot, EstimateStructuredRowAdvanceY(imgui))
-                if slot.start == nil then
-                    local beforeMax = GetSlotGeometry(node, "max.decrement")
-                    if beforeMax and type(beforeMax.start) == "number" then
-                        local afterMin = GetCursorPosXSafe(imgui)
-                        local separatorX = afterMin
-                            + math.max(((ctx.rowStart + beforeMax.start) - afterMin - separatorWidth) / 2, 0)
-                        imgui.SetCursorPosX(separatorX)
-                    end
-                end
-                AlignSlotContent(imgui, slot, separatorWidth)
-                imgui.Text(separatorText)
-                return false
-            end,
-        })
-        for _, slot in ipairs(maxStepper._slotTemplate) do
-            table.insert(node._rangeSlots, slot)
-        end
     end,
     draw = function(imgui, node, bound, x, y)
         local minStepper = node._minStepper
@@ -1363,12 +1624,59 @@ WidgetTypes.steppedRange = {
         local minValue = bound.min:get()
         local maxValue = bound.max:get()
 
-        local rowStart = x
-        node._rangeCtx = node._rangeCtx or {}
-        node._rangeCtx.rowStart = rowStart
         PrepareStepperDrawContext(minStepper, bound.min, { min = minStepper.min, max = maxValue })
         PrepareStepperDrawContext(maxStepper, bound.max, { min = minValue, max = maxStepper.max })
-        return DrawWidgetSlots(imgui, node, node._rangeSlots, rowStart, y)
+        local entries = BuildOrderedStepperEntries(minStepper, {
+            drawLabel = true,
+            slotPrefix = "min.",
+            labelSlotName = "label",
+            geometryOwner = node,
+        })
+        local separatorGeometry = GetSlotGeometry(node, "separator")
+        entries[#entries + 1] = {
+            index = #entries + 1,
+            name = "separator",
+            line = (separatorGeometry and separatorGeometry.line) or 1,
+            start = separatorGeometry and separatorGeometry.start or nil,
+            width = separatorGeometry and separatorGeometry.width or nil,
+            align = separatorGeometry and separatorGeometry.align or nil,
+            sameLine = true,
+            estimateWidth = function(_imgui)
+                return CalcTextWidth(_imgui, "to")
+            end,
+            render = function(_imgui)
+                _imgui.Text("to")
+                return false, CalcTextWidth(_imgui, "to"), EstimateStructuredRowAdvanceY(_imgui)
+            end,
+        }
+        local maxEntries = BuildOrderedStepperEntries(maxStepper, {
+            drawLabel = false,
+            slotPrefix = "max.",
+            firstSlotSameLine = true,
+            geometryOwner = node,
+        })
+        for _, entry in ipairs(maxEntries) do
+            entry.index = #entries + 1
+            entries[#entries + 1] = entry
+        end
+        for index, entry in ipairs(entries) do
+            entry.index = index
+        end
+        table.sort(entries, function(left, right)
+            if left.line ~= right.line then
+                return left.line < right.line
+            end
+            if type(left.start) == "number" and type(right.start) == "number" and left.start ~= right.start then
+                return left.start < right.start
+            end
+            return left.index < right.index
+        end)
+        return DrawOrderedEntries(
+            imgui,
+            entries,
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui))
     end,
 }
 
@@ -1428,7 +1736,6 @@ WidgetTypes.packedCheckboxList = {
             return 0, 0, false
         end
 
-        local changed = false
         local filterBind = bound.filterText
         local filterText = filterBind and filterBind.get() or ""
         if type(filterText) ~= "string" then filterText = "" end
@@ -1439,14 +1746,8 @@ WidgetTypes.packedCheckboxList = {
         if filterMode ~= "checked" and filterMode ~= "unchecked" then
             filterMode = "all"
         end
-        local rowStart = x
-        local rowStartY = y
-        local currentLine = nil
         local visibleIndex = 0
-        local currentRowY = rowStartY
-        local currentRowAdvance = EstimateStructuredRowAdvanceY(imgui)
-        local maxRight = rowStart
-        local maxBottom = rowStartY
+        local optionEntries = {}
 
         for _, child in ipairs(children) do
             if child ~= nil then
@@ -1461,63 +1762,28 @@ WidgetTypes.packedCheckboxList = {
                 if visible and visibleIndex < node.slotCount then
                     visibleIndex = visibleIndex + 1
                     local slot = node._packedSlots[visibleIndex]
-                    local slotName = slot.name
-                    local geometry = GetSlotGeometry(node, slotName)
-                    local line = (geometry and geometry.line) or slot.line or 1
-                    local start = (geometry and geometry.start) or slot.start
-                    if currentLine ~= line then
-                        if currentLine ~= nil then
-                            currentRowY = currentRowY + currentRowAdvance
-                        end
-                        currentLine = line
-                        currentRowAdvance = EstimateStructuredRowAdvanceY(imgui)
-                    elseif slot.sameLine ~= false then
-                        imgui.SameLine()
-                    end
-
-                    local slotX = type(start) == "number" and (rowStart + start) or GetCursorPosXSafe(imgui)
-                    local childChanged, nextX, _, consumedAdvance = DrawStructuredAt(
-                        imgui,
-                        slotX,
-                        currentRowY,
-                        EstimateStructuredRowAdvanceY(imgui),
-                        function()
-                            imgui.PushID((slotName or "item") .. "_" .. tostring(visibleIndex))
-                            local color = node._valueColors and node._valueColors[child.alias] or nil
-                            local newVal, toggled = DrawWithValueColor(imgui, color, function()
-                                return imgui.Checkbox(label, val == true)
-                            end)
-                            if toggled then
-                                child.set(newVal)
-                            end
-                            imgui.PopID()
-                            return toggled
-                        end)
-                    if childChanged then
-                        changed = true
-                    end
-                    if consumedAdvance > currentRowAdvance then
-                        currentRowAdvance = consumedAdvance
-                    end
-                    if type(nextX) == "number" and nextX > maxRight then
-                        maxRight = nextX
-                    end
-                    local slotBottom = currentRowY + consumedAdvance
-                    if slotBottom > maxBottom then
-                        maxBottom = slotBottom
-                    end
-                    SetCursorPosSafe(imgui, nextX, currentRowY)
+                    optionEntries[#optionEntries + 1] = {
+                        slotName = slot.name,
+                        sameLine = slot.sameLine,
+                        line = slot.line,
+                        start = slot.start,
+                        label = label,
+                        current = val == true,
+                        color = node._valueColors and node._valueColors[child.alias] or nil,
+                        onToggle = function(nextValue)
+                            child.set(nextValue)
+                            return true
+                        end,
+                    }
                 end
             end
         end
 
-        local finalBottom = currentLine ~= nil and (currentRowY + currentRowAdvance) or rowStartY
-        if finalBottom > maxBottom then
-            maxBottom = finalBottom
-        end
-        local consumedWidth = math.max(maxRight - rowStart, 0)
-        local consumedHeight = math.max(maxBottom - rowStartY, 0)
-        SetCursorPosSafe(imgui, rowStart, rowStartY + consumedHeight)
-        return consumedWidth, consumedHeight, changed
+        return DrawOrderedEntries(
+            imgui,
+            BuildOrderedCheckboxEntries(node, optionEntries),
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui))
     end,
 }
