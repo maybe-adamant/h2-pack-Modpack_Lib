@@ -23,6 +23,8 @@ It owns:
   Storage, widget, and layout registry model, including built-in node types and custom type extension.
 - [SPECIAL_MODULE_PERFORMANCE.md](SPECIAL_MODULE_PERFORMANCE.md)
   Performance guidance for special-module draw paths and hot ImGui render loops.
+- [IMGUI_LUA_REFERENCE.md](IMGUI_LUA_REFERENCE.md)
+  Reference for the Dear ImGui Lua binding: cursor/layout APIs, size queries, style, item utilities, and behavioral gotchas.
 - [RELOAD_MODUTIL_CHALK_REFERENCE.md](RELOAD_MODUTIL_CHALK_REFERENCE.md)
   Stack-level reference for ReLoad, ModUtil, and Chalk behavior as it affects module authoring.
 - [CONTRIBUTING.md](CONTRIBUTING.md)

@@ -23,7 +23,7 @@ they do not allocate.
 This document assumes the live special-module contract:
 
 - `config`, `chalk`, and `reload` stay local to `main.lua`
-- `local dataDefaults = import("config.lua")` and `public.store = lib.createStore(config, public.definition, dataDefaults)` are the boundary where raw config stops
+- `local dataDefaults = import("config.lua")` and `public.store = lib.store.create(config, public.definition, dataDefaults)` are the boundary where raw config stops
 - `store = public.store` may be shared across module files
 - special-module draw functions receive `uiState`, not raw config
 - runtime/gameplay code reads persisted state through `store.read(...)`
@@ -153,8 +153,8 @@ Current hosted and standalone flows already:
 
 - render from `uiState.view`
 - apply edits through `uiState.set/update/toggle`
-- commit through `runUiStatePass(...)`
-- use transactional `commitUiState(...)` for `affectsRunData` modules
+- commit through `lib.special.runPass(...)`
+- use transactional `lib.special.commitState(...)` for `affectsRunData` modules
 
 That means modules should not do their own equivalents of:
 
@@ -389,25 +389,6 @@ This keeps hot code cleaner and avoids redundant debug branches.
 
 ---
 
-## Hash key caching
-
-`lib.validateSchema` caches `field._schemaKey` for each schema field. Hash and internal Lib debug/audit code
-should always use the cached key rather than recomputing via `table.concat`:
-
-```lua
--- In hash encode/decode (hash.lua uses this automatically):
-kv[special.modName .. "." .. (field._schemaKey or KeyStr(field.configKey))] = ...
-
-```
-
-For module options (`opt._hashKey`), discovery caches `def.id .. "." .. opt.configKey` at
-validation time. This is handled by the Framework — no action needed in the module itself.
-
-Both caches are pre-computed once when modules load. The hash encode/decode loops that run on
-user actions benefit from this, as does any per-frame debug path that was left ungated.
-
----
-
 ## vararg functions: avoid `{...}` table allocation
 
 If you write a helper that accepts varargs and iterates them:
@@ -428,7 +409,7 @@ local function myHelper(tbl, ...)
 end
 ```
 
-`lib.backup(tbl, ...)` uses this pattern — follow it for any module-level vararg helpers.
+`lib.mutation.createBackup()` returns a backup function that uses this pattern — follow it for any module-level vararg helpers.
 
 ---
 

@@ -15,7 +15,7 @@ Preferred usage is namespaced:
 - `lib.registry.*`
 
 Old flat `lib.*` names still exist, but only as compatibility aliases through:
-- [legacy_api.lua](/home/ayyatma/Projects/modding/modpack/run-director-modpack/adamant-ModpackLib/src/compat/legacy_api.lua)
+- [src/compat/legacy_api.lua](src/compat/legacy_api.lua)
 
 ## Core Model
 

@@ -36,6 +36,35 @@ These are the main source files this document is based on:
 - `Hell2Modding/src/hades2/hades_lua.hpp`
 - `Hell2Modding/src/lua_extensions/bindings/hades/data.cpp`
 
+## Layer Responsibilities
+
+The modpack stack has four layers. Each one owns a different part of the timing and bootstrap story.
+
+**Lib** — service library, no timing ownership
+- no `reload.auto_single()` in Lib files
+- no `modutil.once_loaded.game(...)` in Lib files
+- file load defines and exports API only
+
+**Framework** — service library, no timing ownership
+- no `reload.auto_single()` inside Framework
+- `Framework.init(...)` is a rerunnable builder called by the coordinator
+- Framework does not own game-readiness gating
+
+**Core coordinator** — owns timing and stable GUI registration
+- owns `modutil.once_loaded.game(...)` gating
+- registers stable GUI callbacks once, inside the game-readiness gate
+- calls `Framework.init(...)` on every `loader.load`
+
+**Submodules** — own their definition, store, and bootstrap logic
+- each submodule file is its own `reload.auto_single()` scope
+- `config`, `chalk`, and `reload` stay local to `main.lua`
+- `lib` and `store` may be shared across module files
+
+The coordinator is the only layer that should call `modutil.once_loaded.game(...)`.
+Lib and Framework are re-importable libraries — they should be boring.
+
+---
+
 ## Executive Summary
 
 Use this as the short version.
@@ -509,7 +538,7 @@ This is the best default unless you have a specific reason to deviate.
 For module files in the current stack:
 - keep `chalk`, `reload`, and raw `config` local to `main.lua`
 - `modutil`, `lib`, and `store` may be shared across the module's imported files
-- after `local dataDefaults = import("config.lua")`, `local config = chalk.auto("config.lua")`, and `public.store = lib.createStore(config, public.definition, dataDefaults)`, imported files should use `store.read(...)` / `store.write(...)`
+- after `local dataDefaults = import("config.lua")`, `local config = chalk.auto("config.lua")`, and `public.store = lib.store.create(config, public.definition, dataDefaults)`, imported files should use `store.read(...)` / `store.write(...)`
 
 ## Guidance For Future Agents
 
