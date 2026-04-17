@@ -17,11 +17,27 @@ function ui.verticalTabs(imgui, opts)
     local activeKey = opts.activeKey
 
     imgui.BeginChild(id .. "##nav", navWidth, height, true)
+    local currentGroup = nil
     for _, tab in ipairs(tabs) do
         local key = tab.key
         local label = tostring(tab.label or key or "")
+        local group = type(tab.group) == "string" and tab.group or nil
         local selected = key == activeKey
         local color = tab.color
+        if group ~= nil and group ~= currentGroup then
+            if currentGroup ~= nil and type(imgui.Separator) == "function" then
+                imgui.Separator()
+            end
+            if type(imgui.TextDisabled) == "function" then
+                imgui.TextDisabled(group)
+            else
+                imgui.Text(group)
+            end
+            if type(imgui.Separator) == "function" then
+                imgui.Separator()
+            end
+            currentGroup = group
+        end
         if type(color) == "table" and type(imgui.PushStyleColor) == "function" and type(imgui.PopStyleColor) == "function" then
             local textEnum = imgui.ImGuiCol and imgui.ImGuiCol.Text or 0
             imgui.PushStyleColor(textEnum, color[1], color[2], color[3], color[4] or 1)

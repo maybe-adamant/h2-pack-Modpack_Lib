@@ -156,6 +156,13 @@ function special.standaloneUI(def, store, uiState, opts)
         return opts.drawTab
     end
 
+    local function getBeforeDrawTab()
+        if type(opts.getBeforeDrawTab) == "function" then
+            return opts.getBeforeDrawTab()
+        end
+        return opts.beforeDrawTab
+    end
+
     local function getAfterDrawTab()
         if type(opts.getAfterDrawTab) == "function" then
             return opts.getAfterDrawTab()
@@ -206,11 +213,15 @@ function special.standaloneUI(def, store, uiState, opts)
             end
 
             local drawTab = getDrawTab()
+            local beforeDrawTab = getBeforeDrawTab()
             local afterDrawTab = getAfterDrawTab()
 
             if drawTab then
                 imgui.Separator()
                 imgui.Spacing()
+                if beforeDrawTab then
+                    beforeDrawTab(imgui, uiState)
+                end
                 drawTab(imgui, uiState)
                 if afterDrawTab then
                     afterDrawTab(imgui, uiState)

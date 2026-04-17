@@ -22,6 +22,16 @@ local function ShowTooltip(imgui, tooltip)
     end
 end
 
+local function SelectableCompat(imgui, label, selected)
+    local ok, result = pcall(function()
+        return imgui.Selectable(label, selected)
+    end)
+    if ok then
+        return result
+    end
+    return imgui.Selectable(label)
+end
+
 local function ResolvePackedChildren(uiState, alias, store)
     local aliasNode = uiState and uiState.getAliasNode and uiState.getAliasNode(alias) or nil
     local children = {}
@@ -112,7 +122,7 @@ function WidgetFns.dropdown(imgui, uiState, alias, opts)
         local changed = false
         for _, option in ipairs(optionEntries) do
             local clicked = DrawWithValueColor(imgui, option.color, function()
-                return imgui.Selectable(MakeSelectableId(option.label, option.uniqueId), option.value == current)
+                return SelectableCompat(imgui, MakeSelectableId(option.label, option.uniqueId), option.value == current)
             end)
             if clicked and option.value ~= current then
                 uiState.set(alias, option.value)
@@ -148,7 +158,7 @@ function WidgetFns.mappedDropdown(imgui, uiState, alias, opts)
             local optionColor = type(option) == "table" and option.color or nil
             local uniqueId = type(option) == "table" and (option.id or option.value or label) or option
             local clicked = DrawWithValueColor(imgui, optionColor, function()
-                return imgui.Selectable(MakeSelectableId(label, uniqueId), false)
+                return SelectableCompat(imgui, MakeSelectableId(label, uniqueId), false)
             end)
             if clicked then
                 if type(option) == "table" and type(option.onSelect) == "function" then
@@ -186,7 +196,7 @@ function WidgetFns.packedDropdown(imgui, uiState, alias, store, opts)
             return false
         end
         local changed = false
-        if imgui.Selectable(MakeSelectableId(tostring(opts.noneLabel or "None"), "none"), selection.state == "none") then
+        if SelectableCompat(imgui, MakeSelectableId(tostring(opts.noneLabel or "None"), "none"), selection.state == "none") then
             changed = ClearPackedChoiceSelection(children, selection) or changed
         end
         for _, child in ipairs(children) do
@@ -194,7 +204,7 @@ function WidgetFns.packedDropdown(imgui, uiState, alias, store, opts)
             local childColor = valueColors and valueColors[child.alias] or nil
             local clicked = DrawWithValueColor(imgui, childColor, function()
                 local isSelected = selection.selectedChild and selection.selectedChild.alias == child.alias
-                return imgui.Selectable(MakeSelectableId(childLabel, child.alias), isSelected)
+                return SelectableCompat(imgui, MakeSelectableId(childLabel, child.alias), isSelected)
             end)
             if clicked then
                 changed = ApplyPackedChoiceSelection(children, child.alias, selection) or changed
