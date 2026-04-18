@@ -11,7 +11,7 @@ function TestDefinitionContract:tearDown()
 end
 
 function TestDefinitionContract:testCreateStoreWarnsOnUnknownTopLevelDefinitionKey()
-    lib.createStore({}, {
+    lib.store.create({}, {
         id = "Example",
         name = "Example",
         storage = {
@@ -21,14 +21,16 @@ function TestDefinitionContract:testCreateStoreWarnsOnUnknownTopLevelDefinitionK
         affectRunData = true,
     })
 
-    lu.assertEquals(#Warnings, 1)
-    lu.assertStrContains(Warnings[1], "unknown definition key 'affectRunData'")
+    local joined = table.concat(Warnings, "\n")
+    lu.assertEquals(#Warnings, 2)
+    lu.assertStrContains(joined, "unknown definition key 'ui'")
+    lu.assertStrContains(joined, "unknown definition key 'affectRunData'")
 end
 
-function TestDefinitionContract:testValidateDefinitionWarnsOnSpecialFieldsThatFrameworkIgnores()
-    lib.validateDefinition({
+function TestDefinitionContract:testValidateDefinitionWarnsOnOldVocabularyKeysAsUnknown()
+    lib.store.create({}, {
         modpack = "test-pack",
-        special = true,
+        id = "ExampleSpecial",
         name = "Example Special",
         category = "Run Mods",
         subgroup = "General",
@@ -36,21 +38,22 @@ function TestDefinitionContract:testValidateDefinitionWarnsOnSpecialFieldsThatFr
         storage = {
             { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
         },
-    }, "Example Special")
+    })
 
+    local joined = table.concat(Warnings, "\n")
     lu.assertEquals(#Warnings, 3)
-    lu.assertStrContains(Warnings[1], "special modules ignore definition.category")
-    lu.assertStrContains(Warnings[2], "special modules ignore definition.subgroup")
-    lu.assertStrContains(Warnings[3], "special modules ignore definition.selectQuickUi")
+    lu.assertStrContains(joined, "unknown definition key 'category'")
+    lu.assertStrContains(joined, "unknown definition key 'subgroup'")
+    lu.assertStrContains(joined, "unknown definition key 'selectQuickUi'")
 end
 
 function TestDefinitionContract:testValidateDefinitionWarnsOnIncompleteLifecycle()
-    lib.validateDefinition({
+    lib.store.create({}, {
         id = "Example",
         name = "Example",
         affectsRunData = true,
         apply = function() end,
-    }, "Example")
+    })
 
     lu.assertEquals(#Warnings, 2)
     lu.assertStrContains(Warnings[1], "manual lifecycle requires both definition.apply and definition.revert")

@@ -20,13 +20,9 @@ local internal = AdamantModpackLib_Internal
 internal.libConfig    = libConfig
 internal.coordinators = _coordinators
 internal.logging      = internal.logging or {}
-internal.ui           = internal.ui or {}
-internal.registry     = internal.registry or {}
 
 import 'core/init.lua'
-import 'field_registry/init.lua'
-import 'special/init.lua'
-import 'compat/legacy_api.lua'
+import 'widgets/init.lua'
 
 -- Standalone framework debug toggle — hidden when Core is installed.
 ---@diagnostic disable-next-line: redundant-parameter

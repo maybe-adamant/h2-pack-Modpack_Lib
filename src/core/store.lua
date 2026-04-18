@@ -1,8 +1,82 @@
 local internal = AdamantModpackLib_Internal
 local chalk = rom.mods['SGG_Modding-Chalk']
-local ui = internal.ui
+local storageInternal = internal.storage
 public.store = public.store or {}
 local storeApi = public.store
+local mutation = public.mutation
+local StorageKey = storageInternal.StorageKey
+
+---@class ConfigBackendEntry
+---@field get fun(self: ConfigBackendEntry): any
+---@field set fun(self: ConfigBackendEntry, value: any)
+
+---@class ConfigBackend
+---@field rawConfig table
+---@field getEntry fun(configKey: ConfigPath): ConfigBackendEntry|nil
+---@field readValue fun(configKey: ConfigPath): any
+---@field writeValue fun(configKey: ConfigPath, value: any): boolean
+
+---@class UiState
+---@field view table<string, any>
+---@field get fun(alias: string): any, StorageNode|PackedBitNode|nil
+---@field set fun(alias: string, value: any)
+---@field reset fun(alias: string)
+---@field update fun(alias: string, updater: fun(current: any): any)
+---@field toggle fun(alias: string)
+---@field reloadFromConfig fun()
+---@field flushToConfig fun()
+---@field _captureDirtyConfigSnapshot fun(): table[]
+---@field _restoreConfigSnapshot fun(snapshot: table[]|nil)
+---@field isDirty fun(): boolean
+---@field getAliasNode fun(alias: string): StorageNode|PackedBitNode|nil
+---@field collectConfigMismatches fun(): string[]
+
+---@class ModuleDefinition
+---@field modpack string|nil
+---@field id string|nil
+---@field name string|nil
+---@field shortName string|nil
+---@field tooltip string|nil
+---@field default boolean|nil
+---@field affectsRunData boolean|nil
+---@field storage StorageSchema|nil
+---@field hashGroups table|nil
+---@field patchPlan fun(store: ManagedStore): table|nil
+---@field apply fun(store: ManagedStore)|nil
+---@field revert fun(store: ManagedStore)|nil
+
+---@class ManagedStore
+---@field storage StorageSchema|nil
+---@field uiState UiState
+---@field read fun(keyOrAlias: ConfigPath): any
+---@field write fun(keyOrAlias: ConfigPath, value: any)
+---@field readBits fun(configKey: ConfigPath, offset: number, width: number): number
+---@field writeBits fun(configKey: ConfigPath, offset: number, width: number, value: number)
+---@field getPackedAliases fun(alias: string): PackedBitNode[]
+
+local function readNestedPath(tbl, key)
+    if type(key) == "table" then
+        if #key == 0 then return nil, nil, nil end
+        for i = 1, #key - 1 do
+            tbl = tbl[key[i]]
+            if not tbl then return nil, nil, nil end
+        end
+        return tbl[key[#key]], tbl, key[#key]
+    end
+    return tbl[key], tbl, key
+end
+
+local function writeNestedPath(tbl, key, value)
+    if type(key) == "table" then
+        for i = 1, #key - 1 do
+            tbl[key[i]] = tbl[key[i]] or {}
+            tbl = tbl[key[i]]
+        end
+        tbl[key[#key]] = value
+        return
+    end
+    tbl[key] = value
+end
 
 local function ClonePersistedValue(value)
     if type(value) == "table" then
@@ -11,38 +85,30 @@ local function ClonePersistedValue(value)
     return value
 end
 
+---@param definition ModuleDefinition|StorageSchema|nil
+---@return StorageSchema|nil
 local function BuildManagedStorage(definition)
     if type(definition) ~= "table" then
         return nil
     end
 
-    if definition.stateSchema ~= nil or definition.options ~= nil then
-        error("legacy definition.stateSchema/options are no longer supported; use definition.storage and definition.ui", 2)
-    end
-
     if definition.storage ~= nil
-        or definition.ui ~= nil
-        or definition.special ~= nil
         or definition.id ~= nil
     then
-        local label = tostring(definition.name or definition.id or _PLUGIN.guid or "module")
         if type(definition.storage) == "table" then
             return definition.storage
-        end
-        if type(definition.ui) == "table" and #definition.ui > 0 then
-            internal.logging.warn("%s: module declares definition.ui but missing definition.storage; no uiState created", label)
         end
         return nil
     end
 
     if #definition > 0 then
-        error("createStore expects a module definition table; raw storage/ui arrays are not supported", 2)
+        error("createStore expects a module definition table; raw storage arrays are not supported", 2)
     end
     return nil
 end
 
 local function NormalizeStorageValue(node, value)
-    local storageType = node and node.type and public.registry.storage[node.type] or nil
+    local storageType = node and node.type and storageInternal.types[node.type] or nil
     if storageType and type(storageType.normalize) == "function" then
         return storageType.normalize(node, value)
     end
@@ -65,6 +131,8 @@ local function GetChalkSectionAndKey(configKey)
     return "config", tostring(configKey)
 end
 
+---@param config table
+---@return ConfigBackend|nil
 local function GetConfigBackend(config)
     if not chalk or type(chalk.original) ~= "function" then
         return nil
@@ -98,7 +166,7 @@ local function GetConfigBackend(config)
     backend = {}
 
     function backend.getEntry(configKey)
-        local pathKey = ui.StorageKey(configKey)
+        local pathKey = StorageKey(configKey)
         local cached = pathEntryCache[pathKey]
         if cached ~= nil then
             return cached or nil
@@ -137,6 +205,10 @@ local function GetConfigBackend(config)
     return backend
 end
 
+---@param modConfig table
+---@param configBackend ConfigBackend|nil
+---@param storage StorageSchema
+---@return UiState
 local function CreateUiState(modConfig, configBackend, storage)
     local persistedRootNodes = public.storage.getRoots(storage)
     local transientRootNodes = type(storage) == "table" and (rawget(storage, "_transientRootNodes") or {}) or {}
@@ -159,7 +231,7 @@ local function CreateUiState(modConfig, configBackend, storage)
         if entry then
             return entry:get()
         end
-        return public.accessors.readNestedPath(modConfig, root.configKey)
+        return readNestedPath(modConfig, root.configKey)
     end
 
     local function writeConfigValue(root, value)
@@ -168,12 +240,12 @@ local function CreateUiState(modConfig, configBackend, storage)
             entry:set(value)
             return
         end
-        public.accessors.writeNestedPath(modConfig, root.configKey, value)
+        writeNestedPath(modConfig, root.configKey, value)
     end
 
     local function syncPackedChildren(root, packedValue)
         for _, child in ipairs(root._bitAliases or {}) do
-            local rawValue = public.accessors.readPackedBits(packedValue, child.offset, child.width)
+            local rawValue = public.storage.readPackedBits(packedValue, child.offset, child.width)
             if child.type == "bool" then
                 rawValue = rawValue ~= 0
             end
@@ -292,7 +364,7 @@ local function CreateUiState(modConfig, configBackend, storage)
             end
             local normalized = NormalizeStorageValue(node, value)
             local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
-            local nextPacked = public.accessors.writePackedBits(packedValue, node.offset, node.width, encoded)
+            local nextPacked = public.storage.writePackedBits(packedValue, node.offset, node.width, encoded)
             writeRootToStaging(parent, nextPacked)
             staging[node.alias] = normalized
             return
@@ -367,7 +439,7 @@ local function CreateUiState(modConfig, configBackend, storage)
                 end
                 if root.type == "packedInt" then
                     for _, child in ipairs(root._bitAliases or {}) do
-                        local childValue = public.accessors.readPackedBits(persistedValue, child.offset, child.width)
+                        local childValue = public.storage.readPackedBits(persistedValue, child.offset, child.width)
                         if child.type == "bool" then
                             childValue = childValue ~= 0
                         end
@@ -383,11 +455,64 @@ local function CreateUiState(modConfig, configBackend, storage)
     }
 end
 
+local KnownDefinitionKeys = {
+    modpack = true, id = true, name = true, shortName = true,
+    tooltip = true, default = true, affectsRunData = true,
+    storage = true, hashGroups = true,
+    patchPlan = true, apply = true, revert = true,
+}
+
+local function IsLikelyDefinitionTable(def)
+    if type(def) ~= "table" then return false end
+    for key in pairs(def) do
+        if type(key) == "string" and KnownDefinitionKeys[key] then return true end
+    end
+    return false
+end
+
+local function ValidateDefinition(def, label)
+    if not IsLikelyDefinitionTable(def) then return end
+    local warn = internal.logging.warn
+    local prefix = tostring(label or def.name or def.id or _PLUGIN.guid or "module")
+
+    for key in pairs(def) do
+        if type(key) == "string" and not KnownDefinitionKeys[key] then
+            warn("%s: unknown definition key '%s'", prefix, tostring(key))
+        end
+    end
+
+    local function warnType(key, expected)
+        if def[key] ~= nil and type(def[key]) ~= expected then
+            warn("%s: definition.%s should be %s, got %s", prefix, key, expected, type(def[key]))
+        end
+    end
+
+    for _, key in ipairs({ "modpack", "id", "name", "shortName", "tooltip" }) do
+        warnType(key, "string")
+    end
+    warnType("affectsRunData", "boolean")
+    warnType("storage", "table")
+    warnType("hashGroups", "table")
+    for _, key in ipairs({ "patchPlan", "apply", "revert" }) do warnType(key, "function") end
+
+    if def.modpack ~= nil and def.id == nil then
+        warn("%s: coordinated modules should declare definition.id", prefix)
+    end
+
+    local inferred, info = mutation.inferShape(def)
+    if info.hasApply ~= info.hasRevert then
+        warn("%s: manual lifecycle requires both definition.apply and definition.revert", prefix)
+    end
+    if mutation.mutatesRunData(def) and not inferred then
+        warn("%s: affectsRunData=true but module exposes neither patchPlan nor apply/revert", prefix)
+    end
+end
+
 --- Creates a managed store wrapper around a module definition and its persisted config table.
 ---@param modConfig table Module config table used for persisted reads and writes.
----@param definition table Module definition declaring storage, ui, and mutation behavior.
+---@param definition ModuleDefinition Module definition declaring storage and mutation behavior.
 ---@param dataDefaults table|nil Optional defaults table used to seed missing storage defaults.
----@return table store Managed store instance for config, UI state, and mutation lifecycle.
+---@return ManagedStore store Managed store instance for config, UI state, and mutation lifecycle.
 function storeApi.create(modConfig, definition, dataDefaults)
     local backend = GetConfigBackend(modConfig)
     local store = {}
@@ -398,7 +523,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
             if node.lifetime ~= "transient" and node.default == nil then
                 local key = node.configKey or node.alias
                 if key ~= nil then
-                    node.default = public.accessors.readNestedPath(dataDefaults, key)
+                    node.default = readNestedPath(dataDefaults, key)
                 end
             end
         end
@@ -408,16 +533,11 @@ function storeApi.create(modConfig, definition, dataDefaults)
         or tostring(_PLUGIN.guid or "module")
 
     if type(definition) == "table" and internal.libConfig.DebugMode == true then
-        public.definition.validate(definition, label)
+        ValidateDefinition(definition, label)
     end
 
     if storage then
         public.storage.validate(storage, label)
-        if type(definition.ui) == "table" then
-            public.ui.validate(definition.ui, label, storage, definition.customTypes)
-        end
-    elseif type(definition) == "table" and type(definition.ui) == "table" and #definition.ui > 0 then
-        internal.logging.warn("%s: definition.ui declared without definition.storage; UI state disabled", label)
     end
 
     local aliasNodes = storage and public.storage.getAliases(storage) or {}
@@ -430,7 +550,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
             raw = backend.readValue(configKey)
         end
         if raw == nil then
-            raw = public.accessors.readNestedPath(modConfig, configKey)
+            raw = readNestedPath(modConfig, configKey)
         end
         return raw
     end
@@ -439,7 +559,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
         if backend and backend.writeValue(configKey, value) then
             return
         end
-        public.accessors.writeNestedPath(modConfig, configKey, value)
+        writeNestedPath(modConfig, configKey, value)
     end
 
     local function readRootNode(root)
@@ -469,7 +589,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
                     end
                 if node._isBitAlias then
                     local packed = readRootNode(node.parent)
-                    local rawValue = public.accessors.readPackedBits(packed, node.offset, node.width)
+                    local rawValue = public.storage.readPackedBits(packed, node.offset, node.width)
                     if node.type == "bool" then
                         rawValue = rawValue ~= 0
                     end
@@ -478,7 +598,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
                 return readRootNode(node)
             end
 
-            local root = rootByKey[ui.StorageKey(keyOrAlias)]
+            local root = rootByKey[StorageKey(keyOrAlias)]
             if root then
                 return readRootNode(root)
             end
@@ -504,7 +624,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
                     local currentPacked = readRootNode(parent)
                     local normalized = NormalizeStorageValue(node, value)
                     local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
-                    local nextPacked = public.accessors.writePackedBits(currentPacked, node.offset, node.width, encoded)
+                    local nextPacked = public.storage.writePackedBits(currentPacked, node.offset, node.width, encoded)
                     writeRootNode(parent, nextPacked)
                     return
                 end
@@ -512,7 +632,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
                 return
             end
 
-            local root = rootByKey[ui.StorageKey(keyOrAlias)]
+            local root = rootByKey[StorageKey(keyOrAlias)]
             if root then
                 writeRootNode(root, value)
                 return
@@ -527,7 +647,7 @@ function storeApi.create(modConfig, definition, dataDefaults)
     ---@param width number Number of bits to read.
     ---@return number value Decoded integer value for the requested bit range.
     function store.readBits(configKey, offset, width)
-        return public.accessors.readPackedBits(readRaw(configKey), offset, width)
+        return public.storage.readPackedBits(readRaw(configKey), offset, width)
     end
 
     --- Writes a packed bitfield directly into a persisted config key.
@@ -537,12 +657,30 @@ function storeApi.create(modConfig, definition, dataDefaults)
     ---@param value number Decoded integer value to encode into the requested bit range.
     function store.writeBits(configKey, offset, width, value)
         local current = math.floor(tonumber(readRaw(configKey)) or 0)
-        local nextPacked = public.accessors.writePackedBits(current, offset, width, value)
+        local nextPacked = public.storage.writePackedBits(current, offset, width, value)
         writeRaw(configKey, nextPacked)
     end
 
+    --- Returns packed child aliases for a packed root alias.
+    ---@param alias string Packed root alias.
+    ---@return table aliases Ordered list of `{ alias = string, label = string }` entries.
+    function store.getPackedAliases(alias)
+        local node = aliasNodes[alias]
+        if not node or node.type ~= "packedInt" then
+            return {}
+        end
+
+        local packedAliases = {}
+        for _, child in ipairs(node._bitAliases or {}) do
+            packedAliases[#packedAliases + 1] = {
+                alias = child.alias,
+                label = child.label or child.alias,
+            }
+        end
+        return packedAliases
+    end
+
     store.storage = storage
-    store.ui = type(definition) == "table" and definition.ui or nil
     store._persistedAliasNodes = persistedAliasNodes
 
     if storage then
