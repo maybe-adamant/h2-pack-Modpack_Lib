@@ -11,11 +11,14 @@ globals = {
     "reload", 
     "_PLUGIN", 
     "AdamantModpackLib_Internal", 
-    "GetConfigBackend"
+    "GetConfigBackend",
+    "ScreenData"
     }
 read_globals = { 
     "imgui", 
     "import_as_fallback", 
-    "import" 
+    "import",
+    "HUDScreen",
+    "ModifyTextBox"
     }
 exclude_files = { "src/vendor/**/*.lua", "src/**/*template*.lua" }

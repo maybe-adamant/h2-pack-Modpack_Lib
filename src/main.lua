@@ -17,14 +17,20 @@ public.config = libConfig
 local _coordinators = {}
 AdamantModpackLib_Internal = AdamantModpackLib_Internal or {}
 local internal = AdamantModpackLib_Internal
-internal.libConfig    = libConfig
+internal.libConfig = libConfig
 internal.coordinators = _coordinators
-internal.logging      = internal.logging or {}
+internal.logging = internal.logging or {}
 
 import 'core/init.lua'
 import 'widgets/init.lua'
 
--- Standalone framework debug toggle — hidden when Core is installed.
+modutil.once_loaded.game(function()
+    if internal.InitFallbackHud then
+        internal.InitFallbackHud()
+    end
+end)
+
+-- Standalone framework debug toggle - hidden when Core is installed.
 ---@diagnostic disable-next-line: redundant-parameter
 rom.gui.add_to_menu_bar(function()
     if next(_coordinators) ~= nil then return end
