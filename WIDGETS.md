@@ -299,7 +299,7 @@ Options:
 
 `selectionMode`:
 - `singleEnabled`
-- `singleRemaining`
+- `singleDisabled`
 
 Behavior:
 - resolves packed children from store storage metadata
@@ -312,7 +312,7 @@ Behavior:
 
 Use when:
 - a packed root represents one selected child out of many
-- or the inverse "all except one" style via `singleRemaining`
+- or the inverse "single false / all others true" style via `singleDisabled`
 
 Example:
 

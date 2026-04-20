@@ -10,6 +10,8 @@ local ClassifyPackedChoice = widgetHelpers.ClassifyPackedChoice
 local ApplyPackedChoiceSelection = widgetHelpers.ApplyPackedChoiceSelection
 local ClearPackedChoiceSelection = widgetHelpers.ClearPackedChoiceSelection
 local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
+local SameLineWithGap = widgetHelpers.SameLineWithGap
+local ResolveGap = widgetHelpers.ResolveGap
 
 ---@class RadioOpts
 ---@field label string|nil
@@ -61,10 +63,7 @@ local function DrawRadioOptions(imgui, radioId, labelText, optionEntries, option
     if normalizedPerLine < 1 then
         normalizedPerLine = #optionEntries
     end
-    local normalizedGap = tonumber(optionGap)
-    if normalizedGap == nil or normalizedGap < 0 then
-        normalizedGap = imgui.GetStyle().ItemSpacing.x
-    end
+    local normalizedGap = ResolveGap(imgui, optionGap)
 
     if labelText ~= "" then
         imgui.AlignTextToFramePadding()
@@ -74,10 +73,7 @@ local function DrawRadioOptions(imgui, radioId, labelText, optionEntries, option
     for index, option in ipairs(optionEntries) do
         local positionInLine = (index - 1) % normalizedPerLine
         if positionInLine ~= 0 then
-            imgui.SameLine()
-            if normalizedGap > 0 then
-                imgui.SetCursorPosX(imgui.GetCursorPosX() + normalizedGap)
-            end
+            SameLineWithGap(imgui, normalizedGap)
         end
 
         local clicked = DrawWithValueColor(imgui, option.color, function()

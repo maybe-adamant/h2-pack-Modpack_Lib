@@ -3,17 +3,12 @@ local WidgetFns = public.widgets
 
 local widgetHelpers = internal.widgetHelpers
 local NormalizeColor = widgetHelpers.NormalizeColor
+local ShowTooltip = widgetHelpers.ShowTooltip
 
 ---@class TextOpts
 ---@field color Color|nil
 ---@field tooltip string|nil
 ---@field alignToFramePadding boolean|nil
-
-local function ShowTooltip(imgui, tooltip)
-    if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
-        imgui.SetTooltip(tooltip)
-    end
-end
 
 ---@param imgui table
 ---@return nil

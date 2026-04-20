@@ -129,7 +129,7 @@ function public.standaloneHost(moduleHost, opts)
     assert(type(moduleHost) == "table", "standaloneHost: moduleHost is required")
 
     opts = opts or {}
-    local def = opts.definition or moduleHost.getDefinition()
+    local def = moduleHost.getDefinition()
     assert(type(def) == "table", "standaloneHost: moduleHost definition is required")
     local DEFAULT_WINDOW_WIDTH = 960
     local DEFAULT_WINDOW_HEIGHT = 720

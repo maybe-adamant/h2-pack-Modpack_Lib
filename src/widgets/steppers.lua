@@ -3,6 +3,9 @@ local storageInternal = internal.storage
 local WidgetFns = public.widgets
 
 local NormalizeInteger = storageInternal.NormalizeInteger
+local widgetHelpers = internal.widgetHelpers
+local SameLineWithGap = widgetHelpers.SameLineWithGap
+local ResolveGap = widgetHelpers.ResolveGap
 
 ---@class StepperOpts
 ---@field label string|nil
@@ -17,14 +20,6 @@ local NormalizeInteger = storageInternal.NormalizeInteger
 ---@class SteppedRangeOpts: StepperOpts
 ---@field defaultMax number|nil
 ---@field rangeGap number|nil
-
-local function ResolveGap(imgui, value)
-    local gap = tonumber(value)
-    if gap == nil or gap < 0 then
-        gap = imgui.GetStyle().ItemSpacing.x
-    end
-    return gap
-end
 
 local function MakeStepperConfig(opts)
     return {
@@ -107,16 +102,10 @@ local function DrawStepperControl(imgui, node)
         changed = CommitStepperValue(node, renderedValue - (node.step or 1)) or changed
     end
 
-    imgui.SameLine()
-    if gap > 0 then
-        imgui.SetCursorPosX(imgui.GetCursorPosX() + gap)
-    end
+    SameLineWithGap(imgui, gap)
     DrawCenteredValue(imgui, node)
 
-    imgui.SameLine()
-    if gap > 0 then
-        imgui.SetCursorPosX(imgui.GetCursorPosX() + gap)
-    end
+    SameLineWithGap(imgui, gap)
     if imgui.Button("+") and (maxValue == nil or renderedValue < maxValue) then
         changed = CommitStepperValue(node, renderedValue + (node.step or 1)) or changed
     end
@@ -142,11 +131,8 @@ function WidgetFns.stepper(imgui, session, alias, opts)
     if cfg.label ~= "" then
         imgui.AlignTextToFramePadding()
         imgui.Text(cfg.label)
-        imgui.SameLine()
         local gap = ResolveGap(imgui, cfg.buttonSpacing)
-        if gap > 0 then
-            imgui.SetCursorPosX(imgui.GetCursorPosX() + gap)
-        end
+        SameLineWithGap(imgui, gap)
     end
     changed = DrawStepperControl(imgui, cfg) or changed
     return changed
@@ -198,25 +184,16 @@ function WidgetFns.steppedRange(imgui, session, minAlias, maxAlias, opts)
     if type(opts.label) == "string" and opts.label ~= "" then
         imgui.AlignTextToFramePadding()
         imgui.Text(opts.label)
-        imgui.SameLine()
-        if rangeGap > 0 then
-            imgui.SetCursorPosX(imgui.GetCursorPosX() + rangeGap)
-        end
+        SameLineWithGap(imgui, rangeGap)
     end
 
     changed = DrawStepperControl(imgui, minStepper) or changed
 
-    imgui.SameLine()
-    if rangeGap > 0 then
-        imgui.SetCursorPosX(imgui.GetCursorPosX() + rangeGap)
-    end
+    SameLineWithGap(imgui, rangeGap)
     imgui.AlignTextToFramePadding()
     imgui.Text("to")
 
-    imgui.SameLine()
-    if rangeGap > 0 then
-        imgui.SetCursorPosX(imgui.GetCursorPosX() + rangeGap)
-    end
+    SameLineWithGap(imgui, rangeGap)
     changed = DrawStepperControl(imgui, maxStepper) or changed
 
     return changed

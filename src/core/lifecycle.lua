@@ -105,16 +105,17 @@ end
 
 --- Audits staged session values against persisted config values and reloads staged values from config.
 ---@param def ModuleDefinition Module definition used for diagnostic labels.
----@param store ManagedStore Managed module store associated with the definition.
+---@param _store ManagedStore Managed module store associated with the definition.
 ---@param session Session Session exposing config mismatch and reload helpers.
 ---@return table mismatches List of alias names whose staged values drifted from persisted config.
-function lifecycleApi.resyncSession(def, store, session)
+function lifecycleApi.resyncSession(def, _store, session)
+    local _ = _store
     local mismatches = session.auditMismatches()
     if #mismatches > 0 then
         local name = def and (def.name or def.id) or "module"
         print("[" .. tostring(name) .. "] Session drift detected; reloading staged values for: " .. table.concat(mismatches, ", "))
     end
-    session._reloadFromConfig(store)
+    session._reloadFromConfig()
     return mismatches
 end
 

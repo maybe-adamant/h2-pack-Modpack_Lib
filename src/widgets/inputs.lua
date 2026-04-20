@@ -1,4 +1,8 @@
 local WidgetFns = public.widgets
+local widgetHelpers = AdamantModpackLib_Internal.widgetHelpers
+local ShowTooltip = widgetHelpers.ShowTooltip
+local SameLineWithGap = widgetHelpers.SameLineWithGap
+local ResolveGap = widgetHelpers.ResolveGap
 
 ---@class InputTextOpts
 ---@field label string|nil
@@ -6,12 +10,6 @@ local WidgetFns = public.widgets
 ---@field maxLen number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
-
-local function ShowTooltip(imgui, tooltip)
-    if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
-        imgui.SetTooltip(tooltip)
-    end
-end
 
 ---@param imgui table
 ---@param session Session
@@ -24,19 +22,13 @@ function WidgetFns.inputText(imgui, session, alias, opts)
     local maxLen = math.max(math.floor(tonumber(opts.maxLen) or 256), 1)
     local label = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 120
-    local controlGap = tonumber(opts.controlGap)
-    if controlGap == nil or controlGap < 0 then
-        controlGap = imgui.GetStyle().ItemSpacing.x
-    end
+    local controlGap = ResolveGap(imgui, opts.controlGap)
 
     if label ~= "" then
         imgui.AlignTextToFramePadding()
         imgui.Text(label)
         ShowTooltip(imgui, opts.tooltip)
-        imgui.SameLine()
-        if controlGap > 0 then
-            imgui.SetCursorPosX(imgui.GetCursorPosX() + controlGap)
-        end
+        SameLineWithGap(imgui, controlGap)
     end
 
     if controlWidth > 0 then

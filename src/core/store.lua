@@ -1,7 +1,12 @@
 local internal = AdamantModpackLib_Internal
 local chalk = rom.mods['SGG_Modding-Chalk']
 local storageInternal = internal.storage
+local storeInternal = internal.store
 local StorageKey = storageInternal.StorageKey
+local readNestedPath = storeInternal.readNestedPath
+local writeNestedPath = storeInternal.writeNestedPath
+local ClonePersistedValue = storeInternal.ClonePersistedValue
+local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 
 ---@class ConfigBackendEntry
 ---@field get fun(self: ConfigBackendEntry): any
@@ -42,37 +47,6 @@ local StorageKey = storageInternal.StorageKey
 ---@class ManagedStore
 ---@field read fun(keyOrAlias: ConfigPath): any
 
-local function readNestedPath(tbl, key)
-    if type(key) == "table" then
-        if #key == 0 then return nil, nil, nil end
-        for i = 1, #key - 1 do
-            tbl = tbl[key[i]]
-            if not tbl then return nil, nil, nil end
-        end
-        return tbl[key[#key]], tbl, key[#key]
-    end
-    return tbl[key], tbl, key
-end
-
-local function writeNestedPath(tbl, key, value)
-    if type(key) == "table" then
-        for i = 1, #key - 1 do
-            tbl[key[i]] = tbl[key[i]] or {}
-            tbl = tbl[key[i]]
-        end
-        tbl[key[#key]] = value
-        return
-    end
-    tbl[key] = value
-end
-
-local function ClonePersistedValue(value)
-    if type(value) == "table" then
-        return rom.game.DeepCopyTable(value)
-    end
-    return value
-end
-
 ---@param definition ModuleDefinition|StorageSchema|nil
 ---@return StorageSchema|nil
 local function BuildManagedStorage(definition)
@@ -93,14 +67,6 @@ local function BuildManagedStorage(definition)
         error("createStore expects a module definition table; raw storage arrays are not supported", 2)
     end
     return nil
-end
-
-local function NormalizeStorageValue(node, value)
-    local storageType = node and node.type and storageInternal.types[node.type] or nil
-    if storageType and type(storageType.normalize) == "function" then
-        return storageType.normalize(node, value)
-    end
-    return value
 end
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })

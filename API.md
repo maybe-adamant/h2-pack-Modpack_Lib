@@ -4,6 +4,7 @@ This is the current public Lib surface.
 
 Preferred usage uses top-level module authoring helpers plus namespaces for specialized APIs:
 - `lib.createStore(...)`
+- `lib.createModuleHost(...)`
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
@@ -230,7 +231,7 @@ Reverts and reapplies the module's mutation lifecycle.
 
 ### `lib.lifecycle.applyOnLoad(def, store)`
 
-Syncs live mutation state to the module's effective enabled state on load. Framework calls this for coordinated modules; `lib.standaloneHost(...)` calls it for standalone modules.
+Syncs live mutation state to the module's effective enabled state on load. Framework calls this for coordinated modules; `lib.standaloneHost(moduleHost, ...)` calls it for standalone modules.
 
 ### `lib.lifecycle.resyncSession(def, store, session)`
 
@@ -247,7 +248,40 @@ Behavior:
 
 ## Standalone Host
 
-### `lib.standaloneHost(def, store, session, opts?)`
+### `lib.createModuleHost(opts)`
+
+Creates a behavior-only host object around:
+- `definition`
+- `store`
+- `session`
+- `drawTab`
+- optional `drawQuickContent`
+
+Returned surface:
+- `host.getDefinition()`
+- `host.read(aliasOrKey)`
+- `host.writeAndFlush(aliasOrKey, value)`
+- `host.stage(aliasOrKey, value)`
+- `host.flush()`
+- `host.reloadFromConfig()`
+- `host.resync()`
+- `host.commitIfDirty()`
+- `host.isEnabled()`
+- `host.setEnabled(enabled)`
+- `host.setDebugMode(enabled)`
+- `host.applyOnLoad()`
+- `host.applyMutation()`
+- `host.revertMutation()`
+- `host.hasDrawTab()`
+- `host.drawTab(imgui)`
+- `host.hasQuickContent()`
+- `host.drawQuickContent(imgui)`
+
+Use this as the bridge between module state and either:
+- Framework hosting
+- standalone window/menu hosting
+
+### `lib.standaloneHost(moduleHost, opts?)`
 
 Initializes standalone module hosting and returns window/menu-bar renderers.
 
@@ -258,18 +292,17 @@ Returned surface:
 - `runtime.addMenuBar()`
 
 Behavior:
+- reads definition/state through `moduleHost`
 - applies on-load lifecycle state for non-coordinated modules
 - suppresses the standalone window/menu when the module is coordinated
 - renders built-in controls for:
   - `Enabled`
   - `Debug Mode`
   - `Resync Session`
-- then calls the configured `DrawTab`
-- commits dirty `session` through `lib.lifecycle.commitSession(...)`
+- then calls `moduleHost.drawTab(...)`
+- commits dirty staged state through `moduleHost.commitIfDirty()`
 
-Current optional hooks in `opts`:
-- `getDrawTab`
-- `drawTab`
+Current optional settings in `opts`:
 - `windowTitle`
 
 ## Module Coordination Queries

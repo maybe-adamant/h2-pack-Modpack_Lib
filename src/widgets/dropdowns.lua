@@ -12,7 +12,9 @@ local ClassifyPackedChoice = widgetHelpers.ClassifyPackedChoice
 local ApplyPackedChoiceSelection = widgetHelpers.ApplyPackedChoiceSelection
 local ClearPackedChoiceSelection = widgetHelpers.ClearPackedChoiceSelection
 local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
-
+local ShowTooltip = widgetHelpers.ShowTooltip
+local SameLineWithGap = widgetHelpers.SameLineWithGap
+local ResolveGap = widgetHelpers.ResolveGap
 ---@class DropdownOpts
 ---@field label string|nil
 ---@field tooltip string|nil
@@ -49,12 +51,6 @@ local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
 ---@field noneLabel string|nil
 ---@field multipleLabel string|nil
 ---@field selectionMode PackedSelectionMode|nil
-
-local function ShowTooltip(imgui, tooltip)
-    if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
-        imgui.SetTooltip(tooltip)
-    end
-end
 
 local COMBO_FLAG_NO_PREVIEW = imguiHelpers.ImGuiComboFlags.NoPreview
 local IMGUI_COL_TEXT = imguiHelpers.ImGuiCol.Text
@@ -100,19 +96,13 @@ end
 local function DrawLabeledDropdownControl(imgui, opts, _, previewColor, drawControl)
     local labelText = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 0
-    local controlGap = tonumber(opts.controlGap)
-    if controlGap == nil or controlGap < 0 then
-        controlGap = imgui.GetStyle().ItemSpacing.x
-    end
+    local controlGap = ResolveGap(imgui, opts.controlGap)
 
     if labelText ~= "" then
         imgui.AlignTextToFramePadding()
         imgui.Text(labelText)
         ShowTooltip(imgui, opts.tooltip)
-        imgui.SameLine()
-        if controlGap > 0 then
-            imgui.SetCursorPosX(imgui.GetCursorPosX() + controlGap)
-        end
+        SameLineWithGap(imgui, controlGap)
     end
 
     if controlWidth > 0 then

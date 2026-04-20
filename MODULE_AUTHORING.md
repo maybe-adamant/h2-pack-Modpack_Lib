@@ -15,6 +15,7 @@ It does not document the old declarative `definition.ui` model.
 New module code should use:
 - `lib.config`
 - `lib.createStore(...)`
+- `lib.createModuleHost(...)`
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
@@ -243,6 +244,7 @@ Framework-hosted modules should export:
 - `public.definition`
 - `public.store`
 - `public.session`
+- `public.host`
 - `public.DrawTab`
 - optional `public.DrawQuickContent`
 
@@ -251,6 +253,7 @@ Framework discovery requires:
 - `definition.id`
 - `definition.name`
 - `definition.storage`
+- public `host`
 - public `store`
 - public `session`
 - public `DrawTab`
@@ -265,14 +268,15 @@ Framework behavior:
 For non-framework hosting, use:
 
 ```lua
-local runtime = lib.standaloneHost(
-    public.definition,
-    public.store,
-    public.session,
-    {
-        getDrawTab = function() return public.DrawTab end,
-    }
-)
+public.host = lib.createModuleHost({
+    definition = public.definition,
+    store = public.store,
+    session = public.session,
+    drawTab = public.DrawTab,
+    drawQuickContent = public.DrawQuickContent,
+})
+
+local runtime = lib.standaloneHost(public.host)
 
 rom.gui.add_imgui(runtime.renderWindow)
 rom.gui.add_to_menu_bar(runtime.addMenuBar)
@@ -285,7 +289,7 @@ Notes:
   - `Enabled`
   - `Debug Mode`
   - `Resync Session`
-- the host only calls `DrawTab`; it does not use `DrawQuickContent`
+- the standalone window only calls `DrawTab`; it does not use `DrawQuickContent`
 
 ## Complete Example
 
@@ -343,6 +347,7 @@ public.definition = {
 
 public.store = nil
 public.session = nil
+public.host = nil
 store = nil
 session = nil
 internal.standaloneUi = nil
@@ -390,19 +395,17 @@ local function init()
     public.store, public.session = lib.createStore(config, public.definition, dataDefaults)
     store = public.store
     session = public.session
-    internal.session = public.session
     registerHooks()
 
-    internal.standaloneUi = lib.standaloneHost(
-        public.definition,
-        store,
-        internal.session,
-        {
-            getDrawTab = function()
-                return public.DrawTab
-            end,
-        }
-    )
+    public.host = lib.createModuleHost({
+        definition = public.definition,
+        store = public.store,
+        session = public.session,
+        drawTab = public.DrawTab,
+        drawQuickContent = public.DrawQuickContent,
+    })
+
+    internal.standaloneUi = lib.standaloneHost(public.host)
 end
 
 local loader = reload.auto_single()
@@ -427,6 +430,7 @@ end)
 Notes on the example:
 - `config` and `reload` stay local to `main.lua`
 - `store` is recreated on every reload
+- `public.host` owns the behavior contract used by framework or standalone hosting
 - `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `DrawQuickContent` is optional
 - packed widgets need the module `store`

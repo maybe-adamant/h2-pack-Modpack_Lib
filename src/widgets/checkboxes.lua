@@ -5,6 +5,9 @@ local widgetHelpers = internal.widgetHelpers
 local DrawWithValueColor = widgetHelpers.DrawWithValueColor
 local NormalizeColor = widgetHelpers.NormalizeColor
 local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
+local ShowTooltip = widgetHelpers.ShowTooltip
+local SameLineWithGap = widgetHelpers.SameLineWithGap
+local ResolveGap = widgetHelpers.ResolveGap
 
 local DEFAULT_PACKED_SLOT_COUNT = 32
 
@@ -20,20 +23,6 @@ local DEFAULT_PACKED_SLOT_COUNT = 32
 ---@field slotCount number|nil
 ---@field optionsPerLine number|nil
 ---@field optionGap number|nil
-
-local function ShowTooltip(imgui, tooltip)
-    if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
-        imgui.SetTooltip(tooltip)
-    end
-end
-
-local function ResolveOptionGap(_, optionGap)
-    local normalizedGap = tonumber(optionGap)
-    if normalizedGap == nil or normalizedGap < 0 then
-        normalizedGap = 8
-    end
-    return normalizedGap
-end
 
 ---@param imgui table
 ---@param session Session
@@ -77,7 +66,7 @@ function WidgetFns.packedCheckboxList(imgui, session, alias, store, opts)
     if optionsPerLine < 1 then
         optionsPerLine = 1
     end
-    local optionGap = ResolveOptionGap(imgui, opts.optionGap)
+    local optionGap = ResolveGap(imgui, opts.optionGap, 8)
     local drawn = 0
     local changed = false
 
@@ -94,10 +83,7 @@ function WidgetFns.packedCheckboxList(imgui, session, alias, store, opts)
             drawn = drawn + 1
             local positionInLine = (drawn - 1) % optionsPerLine
             if positionInLine ~= 0 then
-                imgui.SameLine()
-                if optionGap > 0 then
-                    imgui.SetCursorPosX(imgui.GetCursorPosX() + optionGap)
-                end
+                SameLineWithGap(imgui, optionGap)
             end
             local color = valueColors and valueColors[child.alias] or nil
             local nextValue, clicked = DrawWithValueColor(imgui, color, function()

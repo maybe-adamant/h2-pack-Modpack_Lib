@@ -42,6 +42,7 @@ New module UI should be written directly in `DrawTab(ui, session)` and optional 
 
 Common top-level helpers:
 - `lib.createStore(...)`
+- `lib.createModuleHost(...)`
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`

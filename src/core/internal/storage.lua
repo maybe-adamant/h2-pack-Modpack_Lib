@@ -323,6 +323,14 @@ function storageInternal.valuesEqual(node, a, b)
     return DeepValueEqual(a, b)
 end
 
+function storageInternal.NormalizeStorageValue(node, value)
+    local storageType = node and node.type and storageInternal.types[node.type] or nil
+    if storageType and type(storageType.normalize) == "function" then
+        return storageType.normalize(node, value)
+    end
+    return value
+end
+
 --- Returns the prepared alias map for a validated storage schema.
 ---@param storage StorageSchema Validated storage schema.
 ---@return table<string, StorageNode|PackedBitNode> aliases Map from storage alias to prepared storage node.

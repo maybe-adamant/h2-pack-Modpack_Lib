@@ -1,12 +1,11 @@
 local internal = AdamantModpackLib_Internal
-local libWarn = internal.logging.warnIf
 local widgetHelpers = {}
 
 ---@alias Color number[]
 ---@alias ChoiceValue any
 ---@alias ChoiceDisplayValues table<any, string>
 ---@alias ValueColorMap table<any, Color>
----@alias PackedSelectionMode "singleEnabled"|"singleRemaining"
+---@alias PackedSelectionMode "singleEnabled"|"singleDisabled"
 
 function widgetHelpers.NormalizeColor(value)
     if type(value) ~= "table" then
@@ -54,26 +53,32 @@ function widgetHelpers.ChoiceDisplay(node, value)
     return tostring(value)
 end
 
-function widgetHelpers.ValidateValueColorsTable(node, prefix, widgetName)
-    node._valueColors = nil
-    if node.valueColors == nil then
-        return
+function widgetHelpers.ShowTooltip(imgui, tooltip)
+    if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
+        imgui.SetTooltip(tooltip)
     end
-    if type(node.valueColors) ~= "table" then
-        libWarn("%s: %s valueColors must be a table", prefix, widgetName)
-        return
-    end
+end
 
-    local normalizedColors = {}
-    for key, color in pairs(node.valueColors) do
-        local normalized = widgetHelpers.NormalizeColor(color)
-        if normalized == nil then
-            libWarn("%s: %s valueColors[%s] must be a 3- or 4-number color table", prefix, widgetName, tostring(key))
-        else
-            normalizedColors[key] = normalized
-        end
+function widgetHelpers.AdvanceInlineGap(imgui, gap)
+    if tonumber(gap) and gap > 0 then
+        imgui.SetCursorPosX(imgui.GetCursorPosX() + gap)
     end
-    node._valueColors = normalizedColors
+end
+
+function widgetHelpers.ResolveGap(imgui, value, fallback)
+    local gap = tonumber(value)
+    if gap == nil or gap < 0 then
+        if fallback ~= nil then
+            return fallback
+        end
+        return imgui.GetStyle().ItemSpacing.x
+    end
+    return gap
+end
+
+function widgetHelpers.SameLineWithGap(imgui, gap)
+    imgui.SameLine()
+    widgetHelpers.AdvanceInlineGap(imgui, gap)
 end
 
 function widgetHelpers.DrawWithValueColor(imgui, color, drawFn)
@@ -92,28 +97,12 @@ function widgetHelpers.MakeSelectableId(label, uniqueId)
     return tostring(label or "") .. "##" .. tostring(uniqueId or "")
 end
 
-function widgetHelpers.ValidateDisplayValuesTable(node, prefix, widgetName)
-    if node.displayValues ~= nil and type(node.displayValues) ~= "table" then
-        libWarn("%s: %s displayValues must be a table", prefix, widgetName)
-    end
-end
-
 function widgetHelpers.GetPackedChoiceMode(node)
     local mode = node.selectionMode
     if mode == nil or mode == "" then
         return "singleEnabled"
     end
     return mode
-end
-
-function widgetHelpers.GetPackedChoiceChildren(node, bound, widgetName)
-    local children = bound and bound.value and bound.value.children or nil
-    if type(children) ~= "table" then
-        libWarn("%s: no packed children for alias '%s'; bind to a packedInt root",
-            widgetName, tostring(node.binds and node.binds.value))
-        return nil
-    end
-    return children
 end
 
 function widgetHelpers.GetPackedChoiceLabel(node, child)
@@ -123,22 +112,19 @@ function widgetHelpers.GetPackedChoiceLabel(node, child)
     return tostring(child.label or child.alias or "")
 end
 
-function widgetHelpers.GetPackedChoiceNoneValue(mode)
-    if mode == "singleRemaining" then
-        return false
-    end
+function widgetHelpers.GetPackedChoiceNoneValue()
     return false
 end
 
 function widgetHelpers.IsPackedChoiceActive(mode, value)
-    if mode == "singleRemaining" then
+    if mode == "singleDisabled" then
         return value == false
     end
     return value == true
 end
 
 function widgetHelpers.GetPackedChoiceWriteValue(mode, isActive)
-    if mode == "singleRemaining" then
+    if mode == "singleDisabled" then
         if isActive then
             return false
         end
@@ -171,7 +157,7 @@ function widgetHelpers.ClassifyPackedChoice(node, children)
         state = "none"
     elseif activeCount == 1 then
         state = "single"
-    elseif mode == "singleRemaining" and activeCount == totalCount then
+    elseif mode == "singleDisabled" and activeCount == totalCount then
         state = "none"
     end
 
@@ -213,21 +199,6 @@ function widgetHelpers.ClearPackedChoiceSelection(children, selection)
         end
     end
     return changed
-end
-
-function widgetHelpers.ValidatePackedChoiceWidget(node, prefix, widgetName)
-    local mode = widgetHelpers.GetPackedChoiceMode(node)
-    if mode ~= "singleEnabled" and mode ~= "singleRemaining" then
-        libWarn("%s: %s selectionMode must be 'singleEnabled' or 'singleRemaining'", prefix, widgetName)
-    end
-    if node.noneLabel ~= nil and type(node.noneLabel) ~= "string" then
-        libWarn("%s: %s noneLabel must be a string", prefix, widgetName)
-    end
-    if node.multipleLabel ~= nil and type(node.multipleLabel) ~= "string" then
-        libWarn("%s: %s multipleLabel must be a string", prefix, widgetName)
-    end
-    widgetHelpers.ValidateDisplayValuesTable(node, prefix, widgetName)
-    widgetHelpers.ValidateValueColorsTable(node, prefix, widgetName)
 end
 
 function widgetHelpers.ResolvePackedChildren(session, alias, store)
