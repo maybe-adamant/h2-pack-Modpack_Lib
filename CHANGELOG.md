@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.0.0
+All notable changes to this project will be documented in this file.
+
+
+## [Unreleased]
 
 Initial public release of the adamant Modpack Lib surface.
 
@@ -28,3 +31,9 @@ Initial public release of the adamant Modpack Lib surface.
   - `public.host`
   - direct draw functions such as `DrawTab(imgui, session)`
 
+### Notes
+
+- this release documents the current immediate-mode Lib contract
+- legacy declarative UI authoring is not part of the supported public surface for this release
+
+[Unreleased]: https://github.com/h2-modpack/adamant-ModpackLib/compare/HEAD
