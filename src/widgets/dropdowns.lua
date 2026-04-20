@@ -52,7 +52,7 @@ local ResolveGap = widgetHelpers.ResolveGap
 ---@field multipleLabel string|nil
 ---@field selectionMode PackedSelectionMode|nil
 
-local COMBO_FLAG_NO_PREVIEW = imguiHelpers.ImGuiComboFlags.NoPreview
+local COMBO_FLAG_NONE = imguiHelpers.ImGuiComboFlags.None
 local IMGUI_COL_TEXT = imguiHelpers.ImGuiCol.Text
 
 local function DrawComboPreviewText(imgui, previewText, previewColor)
@@ -149,7 +149,7 @@ function WidgetFns.dropdown(imgui, session, alias, opts)
         local opened = imgui.BeginCombo(
             "##" .. tostring(alias),
             "",
-            COMBO_FLAG_NO_PREVIEW
+            COMBO_FLAG_NONE
         )
         DrawComboPreviewText(imgui, previewText, previewColor)
         if not opened then
@@ -190,7 +190,7 @@ function WidgetFns.mappedDropdown(imgui, session, alias, opts)
         local opened = imgui.BeginCombo(
             "##" .. tostring(alias),
             "",
-            COMBO_FLAG_NO_PREVIEW
+            COMBO_FLAG_NONE
         )
         DrawComboPreviewText(imgui, preview, previewColor)
         if not opened then
@@ -242,7 +242,7 @@ function WidgetFns.packedDropdown(imgui, session, alias, store, opts)
         local opened = imgui.BeginCombo(
             "##" .. tostring(alias),
             "",
-            COMBO_FLAG_NO_PREVIEW
+            COMBO_FLAG_NONE
         )
         DrawComboPreviewText(imgui, preview, previewColor)
         if not opened then

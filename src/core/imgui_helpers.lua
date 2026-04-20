@@ -2,31 +2,34 @@ public.imguiHelpers = public.imguiHelpers or {}
 
 local helpers = public.imguiHelpers
 
+-- The ReturnOfModding Lua binding exposes these flag values as raw integer
+-- parameters, but does not consistently expose the C++ enum tables at runtime.
 helpers.ImGuiComboFlags = {
-    NoPreview = _G.ImGuiComboFlags.NoPreview,
+    None = 0,
+    NoPreview = 64,
 }
 
 helpers.ImGuiCol = {
-    Text = _G.ImGuiCol.Text,
+    Text = 0,
 }
 
 helpers.ImGuiTreeNodeFlags = {
-    None = _G.ImGuiTreeNodeFlags.None,
-    Selected = _G.ImGuiTreeNodeFlags.Selected,
-    Framed = _G.ImGuiTreeNodeFlags.Framed,
-    AllowOverlap = _G.ImGuiTreeNodeFlags.AllowOverlap,
-    NoTreePushOnOpen = _G.ImGuiTreeNodeFlags.NoTreePushOnOpen,
-    NoAutoOpenOnLog = _G.ImGuiTreeNodeFlags.NoAutoOpenOnLog,
-    DefaultOpen = _G.ImGuiTreeNodeFlags.DefaultOpen,
-    OpenOnDoubleClick = _G.ImGuiTreeNodeFlags.OpenOnDoubleClick,
-    OpenOnArrow = _G.ImGuiTreeNodeFlags.OpenOnArrow,
-    Leaf = _G.ImGuiTreeNodeFlags.Leaf,
-    Bullet = _G.ImGuiTreeNodeFlags.Bullet,
-    FramePadding = _G.ImGuiTreeNodeFlags.FramePadding,
-    SpanAvailWidth = _G.ImGuiTreeNodeFlags.SpanAvailWidth,
-    SpanFullWidth = _G.ImGuiTreeNodeFlags.SpanFullWidth,
-    NavLeftJumpsBackHere = _G.ImGuiTreeNodeFlags.NavLeftJumpsBackHere,
-    CollapsingHeader = _G.ImGuiTreeNodeFlags.CollapsingHeader,
+    None = 0,
+    Selected = 1,
+    Framed = 2,
+    AllowOverlap = 4,
+    NoTreePushOnOpen = 8,
+    NoAutoOpenOnLog = 16,
+    DefaultOpen = 32,
+    OpenOnDoubleClick = 64,
+    OpenOnArrow = 128,
+    Leaf = 256,
+    Bullet = 512,
+    FramePadding = 1024,
+    SpanAvailWidth = 2048,
+    SpanFullWidth = 4096,
+    NavLeftJumpsBackHere = 8192,
+    CollapsingHeader = 26,
 }
 
 function helpers.unpackColor(color)
