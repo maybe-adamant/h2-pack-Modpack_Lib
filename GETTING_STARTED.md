@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide is for first-time module authors working against the current adamant Lib and Framework surface.
+This guide is for first-time module authors using adamant ModpackLib and ModpackFramework.
 
 It explains:
 - what the main concepts are
@@ -33,14 +33,14 @@ If you want the script workflow and setup details, read the
 
 ## The Core Model
 
-Under the current lean contract, a module is built from four main pieces:
+A module is built from four main pieces:
 
 - `definition`
   Declares module identity, storage, and optional mutation lifecycle hooks.
 - `store`
   Persisted runtime state. Read this from gameplay and hook code.
 - `session`
-  Staged UI state. Draw code edits this instead of writing persisted config directly.
+  Staged UI state. Draw code edits this and host/framework plumbing commits it later.
 - `host`
   The behavior object created by `lib.createModuleHost(...)`. Framework and standalone hosting both use this.
 
@@ -88,7 +88,7 @@ Owns static module data:
 - option lists
 - lookup tables derived after game import
 
-Use this file to declare what exists, not to render UI or mutate gameplay.
+Use this file to declare module data. UI belongs in `ui.lua`; gameplay behavior belongs in `logic.lua`.
 
 ### `src/ui.lua`
 
@@ -213,7 +213,7 @@ public.host = lib.createModuleHost({
 })
 ```
 
-This is the main module export under the current contract.
+This is the main module export.
 
 Framework uses it for coordinated modules. Standalone hosting uses it for module windows and menu items.
 
@@ -250,7 +250,7 @@ This is the part most new authors get wrong.
 
 Persisted storage roots live in Chalk config and are exposed through `store.read(...)`.
 
-The UI does not write them directly. It stages edits in `session`, then host/framework plumbing commits those edits later.
+The UI stages edits in `session`, then host/framework plumbing commits those edits later.
 
 ### Transient values
 
@@ -270,13 +270,9 @@ Packed widgets can edit packed child aliases, but storage still persists the pac
 
 ### Reading transient values from `store`
 
-Do not do this. Transient aliases are not readable through `store.read(...)`.
-
-Use `session.read(...)` or `session.view`.
+Transient aliases live in `session`. Read them with `session.read(...)` or `session.view`.
 
 ### Writing persisted config directly from draw code
-
-Do not use raw Chalk config or lifecycle toggles as general UI write helpers.
 
 Normal draw code should stage values through `session` and let the host/framework commit them.
 
@@ -284,9 +280,9 @@ Normal draw code should stage values through `session` and let the host/framewor
 
 Keep UI and game mutation separate. UI edits state; logic applies state.
 
-### Treating `definition.ui` as live surface
+### Putting UI outside draw functions
 
-That is legacy. New authoring is direct draw-function authoring through `internal.DrawTab(ui, session)`.
+Author UI through draw functions such as `internal.DrawTab(ui, session)`.
 
 ## LuaLS Setup
 

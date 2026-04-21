@@ -1,32 +1,43 @@
 # adamant-ModpackLib
 
-Shared runtime and immediate-mode UI toolkit for adamant modpack modules.
+Reusable runtime library for Hades II mod authors building modpacks, large
+configuration-heavy mods, or coordinated feature bundles.
 
-Lib now owns:
-- managed module storage and explicit `session`
-- storage typing and normalization
-- hash/profile encoding helpers
-- mutation lifecycle helpers for `affectsRunData` modules
-- standalone hosting helpers
-- immediate-mode widgets and navigation helpers
+ModpackLib provides the common plumbing that those projects usually need:
 
-Lib does not own a declarative UI tree/runtime anymore.
-New module UI should be written directly in module draw functions such as
-`internal.DrawTab(ui, session)` and optional `internal.DrawQuickContent(ui, session)`,
-then exposed through `public.host = lib.createModuleHost(...)`.
+- typed storage definitions for module settings
+- a staged UI `session` model for responsive ImGui config screens
+- a persistent `store` model for runtime hook logic
+- profile and hash helpers for saving, loading, and identifying settings
+- mutation helpers for modules that patch run data
+- module host helpers for coordinated and standalone usage
+- reusable ImGui widgets and navigation helpers
+
+The library is designed around immediate-mode UI. Module authors write normal
+draw functions, then expose them through a module host:
+
+```lua
+public.host = lib.createModuleHost({
+    definition = public.definition,
+    store = store,
+    session = session,
+    drawTab = internal.DrawTab,
+    drawQuickContent = internal.DrawQuickContent,
+})
+```
 
 ## Docs
 
 - [GETTING_STARTED.md](GETTING_STARTED.md)
-  First-time author guide: core concepts, file roles, and your first module.
+  Start here for the core concepts, file roles, and first module flow.
 - [API.md](API.md)
-  Reference for the current public namespaces and functions.
+  Public namespaces, functions, and data contracts.
 - [MODULE_AUTHORING.md](MODULE_AUTHORING.md)
-  How to author a module against the current immediate-mode contract.
+  Deeper authoring guide for storage, sessions, lifecycle, and hosting.
 - [WIDGETS.md](WIDGETS.md)
-  Widgets, nav, and storage notes for the live surface.
+  Widget and navigation helpers for module UIs.
 - [UI_PERFORMANCE.md](UI_PERFORMANCE.md)
-  Render-path guidance for immediate-mode module UIs.
+  Render-path guidance for responsive ImGui screens.
 - [IMGUI_LUA_REFERENCE.md](IMGUI_LUA_REFERENCE.md)
   Notes on the Dear ImGui Lua binding used by the stack.
 - [RELOAD_MODUTIL_CHALK_REFERENCE.md](RELOAD_MODUTIL_CHALK_REFERENCE.md)
@@ -34,7 +45,7 @@ then exposed through `public.host = lib.createModuleHost(...)`.
 - [CONTRIBUTING.md](CONTRIBUTING.md)
   Contributor expectations for changing the public Lib contract.
 
-## Current Public Namespaces
+## Public Surface
 
 - `lib.config`
 - `lib.logging`
@@ -51,6 +62,9 @@ Common top-level helpers:
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
 - `lib.resetStorageToDefaults(...)`
+
+Most authors start with `lib.createStore(...)` and `lib.createModuleHost(...)`.
+See [GETTING_STARTED.md](GETTING_STARTED.md) for the recommended project shape.
 
 ## Validation
 

@@ -2,7 +2,7 @@
 
 Reference for writing or auditing module draw code without re-deriving render-path performance analysis from scratch.
 
-This guidance applies to the current lean module contract:
+This guidance applies to module draw code:
 - `DrawTab(ui, session)`
 - optional `DrawQuickContent(ui, session)`
 - `lib.widgets.*`
@@ -10,22 +10,22 @@ This guidance applies to the current lean module contract:
 
 ## Why Draw Paths Need Care
 
-Current module UI is immediate-mode:
+Module UI is immediate-mode:
 - `DrawTab(ui, session)`
 - optional `DrawQuickContent(ui, session)`
 
 These run every imgui frame.
 Any unnecessary allocation or repeated C-boundary call inside those paths shows up immediately.
 
-## Current Contract Assumptions
+## Contract Assumptions
 
 This document assumes:
 - raw `config` stays local to `main.lua`
-- `public.store, public.session = lib.createStore(config, public.definition, dataDefaults)` is the storage/session boundary
+- `local store, session = lib.createStore(config, public.definition, dataDefaults)` is the storage/session boundary
 - draw code reads staged values from `session.view`
 - runtime/gameplay code reads persisted values through `store.read(...)`
 - debug toggles write persisted values through `lib.lifecycle.setDebugMode(store, ...)`
-- hash/profile plumbing stages arbitrary values through `session.write(...)` and flushes with `session.flushToConfig()`
+- hash/profile plumbing stages arbitrary values through `session.write(...)` and flushes with `session._flushToConfig()`
 - framework/host own `session` commit timing
 - standalone UI goes through `lib.standaloneHost(...)`
 
@@ -97,7 +97,7 @@ Prefer this over raw mutable staging values unless you have a concrete reason no
 
 Do not hand-roll flush logic inside draw code.
 
-Current ownership:
+Ownership:
 - framework-hosted modules commit after `DrawTab` / `DrawQuickContent`
 - standalone modules should go through `lib.standaloneHost(...)`
 
@@ -128,7 +128,7 @@ If a dropdown/radio option list only changes when one or two aliases change:
 
 Do not rebuild the same large option table multiple times in the same frame.
 
-## Good Current Patterns
+## Good Patterns
 
 - use `lib.widgets.*` for common controls
 - use `lib.nav.verticalTabs(...)` for simple vertical nav rails
@@ -137,7 +137,7 @@ Do not rebuild the same large option table multiple times in the same frame.
 - compute derived view text only when it actually improves readability
 - keep packed-widget filtering data outside the innermost draw loop when practical
 
-## Bad Current Patterns
+## Bad Patterns
 
 - rebuilding unnecessary tables in hot loops
 - caching abstractions that only survive one frame

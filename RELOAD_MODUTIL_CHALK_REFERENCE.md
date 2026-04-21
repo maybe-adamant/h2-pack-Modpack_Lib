@@ -435,7 +435,7 @@ Good pattern:
 - recreate `store, session = lib.createStore(config, definition, dataDefaults)`
 - recreate module/framework derived state
 
-Do not try to preserve old wrapper objects just because they already exist.
+Recreate wrapper objects during reload so they point at the rebuilt module state.
 
 ## 7. Do not rely on ModUtil hook dedupe
 

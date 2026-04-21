@@ -1,13 +1,11 @@
 # Widgets, Nav, Session, and Hashing
 
-Current live coverage:
+This document covers:
 - storage typing and packing
 - session helpers
 - hash/profile packing helpers
 - immediate-mode widgets
 - navigation helpers
-
-It does not describe a declarative UI tree/runtime anymore.
 
 ## Storage Schema
 
@@ -19,7 +17,7 @@ Built-in root types:
 - `string`
 - `packedInt`
 
-There is no public `lib.storage` namespace. Storage metadata helpers used for hash/profile work live under `lib.hashing`.
+Storage metadata helpers used for hash/profile work live under `lib.hashing`.
 
 ## Reset Helpers
 
@@ -43,7 +41,7 @@ Supported helpers:
 
 Widgets live under `lib.widgets`.
 
-Current built-ins:
+Built-ins:
 - `separator`
 - `text`
 - `button`
@@ -60,12 +58,7 @@ Current built-ins:
 - `checkbox`
 - `packedCheckboxList`
 
-These are direct immediate-mode helpers.
-
-They are not:
-- prepared nodes
-- registry entries
-- declarative widget descriptors
+These are direct immediate-mode helpers. Call them inside module draw functions to render one control at a time.
 
 Typical call shape:
 
@@ -99,7 +92,7 @@ Some bind to packed roots and therefore also need `store`:
 - `packedRadio`
 - `packedCheckboxList`
 
-The `store` argument is used only for packed-root metadata lookup. Packed widgets do not require or expose store-object underscore helpers.
+The `store` argument is used for packed-root metadata lookup.
 
 One binds to two aliases:
 - `steppedRange(minAlias, maxAlias, ...)`
@@ -304,7 +297,6 @@ Options:
 Behavior:
 - resolves packed children from store storage metadata
 - packed widgets require the `store` argument so child metadata stays out of `session`
-- no packed child metadata is exposed through the managed store object itself
 - classifies current packed state as:
   - none
   - single
@@ -461,7 +453,6 @@ Options:
 
 Behavior:
 - resolves packed children from store storage metadata
-- no packed child metadata is exposed through the managed store object itself
 - text filter is case-insensitive substring match on option labels
 - items are laid out inline according to `optionsPerLine`
 - rendering stops after `slotCount` matches
@@ -501,11 +492,11 @@ Use:
 
 Navigation helpers live under `lib.nav`.
 
-Current surface:
+Surface:
 - `lib.nav.verticalTabs(ui, opts)`
 - `lib.nav.isVisible(session, condition)`
 
-`verticalTabs(...)` is the current replacement for the old vertical tab layout runtime.
+`verticalTabs(...)` renders a simple immediate-mode vertical tab rail.
 
 Example:
 
@@ -521,17 +512,6 @@ activeKey = lib.nav.verticalTabs(ui, {
 })
 ```
 
-## What Was Removed
+## Scope
 
-The old field-registry/declarative UI surface is no longer the live model.
-
-Do not write new code around:
-- widget registries
-- layout registries
-- `prepareUiNode(...)`
-- `prepareWidgetNode(...)`
-- `drawTree(...)`
-- quick-node collection
-- custom widget/layout registry extension
-
-If a module still carries that shape, it is historical compatibility residue, not the preferred contract.
+Widgets are direct immediate-mode helpers. Each call draws one control and returns its value and change flag. Composition is ordinary Lua control flow: authors call the helpers they want, in the order they want, inside their own `drawTab` function.

@@ -1,18 +1,14 @@
 # Module Authoring
 
-This guide describes the current supported module contract in Lib.
-
-It is written for the live surface:
+This guide describes the supported module contract in Lib:
 - namespaced public API
 - managed storage and explicit `session`
 - immediate-mode widgets
 - direct draw-function authoring through `internal.DrawTab(ui, session)`
 
-It does not document the old declarative `definition.ui` model.
+## Lib Surface
 
-## Preferred Lib Surface
-
-New module code should use:
+Module code should use:
 - `lib.config`
 - `lib.createStore(...)`
 - `lib.createModuleHost(...)`
@@ -26,7 +22,7 @@ New module code should use:
 - `lib.widgets.*`
 - `lib.nav.*`
 
-Old flat compatibility aliases should not be used for new code.
+Use the namespaced API directly.
 
 ## Basic Module Shape
 
@@ -100,15 +96,7 @@ Meaningful module definition fields:
 - `apply`
 - `revert`
 
-Ignored under the current lean contract:
-- `category`
-- `subgroup`
-- `placement`
-- `ui`
-- `customTypes`
-- `selectQuickUi`
-
-If you keep those fields around, Lib will warn in debug mode.
+In debug mode, Lib warns on any definition key outside the list above so typos surface early.
 
 Coordinated modules should declare:
 - `modpack`
@@ -116,7 +104,7 @@ Coordinated modules should declare:
 - `name`
 - `storage`
 
-Under the current framework contract:
+Framework behavior:
 - every coordinated module gets its own tab
 - `shortName` is used as the shorter tab label when present
 
@@ -141,19 +129,13 @@ Hash/profile plumbing should stage arbitrary decoded aliases through:
 - `session.write(alias, value)`
 - `session._flushToConfig()`
 
-Do not write schema-backed persisted values directly from draw code through raw config or `lib.lifecycle.*` helpers.
-
-Normal draw code should not need `_flushToConfig()`. Under the host contract, draw callbacks receive an author session with only:
+Draw code stages schema-backed values through `session`. Under the host contract, draw callbacks receive an author session with:
 - `session.view`
 - `session.read(alias)`
 - `session.write(alias, value)`
 - `session.reset(alias)`
 
-Also avoid:
-- `store.read(...)` for transient aliases
-- direct persisted writes from draw code
-
-Use `session` for those instead.
+Use `store.read(...)` from runtime/gameplay code for persisted values. Use `session` for transient aliases and UI edits.
 
 ## Storage Authoring
 
@@ -175,7 +157,7 @@ Rules:
 - persisted roots use `configKey`
 - transient roots use `lifetime = "transient"`
 - `configKey` and `lifetime` are mutually exclusive
-- transient roots do not hash
+- transient roots are excluded from hash/profile serialization
 
 ### Packed storage
 
@@ -193,11 +175,11 @@ Use `packedInt` when you need alias-addressable packed children:
 }
 ```
 
-If the module only treats the packed value as a raw mask, keep it as a plain root `int` instead.
+If the module treats the packed value as a raw mask, a plain root `int` is enough.
 
 ## Immediate-Mode UI
 
-Current module UI should be authored directly in Lua draw functions.
+Module UI is authored directly in Lua draw functions.
 
 Typical patterns:
 - `lib.widgets.checkbox(...)`
@@ -213,16 +195,15 @@ Use raw ImGui layout as needed:
 - `ui.BeginTabBar(...)`
 - `ui.BeginChild(...)`
 
-Lib widgets are helpers, not a full layout runtime.
+Lib widgets cover common controls. Use raw ImGui for custom structure and layout.
 
 ## Quick Content
 
-Framework Quick Setup now reads only:
+Framework Quick Setup reads:
 - coordinator `renderQuickSetup(ctx)`
 - module `DrawQuickContent(ui, session)`
 
-There is no quick-node discovery from `definition.ui`.
-Standalone host does not consume `DrawQuickContent`.
+`DrawQuickContent` is a Framework Quick Setup hook.
 
 ## Mutation Lifecycle
 
@@ -294,7 +275,7 @@ Notes:
   - `Enabled`
   - `Debug Mode`
   - `Resync Session`
-- the standalone window only calls `DrawTab`; it does not use `DrawQuickContent`
+- the standalone window renders `DrawTab`; Framework Quick Setup renders `DrawQuickContent`
 
 ## Complete Example
 
@@ -337,7 +318,7 @@ public.definition = {
     id = "ExampleModule",
     name = "Example Module",
     shortName = "Example",
-    tooltip = "Demonstrates the current Lib module contract.",
+    tooltip = "Demonstrates the Lib module contract.",
     default = dataDefaults.Enabled,
     affectsRunData = false,
     storage = {
@@ -438,8 +419,5 @@ Notes on the example:
 - `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `DrawQuickContent` is optional
 - packed widgets need the module `store`
-
-
-
 
 

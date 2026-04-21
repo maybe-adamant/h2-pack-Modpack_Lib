@@ -1,6 +1,6 @@
 # adamant-ModpackLib API
 
-This is the current public Lib surface.
+This is the public Lib surface.
 
 Preferred usage uses top-level module authoring helpers plus namespaces for specialized APIs:
 - `lib.createStore(...)`
@@ -20,7 +20,7 @@ The top-level `lib.config` export also exposes Lib's Chalk config.
 
 ## Core Model
 
-Modules now declare:
+Modules declare:
 - `definition.modpack`
 - `definition.id`
 - `definition.name`
@@ -39,18 +39,13 @@ That host owns:
 - optional `drawQuickContent`
 - built-in lifecycle/state helpers for Framework and standalone hosting
 
-There is no supported new authoring based on:
-- `definition.ui`
-- `definition.customTypes`
-- `selectQuickUi`
-
-Those fields are ignored under the current lean contract and only exist as stale compatibility surface.
+Module behavior is hosted through `public.host`.
 
 ## `lib.config`
 
 Live Lib config loaded from Chalk.
 
-Current meaningful field:
+Meaningful field:
 - `lib.config.DebugMode`
 
 ## Store And Session
@@ -75,14 +70,14 @@ local store, session = lib.createStore(config, public.definition, dataDefaults)
 Returned surface:
 - `store.read(keyOrAlias)`
 
-Store instances do not expose write helpers directly. Persisted writes happen through semantic helpers or session flushes:
+Persisted writes happen through semantic helpers or session flushes:
 
 ```lua
 lib.lifecycle.setEnabled(def, store, enabled)
 lib.lifecycle.setDebugMode(store, enabled)
 ```
 
-Use `setEnabled` for module enabled toggles. It persists the `Enabled` flag and applies/reverts mutation state as needed. Use `setDebugMode` for module debug toggles. Use `session.write(...)` plus `session._flushToConfig()` only from module/host plumbing when you intentionally need an immediate persisted write such as profile/hash import. Ordinary draw-code edits should stay staged and commit through the host/framework flow.
+Use `setEnabled` for module enabled toggles. It persists the `Enabled` flag and applies/reverts mutation state as needed. Use `setDebugMode` for module debug toggles. Module/host plumbing can use `session.write(...)` plus `session._flushToConfig()` for immediate persisted writes such as profile/hash import. Ordinary draw-code edits stay staged and commit through the host/framework flow.
 
 Rules:
 - widgets and draw code should usually read staged values from `session.view`
@@ -90,8 +85,8 @@ Rules:
 - enabled toggles should write through `lib.lifecycle.setEnabled(def, store, enabled)`
 - debug toggles should write through `lib.lifecycle.setDebugMode(store, enabled)`
 - profile/hash plumbing should stage values through `session.write(...)` and flush them through `session._flushToConfig()`
-- transient aliases are not readable through `store.read(...)`
-- transient aliases are not persisted by `session._flushToConfig()`
+- transient aliases are read from `session`
+- transient aliases stay out of persisted config
 
 ### `session`
 
@@ -105,7 +100,7 @@ Useful surface:
 - `session.isDirty()`
 - `session.auditMismatches()`
 
-Host/framework plumbing only also uses:
+Host/framework plumbing methods:
 - `session._flushToConfig()`
 - `session._reloadFromConfig()`
 - `session._captureDirtyConfigSnapshot()`
@@ -277,7 +272,7 @@ Creates a behavior-only host object around:
 - `session.write(alias, value)`
 - `session.reset(alias)`
 
-They do not receive commit/reload plumbing helpers.
+Commit and reload behavior stays on the host object.
 
 Returned surface:
 - `host.getDefinition()`
@@ -324,7 +319,7 @@ Behavior:
 - then calls `moduleHost.drawTab(...)`
 - commits dirty staged state through `moduleHost.commitIfDirty()`
 
-Current optional settings in `opts`:
+Optional settings in `opts`:
 - `windowTitle`
 
 ## Module Coordination Queries
@@ -355,7 +350,7 @@ Conditionally emits a module-scoped log line.
 
 Immediate-mode widget helpers.
 
-Current built-ins:
+Built-ins:
 - `lib.widgets.separator(imgui)`
 - `lib.widgets.text(imgui, text, opts?)`
 - `lib.widgets.button(imgui, label, opts?)`
@@ -372,7 +367,7 @@ Current built-ins:
 - `lib.widgets.checkbox(imgui, session, alias, opts?)`
 - `lib.widgets.packedCheckboxList(imgui, session, alias, store, opts?)`
 
-These are direct immediate-mode helpers, not declarative node renderers.
+These are direct immediate-mode helpers.
 
 ## `lib.nav`
 
