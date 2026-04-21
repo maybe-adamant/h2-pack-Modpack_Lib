@@ -8,12 +8,6 @@ local REGISTRY_KEY = "__adamantHooks"
 
 hooks.Refresh = nil
 
-local function getPathApi()
-    local pathApi = modutil and modutil.mod and modutil.mod.Path
-    assert(pathApi, "lib.hooks: ModUtil Path API is not available")
-    return pathApi
-end
-
 local function getRegistry(owner)
     assert(type(owner) == "table", "lib.hooks: owner must be a persistent table")
 
@@ -58,7 +52,80 @@ local function getSlot(owner, kind, path, key)
     if registry.refreshing then
         state.generation = registry.generation
     end
-    return state
+    return state, registry
+end
+
+local function clearPendingState(state)
+    state.pendingHandler = nil
+    state.pendingReplacement = nil
+    state.pendingContext = nil
+end
+
+local function applyWrapState(state)
+    if state.pendingHandler ~= nil then
+        state.handler = state.pendingHandler
+    end
+
+    if not state.registered then
+        modutil.mod.Path.Wrap(state.path, function(base, ...)
+            local current = state.handler
+            if current then
+                return current(base, ...)
+            end
+            return base(...)
+        end)
+        state.registered = true
+    end
+end
+
+local function applyOverrideState(state)
+    local replacement = state.pendingReplacement
+
+    state.replacement = replacement
+
+    if type(replacement) == "function" then
+        if not state.registered then
+            modutil.mod.Path.Override(state.path, function(...)
+                local current = state.replacement
+                assert(type(current) == "function", "lib.hooks.Override: function replacement is inactive")
+                return current(...)
+            end)
+            state.registered = true
+            state.usesDispatcher = true
+        elseif not state.usesDispatcher then
+            modutil.mod.Path.Restore(state.path)
+            modutil.mod.Path.Override(state.path, function(...)
+                local current = state.replacement
+                assert(type(current) == "function", "lib.hooks.Override: function replacement is inactive")
+                return current(...)
+            end)
+            state.usesDispatcher = true
+        end
+        return
+    end
+
+    if state.registered then
+        modutil.mod.Path.Restore(state.path)
+    end
+    modutil.mod.Path.Override(state.path, replacement)
+    state.registered = true
+    state.usesDispatcher = false
+end
+
+local function applyContextWrapState(state)
+    if state.pendingContext ~= nil then
+        state.context = state.pendingContext
+    end
+
+    if not state.registered then
+        modutil.mod.Path.Context.Wrap(state.path, function(...)
+            local current = state.context
+            if current then
+                return current(...)
+            end
+        end)
+        state.registered = true
+    end
 end
 
 local function deactivateSlot(state)
@@ -75,8 +142,7 @@ local function deactivateSlot(state)
     if state.kind == "override" then
         state.replacement = nil
         if state.registered then
-            local pathApi = getPathApi()
-            pathApi.Restore(state.path)
+            modutil.mod.Path.Restore(state.path)
             state.registered = false
         end
     end
@@ -92,19 +158,15 @@ function hooks.Wrap(owner, path, keyOrHandler, maybeHandler)
     local key, handler = parseRegistrationArgs(path, keyOrHandler, maybeHandler, "handler")
     assert(type(handler) == "function", "lib.hooks.Wrap: handler must be a function")
 
-    local state = getSlot(owner, "wrap", path, key)
-    state.handler = handler
-
-    if not state.registered then
-        getPathApi().Wrap(path, function(base, ...)
-            local current = state.handler
-            if current then
-                return current(base, ...)
-            end
-            return base(...)
-        end)
-        state.registered = true
+    local state, registry = getSlot(owner, "wrap", path, key)
+    if registry.refreshing then
+        state.pendingHandler = handler
+        return
     end
+
+    state.pendingHandler = handler
+    applyWrapState(state)
+    clearPendingState(state)
 end
 
 --- Registers or updates a stable ModUtil Path.Override.
@@ -115,38 +177,15 @@ end
 ---@param maybeReplacement any|nil Replacement when an explicit key is supplied.
 function hooks.Override(owner, path, keyOrReplacement, maybeReplacement)
     local key, replacement = parseRegistrationArgs(path, keyOrReplacement, maybeReplacement, "replacement")
-    local state = getSlot(owner, "override", path, key)
-    local pathApi = getPathApi()
-
-    state.replacement = replacement
-
-    if type(replacement) == "function" then
-        if not state.registered then
-            pathApi.Override(path, function(...)
-                local current = state.replacement
-                assert(type(current) == "function", "lib.hooks.Override: function replacement is inactive")
-                return current(...)
-            end)
-            state.registered = true
-            state.usesDispatcher = true
-        elseif not state.usesDispatcher then
-            pathApi.Restore(path)
-            pathApi.Override(path, function(...)
-                local current = state.replacement
-                assert(type(current) == "function", "lib.hooks.Override: function replacement is inactive")
-                return current(...)
-            end)
-            state.usesDispatcher = true
-        end
+    local state, registry = getSlot(owner, "override", path, key)
+    if registry.refreshing then
+        state.pendingReplacement = replacement
         return
     end
 
-    if state.registered then
-        pathApi.Restore(path)
-    end
-    pathApi.Override(path, replacement)
-    state.registered = true
-    state.usesDispatcher = false
+    state.pendingReplacement = replacement
+    applyOverrideState(state)
+    clearPendingState(state)
 end
 
 --- Registers or updates a stable ModUtil Path.Context.Wrap dispatcher.
@@ -159,18 +198,15 @@ function hooks.Context.Wrap(owner, path, keyOrContext, maybeContext)
     local key, context = parseRegistrationArgs(path, keyOrContext, maybeContext, "context")
     assert(type(context) == "function", "lib.hooks.Context.Wrap: context must be a function")
 
-    local state = getSlot(owner, "contextWrap", path, key)
-    state.context = context
-
-    if not state.registered then
-        getPathApi().Context.Wrap(path, function(...)
-            local current = state.context
-            if current then
-                return current(...)
-            end
-        end)
-        state.registered = true
+    local state, registry = getSlot(owner, "contextWrap", path, key)
+    if registry.refreshing then
+        state.pendingContext = context
+        return
     end
+
+    state.pendingContext = context
+    applyContextWrapState(state)
+    clearPendingState(state)
 end
 
 --- Runs hook registration as one reload generation and deactivates registrations omitted by the callback.
@@ -191,6 +227,24 @@ function internalHooks.refresh(owner, register)
             if state.generation ~= registry.generation then
                 deactivateSlot(state)
                 registry.slots[id] = nil
+            elseif state.kind == "wrap" then
+                applyWrapState(state)
+                clearPendingState(state)
+            elseif state.kind == "override" then
+                applyOverrideState(state)
+                clearPendingState(state)
+            elseif state.kind == "contextWrap" then
+                applyContextWrapState(state)
+                clearPendingState(state)
+            end
+        end
+    else
+        for id, state in pairs(registry.slots) do
+            if state.generation == registry.generation then
+                clearPendingState(state)
+                if not state.registered then
+                    registry.slots[id] = nil
+                end
             end
         end
     end

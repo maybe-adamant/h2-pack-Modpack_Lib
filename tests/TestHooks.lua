@@ -237,6 +237,68 @@ function TestHooks:testContextWrapRefreshOmissionBecomesInert()
     restorePathMock()
 end
 
+function TestHooks:testRefreshFailureKeepsPreviousLiveHookState()
+    local counts = installPathMock()
+    local owner = {}
+    local observed = {}
+
+    _G.AdamantHookTestFailureWrap = function(value)
+        return "base:" .. value
+    end
+    _G.AdamantHookTestFailureOverride = function()
+        return "base-override"
+    end
+    _G.AdamantHookTestFailureContext = function()
+        table.insert(observed, "base")
+    end
+    _G.AdamantHookTestFailureNew = function(value)
+        return "new-base:" .. value
+    end
+
+    createHostWithHooks(owner, function()
+        lib.hooks.Wrap(owner, "AdamantHookTestFailureWrap", function(base, value)
+            return "first:" .. base(value)
+        end)
+        lib.hooks.Override(owner, "AdamantHookTestFailureOverride", function()
+            return "first-override"
+        end)
+        lib.hooks.Context.Wrap(owner, "AdamantHookTestFailureContext", function()
+            table.insert(observed, "first-context")
+        end)
+    end)
+
+    local ok = pcall(function()
+        createHostWithHooks(owner, function()
+            lib.hooks.Wrap(owner, "AdamantHookTestFailureWrap", function(base, value)
+                return "second:" .. base(value)
+            end)
+            lib.hooks.Override(owner, "AdamantHookTestFailureOverride", function()
+                return "second-override"
+            end)
+            lib.hooks.Context.Wrap(owner, "AdamantHookTestFailureContext", function()
+                table.insert(observed, "second-context")
+            end)
+            lib.hooks.Wrap(owner, "AdamantHookTestFailureNew", function(base, value)
+                return "new:" .. base(value)
+            end)
+            error("boom")
+        end)
+    end)
+
+    observed = {}
+    _G.AdamantHookTestFailureContext()
+
+    lu.assertFalse(ok)
+    lu.assertEquals(counts.wrap, 1)
+    lu.assertEquals(counts.override, 1)
+    lu.assertEquals(counts.contextWrap, 1)
+    lu.assertEquals(_G.AdamantHookTestFailureWrap("x"), "first:base:x")
+    lu.assertEquals(_G.AdamantHookTestFailureOverride(), "first-override")
+    lu.assertEquals(observed, { "first-context", "base" })
+    lu.assertEquals(_G.AdamantHookTestFailureNew("x"), "new-base:x")
+    restorePathMock()
+end
+
 function TestHooks:testCreateModuleHostIncrementsPackRegistryVersion()
     local packId = "hook-pack"
     local before = lib.getModuleRegistryVersion(packId)
