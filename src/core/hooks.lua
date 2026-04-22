@@ -8,6 +8,16 @@ local REGISTRY_KEY = "__adamantHooks"
 
 hooks.Refresh = nil
 
+local function getModUtil()
+    local resolved = modutil
+    if not resolved and rom and rom.mods then
+        resolved = rom.mods["SGG_Modding-ModUtil"]
+    end
+    assert(resolved and resolved.mod and resolved.mod.Path,
+        "lib.hooks: SGG_Modding-ModUtil is not available")
+    return resolved
+end
+
 local function getRegistry(owner)
     assert(type(owner) == "table", "lib.hooks: owner must be a persistent table")
 
@@ -67,7 +77,7 @@ local function applyWrapState(state)
     end
 
     if not state.registered then
-        modutil.mod.Path.Wrap(state.path, function(base, ...)
+        getModUtil().mod.Path.Wrap(state.path, function(base, ...)
             local current = state.handler
             if current then
                 return current(base, ...)
@@ -85,7 +95,7 @@ local function applyOverrideState(state)
 
     if type(replacement) == "function" then
         if not state.registered then
-            modutil.mod.Path.Override(state.path, function(...)
+            getModUtil().mod.Path.Override(state.path, function(...)
                 local current = state.replacement
                 assert(type(current) == "function", "lib.hooks.Override: function replacement is inactive")
                 return current(...)
@@ -93,8 +103,9 @@ local function applyOverrideState(state)
             state.registered = true
             state.usesDispatcher = true
         elseif not state.usesDispatcher then
-            modutil.mod.Path.Restore(state.path)
-            modutil.mod.Path.Override(state.path, function(...)
+            local resolvedModUtil = getModUtil()
+            resolvedModUtil.mod.Path.Restore(state.path)
+            resolvedModUtil.mod.Path.Override(state.path, function(...)
                 local current = state.replacement
                 assert(type(current) == "function", "lib.hooks.Override: function replacement is inactive")
                 return current(...)
@@ -105,9 +116,9 @@ local function applyOverrideState(state)
     end
 
     if state.registered then
-        modutil.mod.Path.Restore(state.path)
+        getModUtil().mod.Path.Restore(state.path)
     end
-    modutil.mod.Path.Override(state.path, replacement)
+    getModUtil().mod.Path.Override(state.path, replacement)
     state.registered = true
     state.usesDispatcher = false
 end
@@ -118,7 +129,7 @@ local function applyContextWrapState(state)
     end
 
     if not state.registered then
-        modutil.mod.Path.Context.Wrap(state.path, function(...)
+        getModUtil().mod.Path.Context.Wrap(state.path, function(...)
             local current = state.context
             if current then
                 return current(...)
@@ -142,7 +153,7 @@ local function deactivateSlot(state)
     if state.kind == "override" then
         state.replacement = nil
         if state.registered then
-            modutil.mod.Path.Restore(state.path)
+            getModUtil().mod.Path.Restore(state.path)
             state.registered = false
         end
     end

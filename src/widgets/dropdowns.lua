@@ -8,6 +8,7 @@ local imguiHelpers = public.imguiHelpers
 ---@field default ChoiceValue|nil
 ---@field displayValues ChoiceDisplayValues|nil
 ---@field valueColors ValueColorMap|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 
@@ -21,6 +22,7 @@ local imguiHelpers = public.imguiHelpers
 ---@class MappedDropdownOpts
 ---@field label string|nil
 ---@field tooltip string|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 ---@field getPreview fun(view: table<string, any>): string|number|boolean|nil
@@ -30,6 +32,7 @@ local imguiHelpers = public.imguiHelpers
 ---@class PackedDropdownOpts
 ---@field label string|nil
 ---@field tooltip string|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 ---@field displayValues ChoiceDisplayValues|nil
@@ -80,16 +83,8 @@ end
 ---@param drawControl fun(controlWidth: number|nil, previewColor: Color|nil): boolean
 ---@return boolean
 local function DrawLabeledDropdownControl(imgui, opts, previewColor, drawControl)
-    local labelText = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 0
-    local controlGap = helpers.ResolveGap(imgui, opts.controlGap)
-
-    if labelText ~= "" then
-        imgui.AlignTextToFramePadding()
-        imgui.Text(labelText)
-        helpers.ShowTooltip(imgui, opts.tooltip)
-        helpers.SameLineWithGap(imgui, controlGap)
-    end
+    helpers.DrawInlineLabel(imgui, opts.label, opts.tooltip, opts.controlGap, opts.labelWidth)
 
     if controlWidth > 0 then
         imgui.PushItemWidth(controlWidth)

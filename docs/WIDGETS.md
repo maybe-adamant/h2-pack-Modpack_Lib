@@ -106,7 +106,8 @@ Most leaf widgets support:
 - `tooltip`
 
 The label is rendered inline by the widget itself.
-If you need more custom layout, write the surrounding ImGui yourself and use the widget with an empty label.
+Use `labelWidth` on labeled controls when several rows should align their controls to the same X position. `labelWidth` is measured from the row start to the control start. If a label is longer than that width, the widget falls back to normal gap spacing so the label does not overlap the control.
+If you need more custom layout than that, write the surrounding ImGui yourself and use the widget with an empty label.
 
 ### Colors
 
@@ -186,6 +187,7 @@ Options:
 - `label`
 - `tooltip`
 - `maxLen`
+- `labelWidth`
 - `controlWidth`
 - `controlGap`
 
@@ -208,6 +210,7 @@ Options:
 - `default`
 - `displayValues`
 - `valueColors`
+- `labelWidth`
 - `controlWidth`
 - `controlGap`
 
@@ -226,6 +229,7 @@ Use when:
 Options:
 - `label`
 - `tooltip`
+- `labelWidth`
 - `controlWidth`
 - `controlGap`
 - `getPreview(view)`
@@ -282,6 +286,7 @@ Single-choice dropdown over a packed root.
 Options:
 - `label`
 - `tooltip`
+- `labelWidth`
 - `controlWidth`
 - `controlGap`
 - `displayValues`
@@ -387,6 +392,7 @@ Options:
 - `max`
 - `step`
 - `displayValues`
+- `labelWidth`
 - `valueWidth`
 - `buttonSpacing`
 

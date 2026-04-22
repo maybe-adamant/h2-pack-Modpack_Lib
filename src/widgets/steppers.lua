@@ -8,6 +8,7 @@ local WidgetFns = public.widgets
 ---@field max number|nil
 ---@field step number|nil
 ---@field displayValues table<number, string>|nil
+---@field labelWidth number|nil
 ---@field valueWidth number|nil
 ---@field buttonSpacing number|nil
 
@@ -23,6 +24,7 @@ local function MakeStepperConfig(opts)
         max = opts.max,
         step = math.floor(tonumber(opts.step) or 1),
         displayValues = opts.displayValues,
+        labelWidth = tonumber(opts.labelWidth),
         valueWidth = tonumber(opts.valueWidth),
         buttonSpacing = opts.buttonSpacing,
     }
@@ -122,12 +124,7 @@ function WidgetFns.stepper(imgui, session, alias, opts)
     PrepareStepperDrawContext(cfg, boundValue)
 
     local changed = false
-    if cfg.label ~= "" then
-        imgui.AlignTextToFramePadding()
-        imgui.Text(cfg.label)
-        local gap = helpers.ResolveGap(imgui, cfg.buttonSpacing)
-        helpers.SameLineWithGap(imgui, gap)
-    end
+    helpers.DrawInlineLabel(imgui, cfg.label, nil, cfg.buttonSpacing, cfg.labelWidth)
     changed = DrawStepperControl(imgui, cfg) or changed
     return changed
 end
@@ -146,6 +143,7 @@ function WidgetFns.steppedRange(imgui, session, minAlias, maxAlias, opts)
         min = opts.min,
         max = opts.max,
         step = opts.step,
+        labelWidth = opts.labelWidth,
         valueWidth = opts.valueWidth,
         buttonSpacing = opts.buttonSpacing,
     })
@@ -175,11 +173,7 @@ function WidgetFns.steppedRange(imgui, session, minAlias, maxAlias, opts)
     local changed = false
     local rangeGap = helpers.ResolveGap(imgui, opts.rangeGap)
 
-    if type(opts.label) == "string" and opts.label ~= "" then
-        imgui.AlignTextToFramePadding()
-        imgui.Text(opts.label)
-        helpers.SameLineWithGap(imgui, rangeGap)
-    end
+    helpers.DrawInlineLabel(imgui, opts.label, nil, rangeGap, opts.labelWidth)
 
     changed = DrawStepperControl(imgui, minStepper) or changed
 

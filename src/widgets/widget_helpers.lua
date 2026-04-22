@@ -86,6 +86,37 @@ function widgetHelpers.SameLineWithGap(imgui, gap)
     widgetHelpers.AdvanceInlineGap(imgui, gap)
 end
 
+function widgetHelpers.DrawInlineLabel(imgui, label, tooltip, controlGap, labelWidth)
+    local labelText = tostring(label or "")
+    local width = tonumber(labelWidth)
+    local hasFixedWidth = width ~= nil and width > 0
+
+    if labelText == "" and not hasFixedWidth then
+        return
+    end
+
+    local startX = imgui.GetCursorPosX()
+    if labelText ~= "" then
+        imgui.AlignTextToFramePadding()
+        imgui.Text(labelText)
+        widgetHelpers.ShowTooltip(imgui, tooltip)
+        imgui.SameLine()
+    end
+
+    if hasFixedWidth then
+        local targetX = startX + width
+        local currentX = imgui.GetCursorPosX()
+        if currentX < targetX then
+            imgui.SetCursorPosX(targetX)
+            return
+        end
+    end
+
+    if labelText ~= "" then
+        widgetHelpers.AdvanceInlineGap(imgui, widgetHelpers.ResolveGap(imgui, controlGap))
+    end
+end
+
 function widgetHelpers.DrawWithValueColor(imgui, color, drawFn)
     if type(color) ~= "table" then
         return drawFn()

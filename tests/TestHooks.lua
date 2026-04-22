@@ -3,6 +3,7 @@ local lu = require("luaunit")
 TestHooks = {}
 
 local savedModutil
+local savedRomModutil
 local savedGlobals
 
 local function installPathMock()
@@ -67,6 +68,10 @@ local function installPathMock()
             },
         },
     }
+    if rom and rom.mods then
+        savedRomModutil = rom.mods["SGG_Modding-ModUtil"]
+        rom.mods["SGG_Modding-ModUtil"] = modutil
+    end
 
     return counts
 end
@@ -78,6 +83,10 @@ local function restorePathMock()
     savedGlobals = nil
     modutil = savedModutil
     savedModutil = nil
+    if rom and rom.mods then
+        rom.mods["SGG_Modding-ModUtil"] = savedRomModutil
+    end
+    savedRomModutil = nil
 end
 
 local function createHostWithHooks(owner, registerHooks)
@@ -127,6 +136,23 @@ function TestHooks:testWrapRegistersOnceAndUpdatesHandler()
 
     lu.assertEquals(counts.wrap, 1)
     lu.assertEquals(_G.AdamantHookTestWrap("x"), "second:base:x")
+    restorePathMock()
+end
+
+function TestHooks:testWrapResolvesModUtilFromRomModsWhenGlobalIsMissing()
+    local counts = installPathMock()
+    local owner = {}
+    modutil = nil
+    _G.AdamantHookTestWrapRomMods = function(value)
+        return "base:" .. value
+    end
+
+    lib.hooks.Wrap(owner, "AdamantHookTestWrapRomMods", function(base, value)
+        return "wrapped:" .. base(value)
+    end)
+
+    lu.assertEquals(counts.wrap, 1)
+    lu.assertEquals(_G.AdamantHookTestWrapRomMods("x"), "wrapped:base:x")
     restorePathMock()
 end
 

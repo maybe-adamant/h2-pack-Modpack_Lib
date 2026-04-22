@@ -5,6 +5,7 @@ local WidgetFns = public.widgets
 ---@field label string|nil
 ---@field tooltip string|nil
 ---@field maxLen number|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 
@@ -17,16 +18,9 @@ function WidgetFns.inputText(imgui, session, alias, opts)
     opts = opts or {}
     local current = tostring(session.read(alias) or "")
     local maxLen = math.max(math.floor(tonumber(opts.maxLen) or 256), 1)
-    local label = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 120
-    local controlGap = helpers.ResolveGap(imgui, opts.controlGap)
 
-    if label ~= "" then
-        imgui.AlignTextToFramePadding()
-        imgui.Text(label)
-        helpers.ShowTooltip(imgui, opts.tooltip)
-        helpers.SameLineWithGap(imgui, controlGap)
-    end
+    helpers.DrawInlineLabel(imgui, opts.label, opts.tooltip, opts.controlGap, opts.labelWidth)
 
     if controlWidth > 0 then
         imgui.PushItemWidth(controlWidth)
