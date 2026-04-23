@@ -68,7 +68,6 @@ Common top-level helpers:
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
-- `lib.getModuleRegistryVersion(...)`
 - `lib.resetStorageToDefaults(...)`
 
 Most authors start with `lib.createStore(...)` and `lib.createModuleHost(...)`.

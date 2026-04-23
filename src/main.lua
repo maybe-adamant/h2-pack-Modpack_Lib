@@ -20,7 +20,6 @@ local internal = AdamantModpackLib_Internal
 internal.libConfig = libConfig
 internal.coordinators = internal.coordinators or {}
 internal.logging = internal.logging or {}
-internal.moduleRegistry = internal.moduleRegistry or { versions = {}, hosts = {} }
 local fallbackHud = import 'core/private/fallback_hud.lua'
 
 ---@class AdamantModpackLib
@@ -31,7 +30,6 @@ local fallbackHud = import 'core/private/fallback_hud.lua'
 ---@field standaloneHost fun(moduleHost: ModuleHost, opts: StandaloneOpts|nil): StandaloneRuntime
 ---@field isModuleCoordinated fun(packId: string|nil): boolean
 ---@field isModuleEnabled fun(store: ManagedStore, packId: string|nil): boolean
----@field getModuleRegistryVersion fun(packId: string): number
 ---@field lifecycle table
 ---@field mutation table
 ---@field logging table

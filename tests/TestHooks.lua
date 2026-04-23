@@ -325,18 +325,31 @@ function TestHooks:testRefreshFailureKeepsPreviousLiveHookState()
     restorePathMock()
 end
 
-function TestHooks:testCreateModuleHostIncrementsPackRegistryVersion()
+function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
     local packId = "hook-pack"
-    local before = lib.getModuleRegistryVersion(packId)
-
-    createHostWithHooks({}, function() end)
-
-    lu.assertEquals(lib.getModuleRegistryVersion(packId), before)
+    local applyCalls = 0
+    local revertCalls = 0
+    lib.lifecycle.registerCoordinator(packId, { ModEnabled = true })
 
     lib.createModuleHost({
-        definition = { modpack = packId, id = "Alpha", name = "Alpha", storage = {} },
+        definition = {
+            modpack = packId,
+            id = "Alpha",
+            name = "Alpha",
+            storage = {},
+            affectsRunData = true,
+            apply = function()
+                applyCalls = applyCalls + 1
+            end,
+            revert = function()
+                revertCalls = revertCalls + 1
+            end,
+        },
         store = {
-            read = function()
+            read = function(key)
+                if key == "Enabled" then
+                    return true
+                end
                 return false
             end,
         },
@@ -356,5 +369,7 @@ function TestHooks:testCreateModuleHostIncrementsPackRegistryVersion()
         },
     })
 
-    lu.assertEquals(lib.getModuleRegistryVersion(packId), before + 1)
+    lu.assertEquals(applyCalls, 1)
+    lu.assertEquals(revertCalls, 0)
+    lib.lifecycle.registerCoordinator(packId, nil)
 end

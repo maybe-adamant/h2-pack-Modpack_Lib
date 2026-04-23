@@ -46,14 +46,13 @@ Framework owns pack-level coordinator state:
 Framework also owns pack freshness checks:
 - it stores the init params used to build each pack session
 - it rebuilds a pack when Framework itself reloads
-- it rebuilds a pack when a coordinated module republishes its host
+- it does not rebuild a pack for ordinary coordinated module behavior reloads
 
 ### Lib
 
 Lib owns the shared reload-sensitive plumbing:
 - coordinator registration
-- coordinated module host publication
-- module registry versions
+- coordinated module startup/runtime sync
 - stable ModUtil hook dispatch
 - mutation runtime persistence
 - standalone host suppression for coordinated modules
@@ -74,15 +73,18 @@ The steady-state plugin pattern is:
 ```lua
 local loader = reload.auto_single()
 
+local function registerGui()
+    rom.gui.add_imgui(renderWindow)
+    rom.gui.add_always_draw_imgui(alwaysDraw)
+    rom.gui.add_to_menu_bar(addMenuBar)
+end
+
 local function init()
     -- rebuild current state
 end
 
 modutil.once_loaded.game(function()
-    rom.gui.add_imgui(renderWindow)
-    rom.gui.add_always_draw_imgui(alwaysDraw)
-    rom.gui.add_to_menu_bar(addMenuBar)
-    loader.load(nil, init)
+    loader.load(registerGui, init)
 end)
 ```
 
@@ -90,32 +92,29 @@ The important part is the split:
 - stable GUI registration happens once
 - the active state rebuild happens from `init`
 
-## Coordinated Module Publication
+## Coordinated Module Host Refresh
 
-`lib.createModuleHost(...)` is the publishing boundary for a coordinated module.
+`lib.createModuleHost(...)` is the behavior refresh boundary for a coordinated module.
 
 When host creation succeeds:
 - the module host closes over the current `definition`, `store`, and `session`
 - if `hookOwner` and `registerHooks` are provided, Lib refreshes that owner's hook registrations
-- if `definition.modpack` and `definition.id` are present, Lib publishes `{ definition, host }` into the coordinated module registry
-- Lib increments the registry version for that `packId`
+- if the coordinator for `definition.modpack` is already registered, Lib immediately runs `host.applyOnLoad()`
 
-That means one module reload republishes the module's live surface for the coordinator pack.
+That means one coordinated module reload refreshes its live runtime behavior immediately without forcing a pack rebuild.
 
 ## Framework Pack Refresh
 
-Framework stores three things per pack session:
+Framework stores two things per pack session:
 - `initParams`
 - `frameworkGeneration`
-- `moduleRegistryVersion`
 
 Its renderer, menu-bar callback, and always-draw callback all run a freshness check before using the pack.
 
 Framework rebuilds the pack when:
 - Framework reloaded and its generation changed
-- a coordinated module republished its host and the pack registry version changed
 
-The rebuild path reruns `Framework.init(pack.initParams)` and refreshes discovery, HUD, hash, and UI state from the latest module surfaces.
+The rebuild path reruns `Framework.init(pack.initParams)` and refreshes discovery, HUD, hash, and UI state from the latest framework surfaces.
 
 ## Hook Model
 
@@ -182,6 +181,7 @@ Important consequences:
 
 Framework calls `applyOnLoad()` for discovered coordinated modules during pack init.
 `lib.standaloneHost(...)` calls `applyOnLoad()` for standalone modules during standalone startup.
+`lib.createModuleHost(...)` also calls `applyOnLoad()` immediately when the module is already coordinated, so behavior-only module reloads resync live runtime state without a pack rebuild.
 
 ## Safety By Scenario
 
@@ -195,7 +195,7 @@ Players who are not editing files do not exercise the hot-reload path. The stack
 
 Supported.
 
-Module reload republishes the module host, bumps the pack registry version, and lets Framework rebuild the pack on the next callback.
+Module reload replaces the module's live host surface. Framework snapshots that host on the next UI/hash operation, and Lib immediately resyncs live mutation state if the module is already coordinated.
 
 ### Developer doing Lib or Framework work
 
@@ -207,7 +207,21 @@ Persistent Lib registries survive Lib reload. Core late-reads Framework callback
 
 Supported.
 
-The coordinated module registry, coordinator registry, mutation runtime, and Framework freshness checks are designed to converge back to the latest live surfaces.
+The coordinator registry, mutation runtime, and Framework freshness checks are designed to converge back to the latest live surfaces.
+
+### Structural edits
+
+Not hot-reload resilient by design.
+
+Changes to:
+- `definition.id`
+- `definition.modpack`
+- `definition.name` or `shortName`
+- `definition.storage`
+- `definition.hashGroups`
+- module presence or discovery shape
+
+should be handled by a full reload.
 
 ## Practical Rules
 

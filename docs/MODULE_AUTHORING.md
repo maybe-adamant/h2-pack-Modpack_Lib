@@ -302,8 +302,10 @@ public.host = lib.createModuleHost({
 
 local runtime = lib.standaloneHost(public.host)
 
-rom.gui.add_imgui(runtime.renderWindow)
-rom.gui.add_to_menu_bar(runtime.addMenuBar)
+local function registerGui()
+    rom.gui.add_imgui(runtime.renderWindow)
+    rom.gui.add_to_menu_bar(runtime.addMenuBar)
+end
 ```
 
 Notes:
@@ -439,22 +441,22 @@ end
 
 local loader = reload.auto_single()
 
-local function renderWindow()
-    if internal.standaloneUi and internal.standaloneUi.renderWindow then
-        internal.standaloneUi.renderWindow()
-    end
-end
+local function registerGui()
+    rom.gui.add_imgui(function()
+        if internal.standaloneUi and internal.standaloneUi.renderWindow then
+            internal.standaloneUi.renderWindow()
+        end
+    end)
 
-local function addMenuBar()
-    if internal.standaloneUi and internal.standaloneUi.addMenuBar then
-        internal.standaloneUi.addMenuBar()
-    end
+    rom.gui.add_to_menu_bar(function()
+        if internal.standaloneUi and internal.standaloneUi.addMenuBar then
+            internal.standaloneUi.addMenuBar()
+        end
+    end)
 end
 
 modutil.once_loaded.game(function()
-    rom.gui.add_imgui(renderWindow)
-    rom.gui.add_to_menu_bar(addMenuBar)
-    loader.load(nil, init)
+    loader.load(registerGui, init)
 end)
 ```
 

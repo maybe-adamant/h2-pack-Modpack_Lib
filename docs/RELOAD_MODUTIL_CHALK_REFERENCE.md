@@ -369,19 +369,22 @@ Why:
 - `auto_single()` gives one stable reload identity for the file
 - `init` becomes the steady-state bootstrap body that runs on each active load
 
-If you truly need first-load-only work, split that into a separate `on_ready` function. Otherwise prefer `loader.load(nil, init)`.
+If you also need stable first-load-only work such as GUI callback registration, split that into a separate `on_ready` function.
 
 This is the normal steady-state plugin pattern when the active bootstrap body is reload-safe.
 
 ## 2. Stable GUI registration
 
-Register stable GUI callbacks once, outside the reload body, but still behind the game-readiness gate:
+Register stable GUI callbacks from `on_ready`, not directly in the game-readiness hook:
 
 ```lua
-modutil.once_loaded.game(function()
+local function registerGui()
     rom.gui.add_imgui(renderWindow)
     rom.gui.add_to_menu_bar(addMenuBar)
-    loader.load(nil, init)
+end
+
+modutil.once_loaded.game(function()
+    loader.load(registerGui, init)
 end)
 ```
 
@@ -507,16 +510,20 @@ local config = chalk.auto('config.lua')
 
 local loader = reload.auto_single()
 
+local function registerGui()
+    -- first-load-only callback registration
+end
+
 local function init()
     -- reimport locals, rebuild definition/store/session, then apply current config
 end
 
 modutil.once_loaded.game(function()
-    loader.load(nil, init)
+    loader.load(registerGui, init)
 end)
 ```
 
-This is the best default unless you have a specific reason to deviate.
+If the plugin has no first-load-only setup, use `loader.load(nil, init)` instead.
 
 For the repo-specific module and coordinator patterns built on top of these libraries, see [HOT_RELOAD_ARCHITECTURE.md](HOT_RELOAD_ARCHITECTURE.md).
 

@@ -1,5 +1,4 @@
 local internal = AdamantModpackLib_Internal
-local moduleRegistry = internal.moduleRegistry
 
 ---@class StandaloneOpts
 ---@field windowTitle string|nil
@@ -164,24 +163,16 @@ function public.createModuleHost(opts)
     end
 
     local packId = def.modpack
-    local moduleId = def.id
-    if type(packId) == "string" and packId ~= "" and type(moduleId) == "string" and moduleId ~= "" then
-        moduleRegistry.hosts[packId] = moduleRegistry.hosts[packId] or {}
-        moduleRegistry.hosts[packId][moduleId] = {
-            definition = def,
-            host = host,
-        }
-        moduleRegistry.versions[packId] = (moduleRegistry.versions[packId] or 0) + 1
+    if type(packId) == "string" and packId ~= "" and public.isModuleCoordinated(packId) then
+        local ok, err = host.applyOnLoad()
+        if not ok then
+            internal.logging.warn("%s coordinated runtime sync failed: %s",
+                tostring(def.name or def.id or "module"),
+                tostring(err))
+        end
     end
 
     return host
-end
-
---- Returns the current module-host registry version for a pack.
----@param packId string
----@return number version
-function public.getModuleRegistryVersion(packId)
-    return moduleRegistry.versions[packId] or 0
 end
 
 --- Initializes standalone module hosting and returns window/menu-bar renderers.

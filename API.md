@@ -8,7 +8,6 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
-- `lib.getModuleRegistryVersion(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hashing.*`
 - `lib.hooks.*`
@@ -361,11 +360,9 @@ Use this as the bridge between module state and either:
 - Framework hosting
 - standalone window/menu hosting
 
-### `lib.getModuleRegistryVersion(packId)`
-
-Returns the current coordinated-module host registry version for a pack.
-
-This is primarily a framework/coordinator helper. A host created for a coordinated module increments the registry version for `definition.modpack`.
+Behavior:
+- when a coordinator is already registered for `definition.modpack`, host creation immediately syncs the module's live mutation state through `host.applyOnLoad()`
+- otherwise startup sync is owned by Framework or standalone hosting
 
 ### `lib.standaloneHost(moduleHost, opts?)`
 
@@ -468,7 +465,6 @@ Supported forms:
 - `"AliasName"`
 - `{ alias = "AliasName", value = ... }`
 - `{ alias = "AliasName", anyOf = { ... } }`
-
 
 
 

@@ -34,13 +34,12 @@ Initial public release of the adamant Modpack Lib surface.
   - `lib.hooks.Wrap(...)`
   - `lib.hooks.Override(...)`
   - `lib.hooks.Context.Wrap(...)`
-- pack-level coordinated host registry version queries through `lib.getModuleRegistryVersion(packId)`
 - hot-reload architecture guide under `docs/HOT_RELOAD_ARCHITECTURE.md`
 
 ### Changed
 
 - `lib.createModuleHost(...)` now supports `hookOwner` and `registerHooks` for host-owned hook refresh
-- coordinated module hosts now publish their current `{ definition, host }` surface into the Lib registry on host creation
+- coordinated module hosts now self-sync live runtime state on host creation when the coordinator is already registered
 - mutation runtime tracking now persists across recreated stores and reloads keyed by stable module identity when available
 - `lib.lifecycle.applyOnLoad(...)` now reverts active tracked mutation state when a module reloads disabled
 - long-form guides and reference docs now live under `docs/`
