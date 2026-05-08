@@ -156,20 +156,23 @@ function TestMutation:testManualLifecycleHooksReceiveStore()
             return nil
         end,
     }
-    local def = {
+    local def = {}
+    local mutation = {
         affectsRunData = true,
-        apply = function(receivedStore)
+        manualMutation = {
+            apply = function(receivedStore)
             lu.assertEquals(receivedStore, store)
             lu.assertEquals(receivedStore.read("Mode"), "manual")
-        end,
-        revert = function(receivedStore)
+            end,
+            revert = function(receivedStore)
             lu.assertEquals(receivedStore, store)
             lu.assertEquals(receivedStore.read("Mode"), "manual")
-        end,
+            end,
+        },
     }
 
-    lu.assertTrue(lib.lifecycle.applyMutation(def, store))
-    lu.assertTrue(lib.lifecycle.revertMutation(def, store))
+    lu.assertTrue(lib.lifecycle.applyMutation(def, mutation, store))
+    lu.assertTrue(lib.lifecycle.revertMutation(def, mutation, store))
     lu.assertEquals(reads, { "Mode", "Mode" })
 end
 
@@ -180,15 +183,18 @@ function TestMutation:testManualLifecycleFallbackRevertReceivesStore()
             return alias == "Enabled" and true or nil
         end,
     }
-    local def = {
+    local def = {}
+    local mutation = {
         affectsRunData = true,
-        apply = function() end,
-        revert = function(receivedStore)
+        manualMutation = {
+            apply = function() end,
+            revert = function(receivedStore)
             lu.assertEquals(receivedStore, store)
             reverted = true
-        end,
+            end,
+        },
     }
 
-    lu.assertTrue(lib.lifecycle.revertMutation(def, store))
+    lu.assertTrue(lib.lifecycle.revertMutation(def, mutation, store))
     lu.assertTrue(reverted)
 end

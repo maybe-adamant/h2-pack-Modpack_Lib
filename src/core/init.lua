@@ -13,6 +13,7 @@ import 'core/game_object.lua'
 import 'core/hooks.lua'
 import 'core/overlays.lua'
 import 'core/host.lua'
+import 'core/module.lua'
 import('core/mutations.lua', nil, mutationPlan)
 import('core/internal/mutations.lua', nil, mutationPlan)
 import 'core/definition.lua'

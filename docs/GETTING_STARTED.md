@@ -42,14 +42,14 @@ A module is built from four main pieces:
 - `session`
   Staged UI state. Draw code edits this and host/framework plumbing commits it later.
 - `host`
-  The behavior object created by `lib.createModuleHost(...)`. Framework and standalone hosting both use this.
+  The author-facing view returned by `lib.createModule(...)`. Framework and standalone hosting use the internal live host registered by the same call.
 
 Typical module flow:
 
-1. `main.lua` prepares `local definition = lib.prepareDefinition(...)`.
-2. `main.lua` creates `store, session = lib.createStore(...)`.
-3. `main.lua` creates the live module host through `lib.createModuleHost(...)`.
-4. UI code edits staged values through `session`.
+1. `main.lua` calls `lib.createModule(...)`.
+2. The returned author host is assigned to `internal.host`.
+3. The returned store is assigned to `internal.store` when gameplay logic needs it.
+4. UI code edits staged values through the session passed into draw callbacks.
 5. Host/framework plumbing commits staged persistent values when appropriate.
 6. Gameplay logic reads persisted state through `store.read(...)`.
 
@@ -62,10 +62,9 @@ Use the right state object for the right job:
 
 If you ignore that boundary, the module will still often "work", but you will create drift between the UI and the persisted state model.
 
-`store` and `session` are also an ownership pair. Create them together from the
-same prepared `definition`, pass that same pair to `lib.createModuleHost(...)`,
-and recreate both together during module reload. Never combine a store from one
-`createStore(...)` call with a session from another.
+`lib.createModule(...)` owns the normal construction pipeline so store/session
+ownership stays paired. Use the lower-level construction functions only when the
+module needs custom setup.
 
 ## File Roles
 
@@ -76,11 +75,9 @@ The template is split into four files on purpose.
 Owns module wiring:
 
 - imports Lib and stack dependencies
-- prepares `definition`
 - imports `data.lua`, `logic.lua`, and `ui.lua`
-- creates `store` and `session`
-- copies `store` to `internal.store` if logic needs it
-- creates the live host through `lib.createModuleHost(...)`
+- creates the module through `lib.createModule(...)`
+- assigns returned `host` and `store` to `internal` when needed
 - wires optional standalone UI
 
 Keep store/session/host creation here even if the module grows.
@@ -110,8 +107,8 @@ This code should read and write staged values through the author-facing `session
 Owns gameplay and mutation behavior:
 
 - `internal.RegisterHooks()`
-- `definition.patchPlan`
-- optional `definition.apply(...)` / `definition.revert(...)`
+- optional `internal.BuildPatchPlan(...)`
+- optional manual mutation apply/revert callbacks
 
 This code should read persisted state through `internal.store`.
 
@@ -124,11 +121,15 @@ Start with the template, then fill in these pieces in order.
 At minimum:
 
 ```lua
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    affectsRunData = false,
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = "ExampleModule",
+        name = "Example Module",
+    },
 })
 ```
 
@@ -141,15 +142,27 @@ Modules with no custom settings may omit `storage`; Lib still injects the built-
 Example:
 
 ```lua
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    affectsRunData = false,
-    storage = {
+local function BuildStorage()
+    return {
         { type = "bool", alias = "FeatureEnabled", default = false },
         { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
         { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
+    }
+end
+```
+
+Then attach it to the module definition:
+
+```lua
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = "ExampleModule",
+        name = "Example Module",
+        storage = BuildStorage(),
     },
 })
 ```
@@ -169,14 +182,28 @@ For persistent runtime markers that should not appear in UI staging, profiles, o
 hashes, declare `stage = false, hash = false` and use
 `store.writeUnstaged(...)`.
 
-### 3. Create the managed state in `main.lua`
+### 3. Create the module in `main.lua`
 
 ```lua
-local store, session = lib.createStore(config, definition)
-internal.store = store
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = "ExampleModule",
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
+    drawTab = internal.DrawTab,
+    drawQuickContent = internal.DrawQuickContent,
+})
 ```
 
-Keep `session` local to `main.lua`. The draw path will receive the restricted author-facing session through the live host. If the module reloads, recreate `store` and `session` as a pair before creating the replacement host.
+The draw path receives the restricted author-facing session through the live host.
+The returned store is kept only when gameplay logic needs runtime reads.
 
 ### 4. Build the UI in `ui.lua`
 
@@ -212,21 +239,14 @@ If the module only changes configuration/UI, `logic.lua` can stay minimal.
 If the module changes live run data:
 
 ```lua
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    affectsRunData = true,
-    storage = internal.BuildStorage(),
-    patchPlan = function(plan, activeStore)
+local function BuildPatchPlan(plan, activeStore)
     if activeStore.read("FeatureEnabled") then
         plan:set(SomeGameTable, "SomeKey", true)
     end
-    end,
-})
+end
 ```
 
-Use `patchPlan` when possible. Reach for manual `apply(store)` / `revert(store)`
+Use `registerPatchMutation` when possible. Reach for `registerManualMutation`
 only when the mutation is not naturally expressed as reversible table edits.
 
 If the module installs runtime hooks, declare them through `lib.hooks.*` from `internal.RegisterHooks()`:
@@ -245,13 +265,20 @@ function internal.RegisterHooks()
 end
 ```
 
-### 6. Expose the module host in `main.lua`
+### 6. Create the module in `main.lua`
 
 ```lua
-lib.createModuleHost({
-    definition = definition,
-    store = store,
-    session = session,
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = MODULE_ID,
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
+    registerPatchMutation = internal.BuildPatchPlan,
     hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
@@ -271,7 +298,7 @@ If the module has no runtime hooks, `hookOwner` and `registerHooks` may be omitt
 
 If the module belongs to a Framework-managed pack:
 
-- `lib.createModuleHost(...)` registers the module in Lib's live-host registry
+- `lib.createModule(...)` registers the module in Lib's live-host registry
 - Framework calls `host.drawTab(...)`
 - optional quick setup uses `host.drawQuickContent(...)`
 

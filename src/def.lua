@@ -93,21 +93,30 @@ local lib = {}
 ---@field reset fun(alias: string)
 ---@field resetToDefaults fun(opts?: AdamantModpackLib.ResetOpts): boolean, integer
 
+---@class AdamantModpackLib.AuthorHost
+---@field isEnabled fun(): boolean
+---@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
+---@field getMeta fun(): AdamantModpackLib.ModuleMeta
+
 ---@class AdamantModpackLib.ModuleDefinition
 ---@field modpack? string Coordinator pack id for coordinated modules.
 ---@field id? string Stable module id within the pack.
 ---@field name? string Display name.
 ---@field shortName? string Short UI label.
 ---@field tooltip? string UI tooltip.
----@field affectsRunData? boolean Whether this module mutates live run data.
 ---@field storage? AdamantModpackLib.StorageSchema Module storage schema.
 ---@field hashGroupPlan? AdamantModpackLib.HashGroupPlan Hash compaction hints.
----@field patchPlan? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
----@field apply? fun(store: AdamantModpackLib.ManagedStore)
----@field revert? fun(store: AdamantModpackLib.ManagedStore)
----@field onSettingsCommitted? fun(store: AdamantModpackLib.ManagedStore) Post-commit observer for rebuilding derived runtime/UI structures.
 
 ---@class AdamantModpackLib.PreparedDefinition: AdamantModpackLib.ModuleDefinition
+
+---@class AdamantModpackLib.ManualMutation
+---@field apply fun(store: AdamantModpackLib.ManagedStore)
+---@field revert fun(store: AdamantModpackLib.ManagedStore)
+
+---@class AdamantModpackLib.MutationBundle
+---@field affectsRunData boolean
+---@field patchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
+---@field manualMutation? AdamantModpackLib.ManualMutation
 
 ---@class AdamantModpackLib.ModuleHostOpts
 ---@field definition AdamantModpackLib.PreparedDefinition
@@ -116,8 +125,26 @@ local lib = {}
 ---@field session AdamantModpackLib.Session
 ---@field hookOwner? table Persistent table used by hot-reload-safe hooks.
 ---@field registerHooks? fun()
----@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession)
----@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession)
+---@field registerPatchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
+---@field registerManualMutation? AdamantModpackLib.ManualMutation
+---@field onSettingsCommitted? fun(store: AdamantModpackLib.ManagedStore) Post-commit observer for rebuilding derived runtime/UI structures.
+---@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost)
+---@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
+---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
+
+---@class AdamantModpackLib.ModuleCreateOpts
+---@field owner? table Persistent module owner used for structural hot-reload tracking.
+---@field pluginGuid string Plugin guid captured at module file load time.
+---@field config table Module config table.
+---@field definition AdamantModpackLib.ModuleDefinition Raw module definition.
+---@field hookOwner? table Persistent table used by hot-reload-safe hooks.
+---@field registerHooks? fun()
+---@field registerPatchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
+---@field registerManualMutation? AdamantModpackLib.ManualMutation
+---@field onSettingsCommitted? fun(store: AdamantModpackLib.ManagedStore) Post-commit observer for rebuilding derived runtime/UI structures.
+---@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost)
+---@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
+---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
 ---@class AdamantModpackLib.ModuleHost
 ---@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
@@ -162,9 +189,10 @@ local lib = {}
 ---@field ModEnabled boolean
 
 ---@class AdamantModpackLib.MutationInfo
----@field hasPatchPlan boolean
+---@field hasPatch boolean
 ---@field hasApply boolean
 ---@field hasRevert boolean
+---@field hasManual boolean
 
 ---@alias AdamantModpackLib.MutationPlanFn fun(self: AdamantModpackLib.MutationPlan, ...: any): AdamantModpackLib.MutationPlan
 
@@ -344,50 +372,55 @@ end
 function lib.lifecycle.requestCoordinatorRebuild(packId, reason)
 end
 
----@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@return AdamantModpackLib.MutationShape? shape
 ---@return AdamantModpackLib.MutationInfo info
-function lib.lifecycle.inferMutation(def)
+function lib.lifecycle.inferMutation(mutationBundle)
 end
 
----@param def AdamantModpackLib.ModuleDefinition?
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@return boolean affects
-function lib.lifecycle.affectsRunData(def)
+function lib.lifecycle.affectsRunData(mutationBundle)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@param store AdamantModpackLib.ManagedStore?
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.applyMutation(def, store)
+function lib.lifecycle.applyMutation(def, mutationBundle, store)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@param store AdamantModpackLib.ManagedStore?
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.revertMutation(def, store)
+function lib.lifecycle.revertMutation(def, mutationBundle, store)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@param store AdamantModpackLib.ManagedStore?
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.reapplyMutation(def, store)
+function lib.lifecycle.reapplyMutation(def, mutationBundle, store)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@param store AdamantModpackLib.ManagedStore
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.applyOnLoad(def, store)
+function lib.lifecycle.applyOnLoad(def, mutationBundle, store)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param settingsObserver fun(store: AdamantModpackLib.ManagedStore)?
 ---@param store AdamantModpackLib.ManagedStore
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.notifySettingsCommitted(def, store)
+function lib.lifecycle.notifySettingsCommitted(def, settingsObserver, store)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
@@ -397,19 +430,22 @@ function lib.lifecycle.resyncSession(def, session)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
+---@param settingsObserver fun(store: AdamantModpackLib.ManagedStore)?
 ---@param store AdamantModpackLib.ManagedStore
 ---@param session AdamantModpackLib.Session
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.commitSession(def, store, session)
+function lib.lifecycle.commitSession(def, mutationBundle, settingsObserver, store, session)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param mutationBundle AdamantModpackLib.MutationBundle?
 ---@param store AdamantModpackLib.ManagedStore
 ---@param enabled boolean
 ---@return boolean ok
 ---@return string? err
-function lib.lifecycle.setEnabled(def, store, enabled)
+function lib.lifecycle.setEnabled(def, mutationBundle, store, enabled)
 end
 
 ---@param store AdamantModpackLib.ManagedStore
@@ -876,8 +912,14 @@ end
 function lib.resetStorageToDefaults(storage, session, opts)
 end
 
+---@param opts AdamantModpackLib.ModuleCreateOpts
+---@return AdamantModpackLib.AuthorHost host
+---@return AdamantModpackLib.ManagedStore store
+function lib.createModule(opts)
+end
+
 ---@param opts AdamantModpackLib.ModuleHostOpts
----@return AdamantModpackLib.ModuleHost host
+---@return AdamantModpackLib.AuthorHost host
 function lib.createModuleHost(opts)
 end
 

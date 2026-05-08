@@ -2,7 +2,6 @@ local internal = AdamantModpackLib_Internal
 internal.definition = internal.definition or {}
 local definitionInternal = internal.definition
 local storageInternal = internal.storage
-local mutationInternal = internal.mutation
 local values = internal.values
 
 local KnownDefinitionKeys = {
@@ -11,13 +10,8 @@ local KnownDefinitionKeys = {
     name = true,
     shortName = true,
     tooltip = true,
-    affectsRunData = true,
     storage = true,
     hashGroupPlan = true,
-    patchPlan = true,
-    apply = true,
-    revert = true,
-    onSettingsCommitted = true,
 }
 
 definitionInternal.KnownKeys = KnownDefinitionKeys
@@ -141,31 +135,11 @@ function definitionInternal.validate(definition, label)
     for _, key in ipairs({ "modpack", "id", "name", "shortName", "tooltip" }) do
         checkType(key, "string")
     end
-    checkType("affectsRunData", "boolean")
     checkType("storage", "table")
     checkType("hashGroupPlan", "table")
-    for _, key in ipairs({ "patchPlan", "apply", "revert", "onSettingsCommitted" }) do
-        checkType(key, "function")
-    end
 
     if definition.modpack ~= nil and definition.id == nil then
         internal.violate("definition.missing_coordinated_id", "%s: coordinated modules should declare definition.id", prefix)
-    end
-
-    local inferredMutationShape, mutationInfo = mutationInternal.inferMutation(definition)
-    if definition.affectsRunData == true and not inferredMutationShape then
-        internal.violate(
-            "definition.missing_mutation",
-            "%s: affectsRunData=true requires patchPlan or apply/revert",
-            prefix
-        )
-    end
-    if mutationInfo.hasApply ~= mutationInfo.hasRevert then
-        internal.violate(
-            "definition.incomplete_manual_lifecycle",
-            "%s: manual lifecycle requires both definition.apply and definition.revert",
-            prefix
-        )
     end
 end
 
@@ -175,7 +149,6 @@ function definitionInternal.getStructuralFingerprint(definition)
         id = definition and definition.id or nil,
         name = definition and definition.name or nil,
         shortName = definition and definition.shortName or nil,
-        affectsRunData = definition and definition.affectsRunData or nil,
         storage = definition and definition.storage or nil,
         hashGroupPlan = definition and definition.hashGroupPlan or nil,
     }

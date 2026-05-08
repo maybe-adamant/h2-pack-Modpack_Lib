@@ -3,6 +3,7 @@
 This is the public Lib surface.
 
 Preferred usage uses top-level module authoring helpers plus namespaces for specialized APIs:
+- `lib.createModule(...)`
 - `lib.prepareDefinition(...)`
 - `lib.createStore(...)`
 - `lib.createModuleHost(...)`
@@ -31,16 +32,18 @@ Modules declare:
 - `definition.id`
 - `definition.name`
 - optional `definition.storage`
-- optional mutation lifecycle fields:
-  - `affectsRunData`
-  - `patchPlan`
-  - `apply`
-  - `revert`
-- optional post-commit observer:
-  - `onSettingsCommitted`
 
-Modules create a behavior host:
-- `lib.createModuleHost(...)`
+Modules normally create and publish their behavior host through:
+- `lib.createModule(...)`
+
+Optional module capabilities are passed to module/host creation:
+- `registerPatchMutation`
+- `registerManualMutation`
+- `onSettingsCommitted`
+- `registerHooks`
+- `registerIntegrations`
+- `drawTab`
+- `drawQuickContent`
 
 That host owns:
 - `drawTab`
@@ -106,7 +109,11 @@ Namespaced state buckets attached to live game object tables such as `CurrentRun
 
 Use this for object-owned runtime state whose lifetime should follow that game table. It is not persisted, staged, hashed, profiled, or reset by Lib.
 
-Typical use:
+The normal author path is `lib.createModule(...)`, which prepares the definition,
+creates the store/session pair, publishes the live host, and returns the
+author-facing host plus the state handles to keep.
+
+Advanced use:
 
 ```lua
 local state = lib.gameObject.get(CurrentRun, PACK_ID, MODULE_ID, "run", function()
@@ -152,17 +159,10 @@ Structural reload checks cover:
 - `id`
 - `name`
 - `shortName`
-- `affectsRunData`
 - `storage`
 - `hashGroupPlan`
 
-Behavior-only fields such as:
-- `patchPlan`
-- `apply`
-- `revert`
-- `onSettingsCommitted`
-
-do not trigger a structural reload warning.
+Behavior callbacks are not valid definition fields and do not participate in structural fingerprinting.
 
 Typical use:
 
@@ -173,11 +173,12 @@ local definition = lib.prepareDefinition(internal, {
     name = "Example Module",
     storage = internal.BuildStorage(),
     hashGroupPlan = internal.BuildHashGroupPlan(),
-    patchPlan = internal.BuildPatchPlan,
 })
 ```
 
-Treat the returned definition as the authoritative module contract and pass it to `createStore(...)` and `createModuleHost(...)`.
+Treat the returned definition as the authoritative module contract and pass it to
+`createStore(...)` and `createModuleHost(...)` when using the lower-level
+pipeline directly.
 
 `hashGroupPlan` is the preferred author-facing input for complex hash layouts:
 
@@ -198,6 +199,42 @@ Rules:
 - `items` is an ordered list of logical bundles
 - each item may be a single alias string or a list of aliases that must stay together
 - Framework may use these hints to pack multiple persisted roots into shorter canonical hash tokens
+
+### `lib.createModule(opts)`
+
+Canonical module-construction helper.
+
+```lua
+local host, store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = "ExampleModule",
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
+    registerPatchMutation = internal.BuildPatchPlan,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
+    drawTab = internal.DrawTab,
+    drawQuickContent = internal.DrawQuickContent,
+})
+internal.host = host
+internal.store = store
+```
+
+Returns:
+- `host`
+  Author-facing host with `isEnabled()`, `getIdentity()`, and `getMeta()`.
+- `store`
+  Runtime read surface for gameplay/hooks.
+
+`createModule(...)` intentionally does not return the prepared definition or
+raw session. Draw callbacks receive the restricted author session, and custom
+construction can use `prepareDefinition(...)`, `createStore(...)`, and
+`createModuleHost(...)` directly.
 
 ### `lib.createStore(config, definition)`
 
@@ -227,11 +264,16 @@ Returned surface:
 Persisted writes happen through semantic helpers or session flushes:
 
 ```lua
-lib.lifecycle.setEnabled(def, store, enabled)
+lib.lifecycle.setEnabled(def, mutationBundle, store, enabled)
 lib.lifecycle.setDebugMode(store, enabled)
 ```
 
-Use `setEnabled` for module enabled toggles. It persists the `Enabled` flag and applies/reverts mutation state as needed. Use `setDebugMode` for module debug toggles. Module/host plumbing can use `session.write(...)` plus `session._flushToConfig()` for immediate persisted writes such as profile/hash import. Ordinary draw-code edits stay staged and commit through the host/framework flow.
+Use `setEnabled` from lower-level host/custom construction code when you also
+own the mutation bundle. Normal modules should let `createModule(...)` and the
+host own enabled/debug transitions. Module/host plumbing can use
+`session.write(...)` plus `session._flushToConfig()` for immediate persisted
+writes such as profile/hash import. Ordinary draw-code edits stay staged and
+commit through the host/framework flow.
 
 `Enabled` and `DebugMode` are ordinary prepared storage aliases injected by Lib.
 Do not declare them in module storage or module `config.lua`.
@@ -243,7 +285,7 @@ Rules:
 - widgets and draw code should usually read staged values from `session.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
 - module-owned runtime markers declared with `stage = false, hash = false` should write through `store.writeUnstaged(...)`
-- enabled toggles should write through `lib.lifecycle.setEnabled(def, store, enabled)`
+- enabled toggles should write through the host or `lib.lifecycle.setEnabled(def, mutationBundle, store, enabled)`
 - debug toggles should write through `lib.lifecycle.setDebugMode(store, enabled)`
 - profile/hash plumbing should stage values through `session.write(...)` and flush them through `session._flushToConfig()`
 - transient aliases are read from `session`
@@ -426,11 +468,16 @@ end
 
 local PLUGIN_GUID = _PLUGIN.guid
 
-lib.createModuleHost({
+internal.host, internal.store = lib.createModule({
+    owner = internal,
     pluginGuid = PLUGIN_GUID,
-    definition = internal.definition,
-    store = store,
-    session = session,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = MODULE_ID,
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
     hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
@@ -601,7 +648,7 @@ Infers the mutation lifecycle shape:
 
 Registers coordinator config for a pack. Framework uses this during coordinator initialization.
 
-### `lib.lifecycle.setEnabled(def, store, enabled)`
+### `lib.lifecycle.setEnabled(def, mutationBundle, store, enabled)`
 
 Transitions persisted enabled state and applies/reverts mutation state as needed.
 
@@ -609,25 +656,25 @@ Transitions persisted enabled state and applies/reverts mutation state as needed
 
 Writes the persisted debug-mode flag for a module store.
 
-### `lib.lifecycle.affectsRunData(def)`
+### `lib.lifecycle.affectsRunData(mutationBundle)`
 
-Returns whether the module definition opts into live run-data mutation behavior.
+Returns whether a mutation bundle declares live run-data mutation behavior.
 
-### `lib.lifecycle.applyMutation(def, store)`
+### `lib.lifecycle.applyMutation(def, mutationBundle, store)`
 
 Applies the module's mutation lifecycle.
 Manual lifecycle hooks receive the same store as `apply(store)`.
 
-### `lib.lifecycle.revertMutation(def, store)`
+### `lib.lifecycle.revertMutation(def, mutationBundle, store)`
 
 Reverts the module's mutation lifecycle.
 Manual lifecycle hooks receive the same store as `revert(store)`.
 
-### `lib.lifecycle.reapplyMutation(def, store)`
+### `lib.lifecycle.reapplyMutation(def, mutationBundle, store)`
 
 Reverts and reapplies the module's mutation lifecycle.
 
-### `lib.lifecycle.applyOnLoad(def, store)`
+### `lib.lifecycle.applyOnLoad(def, mutationBundle, store)`
 
 Syncs live mutation state to the module's effective enabled state on load. Framework calls this for coordinated modules; `lib.standaloneHost(...)` calls it for standalone modules.
 
@@ -635,21 +682,21 @@ Syncs live mutation state to the module's effective enabled state on load. Frame
 
 Audits staged state against persisted config, logs drift, then reloads staged values from config.
 
-### `lib.lifecycle.commitSession(def, store, session)`
+### `lib.lifecycle.commitSession(def, mutationBundle, settingsObserver, store, session)`
 
 Transactional commit helper for staged `session`.
 
 Behavior:
 - flushes staged persisted values to config
-- if the module is enabled and `affectsRunData`, reapplies mutation state
-- calls `definition.onSettingsCommitted(store)` after a successful dirty commit when present
+- if the module is enabled and the mutation bundle affects run data, reapplies mutation state
+- calls `settingsObserver(store)` after a successful dirty commit when present
 - on failure, restores the previous config snapshot and reloads `session`
 
 `onSettingsCommitted` is a post-commit observer for rebuilding derived runtime/UI structures. It is not transactional; callback errors are warned and do not roll back the committed config.
 
-### `lib.lifecycle.notifySettingsCommitted(def, store)`
+### `lib.lifecycle.notifySettingsCommitted(def, settingsObserver, store)`
 
-Runs `definition.onSettingsCommitted(store)` when present. Host flush paths use this after direct staged writes, so profile/hash imports and normal UI commits share the same observer boundary.
+Runs `settingsObserver(store)` when present. Host flush paths use this after direct staged writes, so profile/hash imports and normal UI commits share the same observer boundary.
 
 ## Standalone Host
 
@@ -662,6 +709,10 @@ Creates a behavior-only host object around:
 - `session`
 - optional `hookOwner`
 - optional `registerHooks`
+- optional `registerPatchMutation`
+- optional `registerManualMutation`
+- optional `onSettingsCommitted`
+- optional `registerIntegrations`
 - `drawTab`
 - optional `drawQuickContent`
 
@@ -671,35 +722,20 @@ Creates a behavior-only host object around:
 - `session.write(alias, value)`
 - `session.reset(alias)`
 
-Commit and reload behavior stays on the host object.
+Commit and reload behavior stays on Lib's internal live host. Modules do not receive
+that object directly.
 
 If `registerHooks` is provided:
 - `hookOwner` must be a persistent table
 - the host runs `registerHooks()` during host creation
 - hook declarations made through `lib.hooks.*` are refreshed as one registration pass for that owner
 
-Returned surface:
+Returned author surface:
+- `host.isEnabled()`
 - `host.getIdentity()`
 - `host.getMeta()`
-- `host.affectsRunData()`
-- `host.getHashHints()`
-- `host.getStorage()`
-- `host.read(alias)`
-- `host.writeAndFlush(alias, value)`
-- `host.stage(alias, value)`
-- `host.flush()`
-- `host.reloadFromConfig()`
-- `host.resync()`
-- `host.resetToDefaults(opts?)`
-- `host.commitIfDirty()`
-- `host.isEnabled()`
-- `host.setEnabled(enabled)`
-- `host.setDebugMode(enabled)`
-- `host.applyOnLoad()`
-- `host.applyMutation()`
-- `host.revertMutation()`
-- `host.drawTab(imgui)`
-- `host.drawQuickContent(imgui)`
+
+Runtime host behavior is resolved internally through the live-host registry.
 
 Use this as the bridge between module state and either:
 - Framework hosting
@@ -731,6 +767,14 @@ Behavior:
   - `Resync Session`
 - then calls `moduleHost.drawTab(...)`
 - commits dirty staged state through `moduleHost.commitIfDirty()`
+
+### `lib.getLiveModuleHost(pluginGuid)`
+
+Returns the full runtime host registered by `lib.createModuleHost(...)`.
+
+This is an infrastructure API for Framework discovery, standalone hosting, and
+Lib internals. Normal module code should keep the author host returned by
+`lib.createModuleHost(...)` and use `store`/`session` for state access.
 
 ## Module Coordination Queries
 

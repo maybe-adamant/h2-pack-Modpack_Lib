@@ -57,8 +57,8 @@ local function SetActiveManualRevert(def, store, revertFn)
     SetRuntimeState(def, store, runtime)
 end
 
-local function BuildMutationPlan(def, store)
-    local builder = def and def.patchPlan
+local function BuildMutationPlan(mutationBundle, store)
+    local builder = mutationBundle and mutationBundle.patchMutation
     if type(builder) ~= "function" then
         return nil
     end
@@ -123,14 +123,15 @@ local function RevertActiveMutation(def, store)
     return true, nil, didActive
 end
 
---- Infers which mutation lifecycle a module definition exposes.
----@param def ModuleDefinition Candidate module definition table.
+--- Infers which mutation lifecycle a module exposes.
+---@param mutationBundle table|nil Candidate mutation bundle.
 ---@return MutationShape|nil shape Inferred lifecycle shape: `patch`, `manual`, `hybrid`, or nil.
 ---@return MutationInfo info Flags describing which lifecycle hooks are present on the definition.
-function mutationInternal.inferMutation(def)
-    local hasPatch = def and type(def.patchPlan) == "function" or false
-    local hasApply = def and type(def.apply) == "function" or false
-    local hasRevert = def and type(def.revert) == "function" or false
+function mutationInternal.inferMutation(mutationBundle)
+    local manual = mutationBundle and mutationBundle.manualMutation or nil
+    local hasPatch = mutationBundle and type(mutationBundle.patchMutation) == "function" or false
+    local hasApply = manual and type(manual.apply) == "function" or false
+    local hasRevert = manual and type(manual.revert) == "function" or false
     local hasManual = hasApply and hasRevert
 
     local inferred = nil
@@ -150,23 +151,21 @@ function mutationInternal.inferMutation(def)
     }
 end
 
---- Returns whether a module definition declares that it affects live run data.
----@param def ModuleDefinition|nil Candidate module definition table.
+--- Returns whether a module declares that it affects live run data.
+---@param mutationBundle table|nil Candidate mutation bundle.
 ---@return boolean affects True when the definition opts into run-data mutation behavior.
-function mutationInternal.affectsRunData(def)
-    if not def then
-        return false
-    end
-    return def.affectsRunData == true
+function mutationInternal.affectsRunData(mutationBundle)
+    return mutationBundle and mutationBundle.affectsRunData == true or false
 end
 
---- Applies a module definition's current mutation lifecycle to live run data.
+--- Applies a module's current mutation lifecycle to live run data.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle applied successfully.
 ---@return string|nil err Error message when the apply step fails.
-function mutationInternal.apply(def, store)
-    local inferred, info = mutationInternal.inferMutation(def)
+function mutationInternal.apply(def, mutationBundle, store)
+    local inferred, info = mutationInternal.inferMutation(mutationBundle)
 
     local okActive, errActive = RevertActiveMutation(def, store)
     if not okActive then
@@ -174,7 +173,7 @@ function mutationInternal.apply(def, store)
     end
 
     if not inferred then
-        if not mutationInternal.affectsRunData(def) then
+        if not mutationInternal.affectsRunData(mutationBundle) then
             return true, nil
         end
         return false, "no supported mutation lifecycle found"
@@ -182,7 +181,7 @@ function mutationInternal.apply(def, store)
 
     local builtPlan = nil
     if info.hasPatch then
-        local okBuild, result = pcall(BuildMutationPlan, def, store)
+        local okBuild, result = pcall(BuildMutationPlan, mutationBundle, store)
         if not okBuild then
             return false, result
         end
@@ -197,7 +196,8 @@ function mutationInternal.apply(def, store)
     end
 
     if info.hasManual then
-        local okManual, errManual = pcall(def.apply, store)
+        local manual = mutationBundle.manualMutation
+        local okManual, errManual = pcall(manual.apply, store)
         if not okManual then
             if builtPlan then
                 pcall(builtPlan.revert, builtPlan)
@@ -205,7 +205,7 @@ function mutationInternal.apply(def, store)
             end
             return false, errManual
         end
-        SetActiveManualRevert(def, store, def.revert)
+        SetActiveManualRevert(def, store, manual.revert)
     end
 
     return true, nil
@@ -221,19 +221,20 @@ function mutationInternal.revertActive(def, store)
     return ok, err
 end
 
---- Reverts a module definition's current mutation lifecycle from live run data.
+--- Reverts a module's current mutation lifecycle from live run data.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reverted successfully.
 ---@return string|nil err Error message when the revert step fails.
-function mutationInternal.revert(def, store)
-    local inferred, info = mutationInternal.inferMutation(def)
+function mutationInternal.revert(def, mutationBundle, store)
+    local inferred, info = mutationInternal.inferMutation(mutationBundle)
     if not inferred then
         local okActive, errActive, didActive = RevertActiveMutation(def, store)
         if not okActive then
             return false, errActive
         end
-        if didActive or not mutationInternal.affectsRunData(def) then
+        if didActive or not mutationInternal.affectsRunData(mutationBundle) then
             return true, nil
         end
         return false, "no supported mutation lifecycle found"
@@ -242,11 +243,12 @@ function mutationInternal.revert(def, store)
     local firstErr = nil
 
     if info.hasManual then
+        local manual = mutationBundle.manualMutation
         local okActiveManual, errActiveManual, didActiveManual = RevertActiveManual(def, store)
         if not okActiveManual and not firstErr then
             firstErr = errActiveManual
         elseif not didActiveManual then
-            local okManual, errManual = pcall(def.revert, store)
+            local okManual, errManual = pcall(manual.revert, store)
             if not okManual and not firstErr then
                 firstErr = errManual
             end
@@ -265,18 +267,19 @@ function mutationInternal.revert(def, store)
     return true, nil
 end
 
---- Reverts and reapplies a module definition's mutation lifecycle.
+--- Reverts and reapplies a module's mutation lifecycle.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reapplied successfully.
 ---@return string|nil err Error message when the reapply step fails.
-function mutationInternal.reapply(def, store)
-    local okRevert, errRevert = mutationInternal.revert(def, store)
+function mutationInternal.reapply(def, mutationBundle, store)
+    local okRevert, errRevert = mutationInternal.revert(def, mutationBundle, store)
     if not okRevert then
         return false, errRevert
     end
 
-    local okApply, errApply = mutationInternal.apply(def, store)
+    local okApply, errApply = mutationInternal.apply(def, mutationBundle, store)
     if not okApply then
         return false, errApply
     end

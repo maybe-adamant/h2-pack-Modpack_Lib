@@ -12,11 +12,11 @@ end
 
 function TestLogging:tearDown()
     print = self.previousPrint
-    AdamantModpackLib_Internal.violationSeverity["test.warn"] = nil
-    AdamantModpackLib_Internal.violationSeverity["test.debug"] = nil
-    AdamantModpackLib_Internal.violationSeverity["test.ignore"] = nil
-    AdamantModpackLib_Internal.violationSeverity["test.error"] = nil
-    AdamantModpackLib_Internal.violationSeverity["test.invalid"] = nil
+    AdamantModpackLib_Internal.violationPolicy["test.warn"] = nil
+    AdamantModpackLib_Internal.violationPolicy["test.debug"] = nil
+    AdamantModpackLib_Internal.violationPolicy["test.ignore"] = nil
+    AdamantModpackLib_Internal.violationPolicy["test.error"] = nil
+    AdamantModpackLib_Internal.violationPolicy["test.invalid"] = nil
     lib.config.DebugMode = false
 end
 
@@ -45,7 +45,10 @@ function TestLogging:testLogIfHonorsEnabledFlagAndHandlesPlainMessages()
 end
 
 function TestLogging:testViolationWarnUsesPolicyId()
-    AdamantModpackLib_Internal.violationSeverity["test.warn"] = "warn"
+    AdamantModpackLib_Internal.violationPolicy["test.warn"] = {
+        severity = "warn",
+        description = "Test warning policy.",
+    }
 
     local severity, message = AdamantModpackLib_Internal.violate("test.warn", "hello %s", "world")
 
@@ -61,8 +64,46 @@ function TestLogging:testViolationPolicyCarriesDescriptions()
     lu.assertStrContains(policy.description, "persisted")
 end
 
+function TestLogging:testViolationPolicyMatchesSourceCallSites()
+    local files = {
+        "src/core/definition.lua",
+        "src/core/game_object.lua",
+        "src/core/hooks.lua",
+        "src/core/host.lua",
+        "src/core/integrations.lua",
+        "src/core/lifecycle.lua",
+        "src/core/overlays.lua",
+        "src/core/store.lua",
+        "src/core/internal/logging.lua",
+        "src/core/internal/session.lua",
+        "src/core/internal/storage.lua",
+        "src/core/internal/storage_types.lua",
+        "src/core/internal/store.lua",
+    }
+    local referenced = {}
+
+    for _, path in ipairs(files) do
+        local handle = assert(io.open(path, "r"))
+        local source = handle:read("*a")
+        handle:close()
+        for id in string.gmatch(source, "internal%.violate%s*%(%s*[\"']([^\"']+)[\"']") do
+            referenced[id] = true
+            lu.assertNotNil(AdamantModpackLib_Internal.violationPolicy[id], id)
+        end
+    end
+
+    for id in pairs(AdamantModpackLib_Internal.violationPolicy) do
+        if not string.match(id, "^test%.") then
+            lu.assertTrue(referenced[id], id)
+        end
+    end
+end
+
 function TestLogging:testViolationDebugHonorsLibDebugMode()
-    AdamantModpackLib_Internal.violationSeverity["test.debug"] = "debug"
+    AdamantModpackLib_Internal.violationPolicy["test.debug"] = {
+        severity = "debug",
+        description = "Test debug policy.",
+    }
 
     AdamantModpackLib_Internal.violate("test.debug", "hidden")
     lib.config.DebugMode = true
@@ -72,7 +113,10 @@ function TestLogging:testViolationDebugHonorsLibDebugMode()
 end
 
 function TestLogging:testViolationIgnoreReturnsWithoutPrinting()
-    AdamantModpackLib_Internal.violationSeverity["test.ignore"] = "ignore"
+    AdamantModpackLib_Internal.violationPolicy["test.ignore"] = {
+        severity = "ignore",
+        description = "Test ignored policy.",
+    }
 
     local severity, message = AdamantModpackLib_Internal.violate("test.ignore", "ignored")
 
@@ -82,7 +126,10 @@ function TestLogging:testViolationIgnoreReturnsWithoutPrinting()
 end
 
 function TestLogging:testViolationErrorRaises()
-    AdamantModpackLib_Internal.violationSeverity["test.error"] = "error"
+    AdamantModpackLib_Internal.violationPolicy["test.error"] = {
+        severity = "error",
+        description = "Test error policy.",
+    }
 
     lu.assertErrorMsgContains("[lib] test.error: broken", function()
         AdamantModpackLib_Internal.violate("test.error", "broken")
@@ -90,7 +137,10 @@ function TestLogging:testViolationErrorRaises()
 end
 
 function TestLogging:testViolationRejectsInvalidSeverity()
-    AdamantModpackLib_Internal.violationSeverity["test.invalid"] = "trace"
+    AdamantModpackLib_Internal.violationPolicy["test.invalid"] = {
+        severity = "trace",
+        description = "Test invalid policy.",
+    }
 
     lu.assertErrorMsgContains("violation.invalid_severity", function()
         AdamantModpackLib_Internal.violate("test.invalid", "broken")

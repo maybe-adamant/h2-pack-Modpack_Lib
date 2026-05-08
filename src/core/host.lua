@@ -11,6 +11,11 @@ local internal = AdamantModpackLib_Internal
 ---@field reset fun(alias: string)
 ---@field resetToDefaults fun(opts: table|nil): boolean, number
 
+---@class AuthorHost
+---@field isEnabled fun(): boolean
+---@field getIdentity fun(): table
+---@field getMeta fun(): table
+
 ---@class ModuleHostOpts
 ---@field definition ModuleDefinition
 ---@field pluginGuid string
@@ -18,8 +23,12 @@ local internal = AdamantModpackLib_Internal
 ---@field session Session
 ---@field hookOwner table|nil
 ---@field registerHooks fun()|nil
----@field drawTab fun(imgui: table, session: AuthorSession)
----@field drawQuickContent fun(imgui: table, session: AuthorSession)|nil
+---@field registerPatchMutation fun(plan: table, store: ManagedStore)|nil
+---@field registerManualMutation table|nil
+---@field onSettingsCommitted fun(store: ManagedStore)|nil
+---@field registerIntegrations fun(host: AuthorHost)|nil
+---@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
+---@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
 
 ---@class ModuleHost
 ---@field getIdentity fun(): table
@@ -51,16 +60,69 @@ function public.getLiveModuleHost(pluginGuid)
     return internal.liveModuleHosts[pluginGuid]
 end
 
+local KnownHostOpts = {
+    definition = true,
+    pluginGuid = true,
+    store = true,
+    session = true,
+    hookOwner = true,
+    registerHooks = true,
+    registerPatchMutation = true,
+    registerManualMutation = true,
+    onSettingsCommitted = true,
+    registerIntegrations = true,
+    drawTab = true,
+    drawQuickContent = true,
+}
+
+local function ValidateKnownOpts(opts, context)
+    for key in pairs(opts) do
+        if not KnownHostOpts[key] then
+            internal.violate("host.unknown_opt", "%s: unknown option '%s'", context, tostring(key))
+        end
+    end
+end
+
+local function BuildMutationBundle(opts)
+    local patchMutation = opts.registerPatchMutation
+    local manualMutation = opts.registerManualMutation
+
+    if patchMutation ~= nil and type(patchMutation) ~= "function" then
+        internal.violate("host.invalid_create_opts", "createModuleHost: registerPatchMutation must be a function")
+    end
+    if manualMutation ~= nil then
+        if type(manualMutation) ~= "table" then
+            internal.violate("host.invalid_create_opts", "createModuleHost: registerManualMutation must be a table")
+        end
+        if type(manualMutation.apply) ~= "function" or type(manualMutation.revert) ~= "function" then
+            internal.violate(
+                "host.invalid_create_opts",
+                "createModuleHost: registerManualMutation requires apply and revert functions"
+            )
+        end
+    end
+    if opts.onSettingsCommitted ~= nil and type(opts.onSettingsCommitted) ~= "function" then
+        internal.violate("host.invalid_create_opts", "createModuleHost: onSettingsCommitted must be a function")
+    end
+
+    return {
+        affectsRunData = patchMutation ~= nil or manualMutation ~= nil,
+        patchMutation = patchMutation,
+        manualMutation = manualMutation,
+    }, opts.onSettingsCommitted
+end
+
 --- Creates a behavior-only host object for Framework and standalone hosting.
 --- Registers the created host into Lib's live-host registry under `opts.pluginGuid`
 --- so coordinated discovery can resolve it immediately.
 --- The host closes over store/session without exposing those state handles publicly.
 ---@param opts ModuleHostOpts
----@return ModuleHost host Module host behavior contract.
+---@return AuthorHost host Module author host view.
 function public.createModuleHost(opts)
     if type(opts) ~= "table" then
         internal.violate("host.invalid_create_opts", "createModuleHost: opts must be a table")
     end
+    ValidateKnownOpts(opts, "createModuleHost")
     local def = opts.definition
     local store = opts.store
     local session = opts.session
@@ -77,8 +139,10 @@ function public.createModuleHost(opts)
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
     local registerHooks = opts.registerHooks
+    local registerIntegrations = opts.registerIntegrations
     local hookOwner = opts.hookOwner
     local pluginGuid = opts.pluginGuid
+    local mutationBundle, settingsObserver = BuildMutationBundle(opts)
 
     if type(drawTab) ~= "function" then
         internal.violate("host.invalid_create_opts", "createModuleHost: drawTab is required")
@@ -95,6 +159,9 @@ function public.createModuleHost(opts)
             internal.violate("host.invalid_create_opts", "createModuleHost: hookOwner is required when registerHooks is provided")
         end
         internal.hooks.refresh(hookOwner, registerHooks)
+    end
+    if registerIntegrations ~= nil and type(registerIntegrations) ~= "function" then
+        internal.violate("host.invalid_create_opts", "createModuleHost: registerIntegrations must be a function")
     end
 
     ---@type AuthorSession
@@ -127,7 +194,7 @@ function public.createModuleHost(opts)
     end
 
     function host.affectsRunData()
-        return public.lifecycle.affectsRunData(def)
+        return public.lifecycle.affectsRunData(mutationBundle)
     end
 
     function host.getHashHints()
@@ -145,7 +212,7 @@ function public.createModuleHost(opts)
     function host.writeAndFlush(alias, value)
         session.write(alias, value)
         session._flushToConfig()
-        return public.lifecycle.notifySettingsCommitted(def, store)
+        return public.lifecycle.notifySettingsCommitted(def, settingsObserver, store)
     end
 
     function host.stage(alias, value)
@@ -158,7 +225,7 @@ function public.createModuleHost(opts)
             return true
         end
         session._flushToConfig()
-        return public.lifecycle.notifySettingsCommitted(def, store)
+        return public.lifecycle.notifySettingsCommitted(def, settingsObserver, store)
     end
 
     function host.reloadFromConfig()
@@ -177,7 +244,7 @@ function public.createModuleHost(opts)
         if not session.isDirty() then
             return true, nil, false
         end
-        local ok, err = public.lifecycle.commitSession(def, store, session)
+        local ok, err = public.lifecycle.commitSession(def, mutationBundle, settingsObserver, store, session)
         return ok, err, ok == true
     end
 
@@ -186,7 +253,7 @@ function public.createModuleHost(opts)
     end
 
     function host.setEnabled(enabled)
-        return public.lifecycle.setEnabled(def, store, enabled)
+        return public.lifecycle.setEnabled(def, mutationBundle, store, enabled)
     end
 
     function host.setDebugMode(enabled)
@@ -194,24 +261,31 @@ function public.createModuleHost(opts)
     end
 
     function host.applyOnLoad()
-        return public.lifecycle.applyOnLoad(def, store)
+        return public.lifecycle.applyOnLoad(def, mutationBundle, store)
     end
 
     function host.applyMutation()
-        return public.lifecycle.applyMutation(def, store)
+        return public.lifecycle.applyMutation(def, mutationBundle, store)
     end
 
     function host.revertMutation()
-        return public.lifecycle.revertMutation(def, store)
+        return public.lifecycle.revertMutation(def, mutationBundle, store)
     end
 
+    ---@type AuthorHost
+    local authorHost = {
+        isEnabled = host.isEnabled,
+        getIdentity = host.getIdentity,
+        getMeta = host.getMeta,
+    }
+
     function host.drawTab(imgui)
-        return drawTab(imgui, authorSession)
+        return drawTab(imgui, authorSession, authorHost)
     end
 
     if type(drawQuickContent) == "function" then
         function host.drawQuickContent(imgui)
-            return drawQuickContent(imgui, authorSession)
+            return drawQuickContent(imgui, authorSession, authorHost)
         end
     end
 
@@ -221,6 +295,9 @@ function public.createModuleHost(opts)
     local pendingCoordinatorRebuild = internal.pendingCoordinatorRebuilds[def]
     local hasPendingCoordinatorRebuild = type(pendingCoordinatorRebuild) == "table"
     internal.liveModuleHosts[pluginGuid] = host
+    if registerIntegrations then
+        registerIntegrations(authorHost)
+    end
     if not hasPendingCoordinatorRebuild
         and type(packId) == "string"
         and packId ~= ""
@@ -243,7 +320,7 @@ function public.createModuleHost(opts)
         end
     end
 
-    return host
+    return authorHost
 end
 
 --- Initializes standalone module hosting and returns window/menu-bar renderers.

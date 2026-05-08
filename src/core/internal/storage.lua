@@ -5,6 +5,21 @@ local StorageTypes = storageInternal.types
 local NormalizeInteger = storageInternal.NormalizeInteger
 local values = internal.values
 
+-- Storage schemas are prepared once by prepareDefinition, then treated as
+-- runtime-stable metadata by store/session/Framework consumers. Validation is
+-- fail-fast: the first structural contract violation stops preparation.
+--
+-- Supported root-axis combinations:
+--   persist=true,  stage=true,  hash=true   -> config-backed UI/profile/hash state.
+--   persist=true,  stage=true,  hash=false  -> config-backed UI state excluded from hashes.
+--   persist=false, stage=true,  hash=false  -> transient staged UI state.
+--   persist=true,  stage=false, hash=false  -> persistent runtime cache via store.writeUnstaged.
+--   persist=false, stage=false, hash=false  -> in-memory runtime cache via store.writeUnstaged.
+--
+-- hash=true requires persist=true and stage=true. Table rows inherit their
+-- table root axes. PackedInt roots currently require stage=true so root and
+-- child aliases stay synchronized through the session surface.
+
 ---@alias StorageValueKind "'bool'"|"'int'"|"'string'"|"'table'"
 ---@alias StorageNodeType "'bool'"|"'int'"|"'string'"|"'packedInt'"|"'table'"
 

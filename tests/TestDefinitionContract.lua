@@ -10,54 +10,48 @@ function TestDefinitionContract:tearDown()
     RestoreWarnings()
 end
 
-function TestDefinitionContract:testCreateStoreWarnsOnUnknownTopLevelDefinitionKey()
-    lib.prepareDefinition({}, {
-        id = "Example",
-        name = "Example",
-        storage = {
-            { type = "bool", alias = "EnabledFlag", default = false },
-        },
-        ui = {},
-        affectRunData = true,
-    })
-
-    local joined = table.concat(Warnings, "\n")
-    lu.assertEquals(#Warnings, 2)
-    lu.assertStrContains(joined, "unknown definition key 'ui'")
-    lu.assertStrContains(joined, "unknown definition key 'affectRunData'")
+function TestDefinitionContract:testCreateStoreErrorsOnUnknownTopLevelDefinitionKey()
+    lu.assertErrorMsgContains("unknown definition key 'ui'", function()
+        lib.prepareDefinition({}, {
+            id = "Example",
+            name = "Example",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+            ui = {},
+        })
+    end)
 end
 
-function TestDefinitionContract:testValidateDefinitionWarnsOnOldVocabularyKeysAsUnknown()
-    lib.prepareDefinition({}, {
-        modpack = "test-pack",
-        id = "ExampleSpecial",
-        name = "Example Special",
-        category = "Run Mods",
-        subgroup = "General",
-        selectQuickUi = function() end,
-        storage = {
-            { type = "bool", alias = "EnabledFlag", default = false },
-        },
-    })
-
-    local joined = table.concat(Warnings, "\n")
-    lu.assertEquals(#Warnings, 3)
-    lu.assertStrContains(joined, "unknown definition key 'category'")
-    lu.assertStrContains(joined, "unknown definition key 'subgroup'")
-    lu.assertStrContains(joined, "unknown definition key 'selectQuickUi'")
+function TestDefinitionContract:testValidateDefinitionErrorsOnOldVocabularyKeysAsUnknown()
+    lu.assertErrorMsgContains("unknown definition key 'category'", function()
+        lib.prepareDefinition({}, {
+            modpack = "test-pack",
+            id = "ExampleSpecial",
+            name = "Example Special",
+            category = "Run Mods",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+        })
+    end)
 end
 
-function TestDefinitionContract:testPrepareDefinitionRejectsIncompleteLifecycleWhenRunDataIsAffected()
-    local ok, err = pcall(function()
+function TestDefinitionContract:testPrepareDefinitionRejectsBehaviorFieldsAsUnknownKeys()
+    lu.assertErrorMsgContains("unknown definition key 'affectsRunData'", function()
         lib.prepareDefinition({}, {
             id = "Example",
             name = "Example",
             affectsRunData = true,
-            apply = function() end,
         })
     end)
 
-    lu.assertFalse(ok)
-    lu.assertStrContains(tostring(err), "affectsRunData=true requires patchPlan or apply/revert")
+    lu.assertErrorMsgContains("unknown definition key 'apply'", function()
+        lib.prepareDefinition({}, {
+            id = "Example",
+            name = "Example",
+            apply = function() end,
+        })
+    end)
 end
 

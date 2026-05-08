@@ -2,6 +2,34 @@ local lu = require('luaunit')
 
 TestDefinitionLifecycle = {}
 
+local function PatchMutation(fn)
+    return {
+        affectsRunData = true,
+        patchMutation = fn,
+    }
+end
+
+local function ManualMutation(apply, revert)
+    return {
+        affectsRunData = true,
+        manualMutation = {
+            apply = apply,
+            revert = revert,
+        },
+    }
+end
+
+local function HybridMutation(patch, apply, revert)
+    return {
+        affectsRunData = true,
+        patchMutation = patch,
+        manualMutation = {
+            apply = apply,
+            revert = revert,
+        },
+    }
+end
+
 local function makeStore(enabled)
     return lib.createStore({ Enabled = enabled }, lib.prepareDefinition({}, { storage = {} }))
 end
@@ -212,10 +240,7 @@ function TestDefinitionLifecycle:testSetElementErrorsOnNonTableTarget()
 end
 
 function TestDefinitionLifecycle:testInferMutationShapeManual()
-    local mode, info = lib.lifecycle.inferMutation({
-        apply = function() end,
-        revert = function() end,
-    })
+    local mode, info = lib.lifecycle.inferMutation(ManualMutation(function() end, function() end))
 
     lu.assertEquals(mode, "manual")
     lu.assertTrue(info.hasManual)
@@ -223,9 +248,7 @@ function TestDefinitionLifecycle:testInferMutationShapeManual()
 end
 
 function TestDefinitionLifecycle:testInferMutationShapePatch()
-    local mode, info = lib.lifecycle.inferMutation({
-        patchPlan = function() end,
-    })
+    local mode, info = lib.lifecycle.inferMutation(PatchMutation(function() end))
 
     lu.assertEquals(mode, "patch")
     lu.assertTrue(info.hasPatch)
@@ -233,11 +256,7 @@ function TestDefinitionLifecycle:testInferMutationShapePatch()
 end
 
 function TestDefinitionLifecycle:testInferMutationShapeHybrid()
-    local mode, info = lib.lifecycle.inferMutation({
-        patchPlan = function() end,
-        apply = function() end,
-        revert = function() end,
-    })
+    local mode, info = lib.lifecycle.inferMutation(HybridMutation(function() end, function() end, function() end))
 
     lu.assertEquals(mode, "hybrid")
     lu.assertTrue(info.hasPatch)
@@ -266,15 +285,15 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlus
                 default = false,
             },
         },
-        onSettingsCommitted = function(store)
-            calls = calls + 1
-            observedValue = store.read("Value")
-        end,
     })
     local store, session = lib.createStore(config, definition)
+    local settingsObserver = function(activeStore)
+        calls = calls + 1
+        observedValue = activeStore.read("Value")
+    end
 
     session.write("Value", true)
-    local ok, err = lib.lifecycle.commitSession(definition, store, session)
+    local ok, err = lib.lifecycle.commitSession(definition, nil, settingsObserver, store, session)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -282,7 +301,7 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlus
     lu.assertTrue(observedValue)
     lu.assertTrue(config.Value)
 
-    ok, err = lib.lifecycle.commitSession(definition, store, session)
+    ok, err = lib.lifecycle.commitSession(definition, nil, settingsObserver, store, session)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(calls, 1)
@@ -291,18 +310,17 @@ end
 function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()
     local store = makeStore(false)
     local target = { Value = 1 }
-    local def = {
-        patchPlan = function(plan)
+    local def = {}
+    local mutation = PatchMutation(function(plan)
             plan:set(target, "Value", 7)
-        end,
-    }
+        end)
 
-    local ok, err = lib.lifecycle.applyMutation(def, store)
+    local ok, err = lib.lifecycle.applyMutation(def, mutation, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 7)
 
-    ok, err = lib.lifecycle.revertMutation(def, store)
+    ok, err = lib.lifecycle.revertMutation(def, mutation, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -314,12 +332,12 @@ function TestDefinitionLifecycle:testPatchRuntimeSurvivesRecreatedStoreByModuleI
     local defA = {
         modpack = "test-pack",
         id = "StablePatchRuntime",
-        patchPlan = function(plan)
-            plan:set(target, "Value", 7)
-        end,
     }
+    local mutationA = PatchMutation(function(plan)
+            plan:set(target, "Value", 7)
+        end)
 
-    local ok, err = lib.lifecycle.applyMutation(defA, storeA)
+    local ok, err = lib.lifecycle.applyMutation(defA, mutationA, storeA)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 7)
@@ -328,17 +346,17 @@ function TestDefinitionLifecycle:testPatchRuntimeSurvivesRecreatedStoreByModuleI
     local defB = {
         modpack = "test-pack",
         id = "StablePatchRuntime",
-        patchPlan = function(plan)
-            plan:set(target, "Value", 9)
-        end,
     }
+    local mutationB = PatchMutation(function(plan)
+            plan:set(target, "Value", 9)
+        end)
 
-    ok, err = lib.lifecycle.applyMutation(defB, storeB)
+    ok, err = lib.lifecycle.applyMutation(defB, mutationB, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 9)
 
-    ok, err = lib.lifecycle.revertMutation(defB, storeB)
+    ok, err = lib.lifecycle.revertMutation(defB, mutationB, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -350,20 +368,19 @@ function TestDefinitionLifecycle:testApplyOnLoadRevertsStablePatchWhenReloadedDi
     local def = {
         modpack = "test-pack",
         id = "DisabledReloadPatchRuntime",
-        affectsRunData = true,
-        patchPlan = function(plan)
-            plan:set(target, "Value", 7)
-        end,
     }
+    local mutation = PatchMutation(function(plan)
+            plan:set(target, "Value", 7)
+        end)
 
-    local ok, err = lib.lifecycle.applyMutation(def, storeA)
+    local ok, err = lib.lifecycle.applyMutation(def, mutation, storeA)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 7)
 
     local storeB = makeStore(false)
 
-    ok, err = lib.lifecycle.applyOnLoad(def, storeB)
+    ok, err = lib.lifecycle.applyOnLoad(def, mutation, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -375,15 +392,14 @@ function TestDefinitionLifecycle:testManualRuntimeSurvivesRecreatedStoreByModule
     local defA = {
         modpack = "test-pack",
         id = "StableManualRuntime",
-        apply = function()
-            target.Value = target.Value + 1
-        end,
-        revert = function()
-            target.Value = target.Value - 1
-        end,
     }
+    local mutationA = ManualMutation(function()
+        target.Value = target.Value + 1
+    end, function()
+        target.Value = target.Value - 1
+    end)
 
-    local ok, err = lib.lifecycle.applyMutation(defA, storeA)
+    local ok, err = lib.lifecycle.applyMutation(defA, mutationA, storeA)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -392,20 +408,19 @@ function TestDefinitionLifecycle:testManualRuntimeSurvivesRecreatedStoreByModule
     local defB = {
         modpack = "test-pack",
         id = "StableManualRuntime",
-        apply = function()
-            target.Value = target.Value + 10
-        end,
-        revert = function()
-            target.Value = target.Value - 10
-        end,
     }
+    local mutationB = ManualMutation(function()
+        target.Value = target.Value + 10
+    end, function()
+        target.Value = target.Value - 10
+    end)
 
-    ok, err = lib.lifecycle.applyMutation(defB, storeB)
+    ok, err = lib.lifecycle.applyMutation(defB, mutationB, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 10)
 
-    ok, err = lib.lifecycle.revertMutation(defB, storeB)
+    ok, err = lib.lifecycle.revertMutation(defB, mutationB, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 0)
@@ -417,14 +432,12 @@ function TestDefinitionLifecycle:testApplyOnLoadDisabledDoesNotCallInactiveManua
     local def = {
         modpack = "test-pack",
         id = "InactiveManualRevert",
-        affectsRunData = true,
-        apply = function() end,
-        revert = function()
-            revertCalls = revertCalls + 1
-        end,
     }
+    local mutation = ManualMutation(function() end, function()
+        revertCalls = revertCalls + 1
+    end)
 
-    local ok, err = lib.lifecycle.applyOnLoad(def, store)
+    local ok, err = lib.lifecycle.applyOnLoad(def, mutation, store)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -433,15 +446,13 @@ end
 
 function TestDefinitionLifecycle:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunDataUnaffected()
     local store = makeStore(false)
-    local def = {
-        affectsRunData = false,
-    }
+    local def = {}
 
-    local ok, err = lib.lifecycle.applyMutation(def, store)
+    local ok, err = lib.lifecycle.applyMutation(def, nil, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
 
-    ok, err = lib.lifecycle.revertMutation(def, store)
+    ok, err = lib.lifecycle.revertMutation(def, nil, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
 end
@@ -449,14 +460,12 @@ end
 function TestDefinitionLifecycle:testSetDefinitionEnabledCommitsOnlyAfterSuccessfulEnable()
     local store = makeStore(false)
     local applied = false
-    local def = {
-        apply = function()
-            applied = true
-        end,
-        revert = function() end,
-    }
+    local def = {}
+    local mutation = ManualMutation(function()
+        applied = true
+    end, function() end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, store, true)
+    local ok, err = lib.lifecycle.setEnabled(def, mutation, store, true)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -466,14 +475,12 @@ end
 
 function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedEnable()
     local store = makeStore(false)
-    local def = {
-        apply = function()
-            error("enable boom")
-        end,
-        revert = function() end,
-    }
+    local def = {}
+    local mutation = ManualMutation(function()
+        error("enable boom")
+    end, function() end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, store, true)
+    local ok, err = lib.lifecycle.setEnabled(def, mutation, store, true)
 
     lu.assertFalse(ok)
     lu.assertStrContains(tostring(err), "enable boom")
@@ -482,14 +489,12 @@ end
 
 function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedDisable()
     local store = makeStore(true)
-    local def = {
-        apply = function() end,
-        revert = function()
-            error("disable boom")
-        end,
-    }
+    local def = {}
+    local mutation = ManualMutation(function() end, function()
+        error("disable boom")
+    end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, store, false)
+    local ok, err = lib.lifecycle.setEnabled(def, mutation, store, false)
 
     lu.assertFalse(ok)
     lu.assertStrContains(tostring(err), "disable boom")
@@ -499,16 +504,14 @@ end
 function TestDefinitionLifecycle:testSetDefinitionEnabledReappliesWhenAlreadyEnabled()
     local store = makeStore(true)
     local calls = {}
-    local def = {
-        apply = function()
-            table.insert(calls, "apply")
-        end,
-        revert = function()
-            table.insert(calls, "revert")
-        end,
-    }
+    local def = {}
+    local mutation = ManualMutation(function()
+        table.insert(calls, "apply")
+    end, function()
+        table.insert(calls, "revert")
+    end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, store, true)
+    local ok, err = lib.lifecycle.setEnabled(def, mutation, store, true)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -519,14 +522,12 @@ end
 function TestDefinitionLifecycle:testSetDefinitionEnabledNoOpsWhenAlreadyDisabled()
     local store = makeStore(false)
     local revertCalls = 0
-    local def = {
-        apply = function() end,
-        revert = function()
-            revertCalls = revertCalls + 1
-        end,
-    }
+    local def = {}
+    local mutation = ManualMutation(function() end, function()
+        revertCalls = revertCalls + 1
+    end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, store, false)
+    local ok, err = lib.lifecycle.setEnabled(def, mutation, store, false)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -537,16 +538,14 @@ end
 function TestDefinitionLifecycle:testReapplyDefinitionStopsWhenRevertFails()
     local store = makeStore(true)
     local applyCalls = 0
-    local def = {
-        apply = function()
-            applyCalls = applyCalls + 1
-        end,
-        revert = function()
-            error("revert boom")
-        end,
-    }
+    local def = {}
+    local mutation = ManualMutation(function()
+        applyCalls = applyCalls + 1
+    end, function()
+        error("revert boom")
+    end)
 
-    local ok, err = lib.lifecycle.reapplyMutation(def, store)
+    local ok, err = lib.lifecycle.reapplyMutation(def, mutation, store)
 
     lu.assertFalse(ok)
     lu.assertStrContains(tostring(err), "revert boom")
@@ -557,27 +556,24 @@ function TestDefinitionLifecycle:testHybridOrderingIsPatchThenManualOnApplyAndMa
     local store = makeStore(false)
     local target = { Value = 0 }
     local order = {}
-    local def = {
-        patchPlan = function(plan)
+    local def = {}
+    local mutation = HybridMutation(function(plan)
             table.insert(order, "build")
             plan:set(target, "Value", 10)
-        end,
-        apply = function()
+        end, function()
             table.insert(order, "manual-apply")
             target.Value = target.Value + 5
-        end,
-        revert = function()
+        end, function()
             table.insert(order, "manual-revert")
             target.Value = -1
-        end,
-    }
+        end)
 
-    local ok = lib.lifecycle.applyMutation(def, store)
+    local ok = lib.lifecycle.applyMutation(def, mutation, store)
     lu.assertTrue(ok)
     lu.assertEquals(order, { "build", "manual-apply" })
     lu.assertEquals(target.Value, 15)
 
-    ok = lib.lifecycle.revertMutation(def, store)
+    ok = lib.lifecycle.revertMutation(def, mutation, store)
     lu.assertTrue(ok)
     lu.assertEquals(order, { "build", "manual-apply", "manual-revert" })
     lu.assertEquals(target.Value, 0)

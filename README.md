@@ -17,14 +17,13 @@ The library is designed around immediate-mode UI. Module authors write normal
 draw functions, then expose them through a module host:
 
 ```lua
-local definition = lib.prepareDefinition(internal, {
-    ...
-})
-
-lib.createModuleHost({
-    definition = definition,
-    store = store,
-    session = session,
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        ...
+    },
     hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
@@ -33,7 +32,7 @@ lib.createModuleHost({
 ```
 
 `hookOwner` and `registerHooks` are the standard way to declare a module's runtime hooks when it uses `lib.hooks.*`.
-`lib.createModuleHost(...)` also registers the live host for coordinated discovery and standalone hosting.
+`lib.createModule(...)` also registers the live host for coordinated discovery and standalone hosting.
 
 ## Docs
 
@@ -71,6 +70,7 @@ lib.createModuleHost({
 - `lib.nav`
 
 Common top-level helpers:
+- `lib.createModule(...)`
 - `lib.prepareDefinition(...)`
 - `lib.createStore(...)`
 - `lib.createModuleHost(...)`
@@ -79,11 +79,11 @@ Common top-level helpers:
 - `lib.isModuleCoordinated(...)`
 - `lib.resetStorageToDefaults(...)`
 
-Most authors start with `lib.createStore(...)` and `lib.createModuleHost(...)`.
+Most authors start with `lib.createModule(...)`.
 See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the recommended project shape.
 
-For structural module contracts, author raw definitions through `lib.prepareDefinition(...)`.
-That includes optional `hashGroupPlan` declarations for complex grouped hash layouts; Lib preserves those hints as part of the prepared contract and Framework compiles them when building canonical config hashes.
+For custom construction, the lower-level `prepareDefinition(...)`,
+`createStore(...)`, and `createModuleHost(...)` primitives remain available.
 
 ## Validation
 

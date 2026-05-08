@@ -336,14 +336,15 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
             id = "Alpha",
             name = "Alpha",
             storage = {},
-            affectsRunData = true,
+        }),
+        registerManualMutation = {
             apply = function()
                 applyCalls = applyCalls + 1
             end,
             revert = function()
                 revertCalls = revertCalls + 1
             end,
-        }),
+        },
         store = {
             read = function(key)
                 if key == "Enabled" then
@@ -415,14 +416,15 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
             id = "Alpha",
             name = "Alpha",
             storage = {},
-            affectsRunData = true,
+        }),
+        registerManualMutation = {
             apply = function()
                 firstApplyCalls = firstApplyCalls + 1
             end,
             revert = function()
                 firstRevertCalls = firstRevertCalls + 1
             end,
-        }),
+        },
         store = store,
         session = createSession(),
         drawTab = function() end,
@@ -435,14 +437,15 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
             id = "Alpha",
             name = "Alpha",
             storage = {},
-            affectsRunData = true,
+        }),
+        registerManualMutation = {
             apply = function()
                 secondApplyCalls = secondApplyCalls + 1
             end,
             revert = function()
                 secondRevertCalls = secondRevertCalls + 1
             end,
-        }),
+        },
         store = store,
         session = createSession(),
         drawTab = function() end,
@@ -459,10 +462,13 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         id = "Alpha",
         name = "Alpha",
         storage = {},
+    }, {
         affectsRunData = true,
-        apply = function() end,
-        revert = function()
+        manualMutation = {
+            apply = function() end,
+            revert = function()
             secondRevertCalls = secondRevertCalls + 1
-        end,
+            end,
+        },
     }, store)
 end

@@ -44,7 +44,7 @@ function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
         Spacing = noop,
     }
 
-    local moduleHost = lib.createModuleHost({
+    lib.createModuleHost({
         pluginGuid = pluginGuid,
         definition = definition,
         store = store,
@@ -53,6 +53,7 @@ function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
             drawCalls = drawCalls + 1
         end,
     })
+    local moduleHost = lib.getLiveModuleHost(pluginGuid)
     moduleHost.commitIfDirty = function()
         return false, "commit boom", false
     end
@@ -79,18 +80,20 @@ function TestHost:testStandaloneHostCanResolveCurrentModuleHostFromLibRegistry()
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local host = lib.createModuleHost({
+    local authorHost = lib.createModuleHost({
         pluginGuid = pluginGuid,
         definition = definition,
         store = store,
         session = session,
         drawTab = function() end,
     })
+    local host = lib.getLiveModuleHost(pluginGuid)
 
     local runtime = lib.standaloneHost(pluginGuid)
 
     lu.assertEquals(type(runtime.renderWindow), "function")
     lu.assertEquals(type(runtime.addMenuBar), "function")
+    lu.assertEquals(type(authorHost.isEnabled), "function")
     lu.assertEquals(lib.getLiveModuleHost(pluginGuid), host)
 end
 
@@ -103,21 +106,22 @@ function TestHost:testHostFlushNotifiesSettingsObserver()
         storage = {
             { type = "bool", alias = "Value", default = false },
         },
-        onSettingsCommitted = function(store)
-            calls = calls + 1
-            observedValue = store.read("Value")
-        end,
     })
     local store, session = lib.createStore({
         Value = false,
     }, definition)
-    local host = lib.createModuleHost({
+    lib.createModuleHost({
         pluginGuid = "test-settings-observer-host",
         definition = definition,
         store = store,
         session = session,
+        onSettingsCommitted = function(activeStore)
+            calls = calls + 1
+            observedValue = activeStore.read("Value")
+        end,
         drawTab = function() end,
     })
+    local host = lib.getLiveModuleHost("test-settings-observer-host")
 
     host.stage("Value", true)
     local ok, err = host.flush()
@@ -142,7 +146,7 @@ function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
         EnabledFlag = true,
         Count = 7,
     }, definition)
-    local host = lib.createModuleHost({
+    lib.createModuleHost({
         pluginGuid = "test-reset-host",
         definition = definition,
         store = store,
@@ -151,6 +155,7 @@ function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
             capturedAuthorSession = authorSession
         end,
     })
+    local host = lib.getLiveModuleHost("test-reset-host")
 
     host.drawTab({})
 
@@ -169,6 +174,50 @@ function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
     lu.assertEquals(authorCount, 1)
     lu.assertEquals(session.read("EnabledFlag"), false)
     lu.assertEquals(session.read("Count"), 6)
+end
+
+function TestHost:testCreateModuleHostPassesAuthorHostToCallbacks()
+    local callbackHost = nil
+    local drawHost = nil
+    local quickHost = nil
+    local definition = lib.prepareDefinition({}, {
+        modpack = "author-pack",
+        id = "AuthorHostModule",
+        name = "Author Host Module",
+        storage = {},
+    })
+    local store, session = lib.createStore({
+        Enabled = true,
+        DebugMode = false,
+    }, definition)
+    local returnedHost = lib.createModuleHost({
+        pluginGuid = "test-author-host",
+        definition = definition,
+        store = store,
+        session = session,
+        registerIntegrations = function(authorHost)
+            callbackHost = authorHost
+        end,
+        drawTab = function(_, _, authorHost)
+            drawHost = authorHost
+        end,
+        drawQuickContent = function(_, _, authorHost)
+            quickHost = authorHost
+        end,
+    })
+
+    local host = lib.getLiveModuleHost("test-author-host")
+    host.drawTab({})
+    host.drawQuickContent({})
+
+    lu.assertEquals(returnedHost, callbackHost)
+    lu.assertEquals(callbackHost, drawHost)
+    lu.assertEquals(callbackHost, quickHost)
+    lu.assertEquals(callbackHost.getIdentity().id, "AuthorHostModule")
+    lu.assertEquals(callbackHost.getMeta().name, "Author Host Module")
+    lu.assertTrue(callbackHost.isEnabled())
+    lu.assertNil(callbackHost.read)
+    lu.assertNil(callbackHost.setEnabled)
 end
 
 function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFrameworkRebuildIsPending()
@@ -194,7 +243,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         DebugMode = false,
         EnabledFlag = false,
     }, definition)
-    local host = lib.createModuleHost({
+    lib.createModuleHost({
         pluginGuid = "reload-pack.ReloadHost",
         definition = definition,
         store = store,
@@ -224,13 +273,14 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         DebugMode = false,
         OtherFlag = false,
     }, prepared)
-    local reloadedHost = lib.createModuleHost({
+    lib.createModuleHost({
         pluginGuid = "reload-pack.ReloadHost",
         definition = prepared,
         store = reloadStore,
         session = reloadSession,
         drawTab = function() end,
     })
+    local reloadedHost = lib.getLiveModuleHost("reload-pack.ReloadHost")
 
     lib.lifecycle.applyOnLoad = originalApplyOnLoad
     lib.lifecycle.registerCoordinator(packId, nil)

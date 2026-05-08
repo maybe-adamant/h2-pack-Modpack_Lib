@@ -18,10 +18,6 @@ local DefaultViolationPolicy = {
         description = "Coordinator rebuild callbacks must be callable so structural reloads can be delegated.",
     },
 
-    ["definition.incomplete_manual_lifecycle"] = {
-        severity = "error",
-        description = "Manual lifecycle definitions must provide apply and revert as a pair.",
-    },
     ["definition.invalid_field_type"] = {
         severity = "debug",
         description = "Definition metadata fields should use the expected public contract types.",
@@ -34,17 +30,13 @@ local DefaultViolationPolicy = {
         severity = "debug",
         description = "Coordinated modules should declare an id for discovery and hash/profile identity.",
     },
-    ["definition.missing_mutation"] = {
-        severity = "error",
-        description = "Definitions that affect run data must declare a patch plan or manual lifecycle.",
-    },
     ["definition.structural_reload_required"] = {
         severity = "warn",
         description = "An uncoordinated structural hot reload cannot be reconciled without a full reload.",
     },
     ["definition.unknown_key"] = {
-        severity = "debug",
-        description = "Unknown definition keys are ignored by Lib and may indicate stale author code.",
+        severity = "error",
+        description = "Unknown definition keys are invalid and may indicate stale author code.",
     },
     ["definition.reserved_storage_alias"] = {
         severity = "error",
@@ -66,7 +58,11 @@ local DefaultViolationPolicy = {
 
     ["host.invalid_create_opts"] = {
         severity = "error",
-        description = "Module hosts require prepared definitions, store/session handles, drawTab, and pluginGuid.",
+        description = "Module hosts require prepared definitions, store/session handles, drawTab, pluginGuid, and valid callbacks.",
+    },
+    ["host.unknown_opt"] = {
+        severity = "error",
+        description = "Module host creation only accepts known construction options.",
     },
     ["host.invalid_standalone_binding"] = {
         severity = "error",
@@ -279,18 +275,23 @@ end
 
 internal.formatLogMessage = FormatMessage
 internal.violationPolicy = internal.violationPolicy or {}
-internal.violationSeverity = internal.violationSeverity or {}
+internal.violationSeverity = nil
 
 for id, entry in pairs(DefaultViolationPolicy) do
     assert(type(entry) == "table", "default violation policy entry must be a table: " .. tostring(id))
     assert(AllowedViolationSeverity[entry.severity], "default violation policy has invalid severity: " .. tostring(id))
     assert(type(entry.description) == "string" and entry.description ~= "",
         "default violation policy is missing a description: " .. tostring(id))
-    if internal.violationPolicy[id] == nil then
-        internal.violationPolicy[id] = entry
+    local current = internal.violationPolicy[id]
+    if type(current) ~= "table" then
+        current = {}
+        internal.violationPolicy[id] = current
     end
-    if internal.violationSeverity[id] == nil then
-        internal.violationSeverity[id] = entry.severity
+    if current.severity == nil then
+        current.severity = entry.severity
+    end
+    if current.description == nil then
+        current.description = entry.description
     end
 end
 
@@ -298,10 +299,11 @@ function internal.violate(id, fmt, ...)
     assert(type(id) == "string" and id ~= "", "internal.violate: id must be a non-empty string")
     assert(type(fmt) == "string", "internal.violate: fmt must be a string")
 
-    local severity = internal.violationSeverity[id]
-    if severity == nil then
+    local policy = internal.violationPolicy[id]
+    if type(policy) ~= "table" then
         error(FormatMessage("[lib] violation.unknown_id: ", "unknown violation id '%s'", id), 2)
     end
+    local severity = policy.severity
     if not AllowedViolationSeverity[severity] then
         error(FormatMessage("[lib] violation.invalid_severity: ", "%s is configured with invalid severity '%s'", id, tostring(severity)), 2)
     end

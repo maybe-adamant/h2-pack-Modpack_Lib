@@ -4,12 +4,12 @@ public.lifecycle = public.lifecycle or {}
 local lifecycleApi = public.lifecycle
 local mutationInternal = internal.mutation
 
-function lifecycleApi.notifySettingsCommitted(def, store)
-    if type(def) ~= "table" or type(def.onSettingsCommitted) ~= "function" then
+function lifecycleApi.notifySettingsCommitted(def, settingsObserver, store)
+    if type(settingsObserver) ~= "function" then
         return true, nil
     end
 
-    local ok, result = pcall(def.onSettingsCommitted, store)
+    local ok, result = pcall(settingsObserver, store)
     if not ok then
         internal.violate("lifecycle.on_settings_committed_failed", "%s: onSettingsCommitted failed: %s",
             tostring(def.name or def.id or "module"),
@@ -112,53 +112,57 @@ end
 ---@param def ModuleDefinition Candidate module definition table.
 ---@return MutationShape|nil shape Inferred lifecycle shape: `patch`, `manual`, `hybrid`, or nil.
 ---@return MutationInfo info Flags describing which lifecycle hooks are present on the definition.
-function lifecycleApi.inferMutation(def)
-    return mutationInternal.inferMutation(def)
+function lifecycleApi.inferMutation(mutationBundle)
+    return mutationInternal.inferMutation(mutationBundle)
 end
 
---- Returns whether a module definition declares that it affects live run data.
----@param def ModuleDefinition|nil Candidate module definition table.
+--- Returns whether a module declares that it affects live run data.
+---@param mutationBundle table|nil Candidate mutation bundle.
 ---@return boolean affects True when the definition opts into run-data mutation behavior.
-function lifecycleApi.affectsRunData(def)
-    return mutationInternal.affectsRunData(def)
+function lifecycleApi.affectsRunData(mutationBundle)
+    return mutationInternal.affectsRunData(mutationBundle)
 end
 
---- Applies a module definition's current mutation lifecycle to live run data.
+--- Applies a module's current mutation lifecycle to live run data.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle applied successfully.
 ---@return string|nil err Error message when the apply step fails.
-function lifecycleApi.applyMutation(def, store)
-    return mutationInternal.apply(def, store)
+function lifecycleApi.applyMutation(def, mutationBundle, store)
+    return mutationInternal.apply(def, mutationBundle, store)
 end
 
---- Reverts a module definition's current mutation lifecycle from live run data.
+--- Reverts a module's current mutation lifecycle from live run data.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reverted successfully.
 ---@return string|nil err Error message when the revert step fails.
-function lifecycleApi.revertMutation(def, store)
-    return mutationInternal.revert(def, store)
+function lifecycleApi.revertMutation(def, mutationBundle, store)
+    return mutationInternal.revert(def, mutationBundle, store)
 end
 
---- Reverts and reapplies a module definition's mutation lifecycle.
+--- Reverts and reapplies a module's mutation lifecycle.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reapplied successfully.
 ---@return string|nil err Error message when the reapply step fails.
-function lifecycleApi.reapplyMutation(def, store)
-    return mutationInternal.reapply(def, store)
+function lifecycleApi.reapplyMutation(def, mutationBundle, store)
+    return mutationInternal.reapply(def, mutationBundle, store)
 end
 
 --- Applies the current effective startup lifecycle state for a module.
 --- Used by Framework for coordinated modules and by standaloneHost for standalone modules.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore Managed module store associated with the definition.
 ---@return boolean ok True when startup lifecycle sync completed.
 ---@return string|nil err Error message when startup mutation application fails.
-function lifecycleApi.applyOnLoad(def, store)
+function lifecycleApi.applyOnLoad(def, mutationBundle, store)
     if public.isModuleEnabled(store, def and def.modpack) then
-        local ok, err = lifecycleApi.applyMutation(def, store)
+        local ok, err = lifecycleApi.applyMutation(def, mutationBundle, store)
         if not ok then
             return false, err
         end
@@ -170,7 +174,7 @@ function lifecycleApi.applyOnLoad(def, store)
     end
 
     -- Standalone only; Framework.init handles this centrally for coordinated packs.
-    if lifecycleApi.affectsRunData(def) and not public.isModuleCoordinated(def and def.modpack) then
+    if lifecycleApi.affectsRunData(mutationBundle) and not public.isModuleCoordinated(def and def.modpack) then
         rom.game.SetupRunData()
     end
 
@@ -195,11 +199,13 @@ end
 
 --- Commits staged session values back to config and reapplies live mutations when required.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
+---@param settingsObserver fun(store: ManagedStore)|nil Post-commit observer.
 ---@param store ManagedStore Managed module store associated with the definition.
 ---@param session Session Session exposing transactional flush and reload helpers.
 ---@return boolean ok True when the commit completed successfully.
 ---@return string|nil err Error message when the commit or rollback path fails.
-function lifecycleApi.commitSession(def, store, session)
+function lifecycleApi.commitSession(def, mutationBundle, settingsObserver, store, session)
     if not session.isDirty() then
         return true, nil
     end
@@ -207,22 +213,22 @@ function lifecycleApi.commitSession(def, store, session)
     local snapshot = session._captureDirtyConfigSnapshot()
     session._flushToConfig()
 
-    local shouldReapply = lifecycleApi.affectsRunData(def)
+    local shouldReapply = lifecycleApi.affectsRunData(mutationBundle)
         and store.read("Enabled") == true
 
     if not shouldReapply then
-        return lifecycleApi.notifySettingsCommitted(def, store)
+        return lifecycleApi.notifySettingsCommitted(def, settingsObserver, store)
     end
 
-    local ok, err = lifecycleApi.reapplyMutation(def, store)
+    local ok, err = lifecycleApi.reapplyMutation(def, mutationBundle, store)
     if ok then
-        return lifecycleApi.notifySettingsCommitted(def, store)
+        return lifecycleApi.notifySettingsCommitted(def, settingsObserver, store)
     end
 
     session._restoreConfigSnapshot(snapshot)
     session._reloadFromConfig()
 
-    local rollbackOk, rollbackErr = lifecycleApi.reapplyMutation(def, store)
+    local rollbackOk, rollbackErr = lifecycleApi.reapplyMutation(def, mutationBundle, store)
     if not rollbackOk then
         internal.violate("lifecycle.session_rollback_reapply_failed", "%s: session rollback reapply failed: %s",
             tostring(def.name or def.id or "module"),
@@ -236,21 +242,22 @@ end
 --- Sets a module's enabled flag and runs mutation lifecycle changes when needed.
 --- Host/framework-facing API. Module draw code should use session widgets instead.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore Managed module store associated with the definition.
 ---@param enabled boolean Desired enabled state.
 ---@return boolean ok True when the enabled state transition completed successfully.
 ---@return string|nil err Error message when the transition fails.
-function lifecycleApi.setEnabled(def, store, enabled)
+function lifecycleApi.setEnabled(def, mutationBundle, store, enabled)
     local nextEnabled = enabled == true
     local current = store.read("Enabled") == true
 
     local ok, err
     if nextEnabled and current then
-        ok, err = lifecycleApi.reapplyMutation(def, store)
+        ok, err = lifecycleApi.reapplyMutation(def, mutationBundle, store)
     elseif nextEnabled then
-        ok, err = lifecycleApi.applyMutation(def, store)
+        ok, err = lifecycleApi.applyMutation(def, mutationBundle, store)
     elseif current then
-        ok, err = lifecycleApi.revertMutation(def, store)
+        ok, err = lifecycleApi.revertMutation(def, mutationBundle, store)
     else
         ok, err = true, nil
     end

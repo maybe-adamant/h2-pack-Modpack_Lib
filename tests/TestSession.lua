@@ -9,10 +9,6 @@ local function makeScalarDefinition()
         storage = {
             { type = "int", alias = "MaxGods", default = 3, min = 1, max = 9 },
         },
-        ui = {
-            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
-            { type = "stepper", binds = { value = "MaxGods" }, label = "Max Gods", min = 1, max = 9, step = 1 },
-        },
     })
 end
 
@@ -28,10 +24,6 @@ local function makePackedDefinition()
                 },
             },
         },
-        ui = {
-            { type = "checkbox", binds = { value = "EnabledBit" }, label = "Enabled" },
-            { type = "dropdown", binds = { value = "ModeBits" }, label = "Mode", values = { 0, 1, 2, 3 } },
-        },
     })
 end
 
@@ -41,10 +33,6 @@ local function makeTransientDefinition()
             { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
             { type = "string", alias = "FilterMode", persist = false, hash = false, default = "all", maxLen = 16 },
             { type = "string", alias = "SummaryText", persist = false, hash = false, default = "", maxLen = 128 },
-        },
-        ui = {
-            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
-            { type = "text", text = "Filter" },
         },
     })
 end
@@ -161,8 +149,9 @@ function TestStore:testRuntimeAliasesUseNarrowStoreAccessor()
 end
 
 function TestStore:testDowngradedUnstagedWriteRejectionDoesNotWrite()
-    local previous = AdamantModpackLib_Internal.violationSeverity["store.invalid_unstaged_write"]
-    AdamantModpackLib_Internal.violationSeverity["store.invalid_unstaged_write"] = "warn"
+    local policy = AdamantModpackLib_Internal.violationPolicy["store.invalid_unstaged_write"]
+    local previous = policy.severity
+    policy.severity = "warn"
     CaptureWarnings()
 
     local config = { Enabled = true, RecordingArmed = false }
@@ -174,7 +163,7 @@ function TestStore:testDowngradedUnstagedWriteRejectionDoesNotWrite()
     lu.assertEquals(#Warnings, 1)
 
     RestoreWarnings()
-    AdamantModpackLib_Internal.violationSeverity["store.invalid_unstaged_write"] = previous
+    policy.severity = previous
 end
 
 function TestStore:testSessionRejectsRuntimeWrites()
@@ -191,8 +180,9 @@ function TestStore:testSessionRejectsRuntimeWrites()
 end
 
 function TestStore:testDowngradedSessionRuntimeWriteStillDoesNotStage()
-    local previous = AdamantModpackLib_Internal.violationSeverity["session.invalid_write_surface"]
-    AdamantModpackLib_Internal.violationSeverity["session.invalid_write_surface"] = "warn"
+    local policy = AdamantModpackLib_Internal.violationPolicy["session.invalid_write_surface"]
+    local previous = policy.severity
+    policy.severity = "warn"
     CaptureWarnings()
 
     local config = { Enabled = true, RecordingArmed = false }
@@ -205,7 +195,7 @@ function TestStore:testDowngradedSessionRuntimeWriteStillDoesNotStage()
     lu.assertEquals(#Warnings, 1)
 
     RestoreWarnings()
-    AdamantModpackLib_Internal.violationSeverity["session.invalid_write_surface"] = previous
+    policy.severity = previous
 end
 
 TestSession = {}
@@ -447,8 +437,9 @@ function TestSession:testSessionResetUnknownAliasFails()
 end
 
 function TestSession:testDowngradedSessionResetUnknownAliasReturnsSafely()
-    local previous = AdamantModpackLib_Internal.violationSeverity["session.unknown_reset_alias"]
-    AdamantModpackLib_Internal.violationSeverity["session.unknown_reset_alias"] = "warn"
+    local policy = AdamantModpackLib_Internal.violationPolicy["session.unknown_reset_alias"]
+    local previous = policy.severity
+    policy.severity = "warn"
     CaptureWarnings()
 
     local _, session = lib.createStore({}, makeRuntimeDefinition())
@@ -459,7 +450,7 @@ function TestSession:testDowngradedSessionResetUnknownAliasReturnsSafely()
     lu.assertEquals(#Warnings, 1)
 
     RestoreWarnings()
-    AdamantModpackLib_Internal.violationSeverity["session.unknown_reset_alias"] = previous
+    policy.severity = previous
 end
 
 function TestSession:testSessionTableWrongAliasFails()
@@ -471,12 +462,14 @@ function TestSession:testSessionTableWrongAliasFails()
 end
 
 function TestSession:testDowngradedSessionTableErrorsReturnNilSafely()
-    local previousUnknown = AdamantModpackLib_Internal.violationSeverity["session.unknown_table_alias"]
-    local previousInvalid = AdamantModpackLib_Internal.violationSeverity["session.invalid_table_alias"]
+    local unknownPolicy = AdamantModpackLib_Internal.violationPolicy["session.unknown_table_alias"]
+    local invalidPolicy = AdamantModpackLib_Internal.violationPolicy["session.invalid_table_alias"]
+    local previousUnknown = unknownPolicy.severity
+    local previousInvalid = invalidPolicy.severity
     local previousPrint = print
     local lines = {}
-    AdamantModpackLib_Internal.violationSeverity["session.unknown_table_alias"] = "warn"
-    AdamantModpackLib_Internal.violationSeverity["session.invalid_table_alias"] = "warn"
+    unknownPolicy.severity = "warn"
+    invalidPolicy.severity = "warn"
     print = function(msg)
         table.insert(lines, msg)
     end
@@ -486,8 +479,8 @@ function TestSession:testDowngradedSessionTableErrorsReturnNilSafely()
     local wrongType = session.table("MaxGods")
 
     print = previousPrint
-    AdamantModpackLib_Internal.violationSeverity["session.unknown_table_alias"] = previousUnknown
-    AdamantModpackLib_Internal.violationSeverity["session.invalid_table_alias"] = previousInvalid
+    unknownPolicy.severity = previousUnknown
+    invalidPolicy.severity = previousInvalid
 
     lu.assertNil(missing)
     lu.assertNil(wrongType)
@@ -495,12 +488,14 @@ function TestSession:testDowngradedSessionTableErrorsReturnNilSafely()
 end
 
 function TestSession:testDowngradedStoreTableErrorsReturnNilSafely()
-    local previousUnknown = AdamantModpackLib_Internal.violationSeverity["store.unknown_table_alias"]
-    local previousInvalid = AdamantModpackLib_Internal.violationSeverity["store.invalid_table_alias"]
+    local unknownPolicy = AdamantModpackLib_Internal.violationPolicy["store.unknown_table_alias"]
+    local invalidPolicy = AdamantModpackLib_Internal.violationPolicy["store.invalid_table_alias"]
+    local previousUnknown = unknownPolicy.severity
+    local previousInvalid = invalidPolicy.severity
     local previousPrint = print
     local lines = {}
-    AdamantModpackLib_Internal.violationSeverity["store.unknown_table_alias"] = "warn"
-    AdamantModpackLib_Internal.violationSeverity["store.invalid_table_alias"] = "warn"
+    unknownPolicy.severity = "warn"
+    invalidPolicy.severity = "warn"
     print = function(msg)
         table.insert(lines, msg)
     end
@@ -510,8 +505,8 @@ function TestSession:testDowngradedStoreTableErrorsReturnNilSafely()
     local wrongType = store.table("MaxGods")
 
     print = previousPrint
-    AdamantModpackLib_Internal.violationSeverity["store.unknown_table_alias"] = previousUnknown
-    AdamantModpackLib_Internal.violationSeverity["store.invalid_table_alias"] = previousInvalid
+    unknownPolicy.severity = previousUnknown
+    invalidPolicy.severity = previousInvalid
 
     lu.assertNil(missing)
     lu.assertNil(wrongType)

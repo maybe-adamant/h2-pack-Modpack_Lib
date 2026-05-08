@@ -36,13 +36,8 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@field shortName string|nil
 ---@field tooltip string|nil
 ---@field default boolean|nil
----@field affectsRunData boolean|nil
 ---@field storage StorageSchema|nil
 ---@field hashGroupPlan table|nil
----@field patchPlan fun(store: ManagedStore): table|nil
----@field apply fun(store: ManagedStore)|nil
----@field revert fun(store: ManagedStore)|nil
----@field onSettingsCommitted fun(store: ManagedStore)|nil
 
 ---@class ManagedStore
 ---@field read fun(alias: string): any

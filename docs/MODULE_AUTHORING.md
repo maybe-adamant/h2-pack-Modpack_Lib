@@ -10,10 +10,8 @@ This guide describes the supported module contract in Lib:
 
 Module code should use:
 - `lib.config`
-- `lib.createStore(...)`
-- `lib.createModuleHost(...)`
+- `lib.createModule(...)`
 - `lib.standaloneHost(...)`
-- `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hooks.*`
@@ -30,22 +28,6 @@ Use the namespaced API directly.
 Typical coordinated module:
 
 ```lua
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    tooltip = "What this module does.",
-    affectsRunData = false,
-    storage = {
-        { type = "bool", alias = "EnabledFlag", default = false },
-        { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
-        { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
-    },
-})
-
-local store, session = lib.createStore(config, definition)
-internal.store = store
-
 function internal.DrawTab(ui, session)
     lib.widgets.checkbox(ui, session, "EnabledFlag", {
         label = "Enabled",
@@ -66,10 +48,21 @@ function internal.DrawQuickContent(ui, session)
     })
 end
 
-lib.createModuleHost({
-    definition = definition,
-    store = store,
-    session = session,
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = MODULE_ID,
+        name = "Example Module",
+        tooltip = "What this module does.",
+        storage = {
+            { type = "bool", alias = "EnabledFlag", default = false },
+            { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+            { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
+        },
+    },
     hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
@@ -81,9 +74,9 @@ This example assumes coordinated/framework hosting.
 For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
 If the module does not register runtime hooks, omit `hookOwner` and `registerHooks`.
 
-`store` and `session` are a matched ownership pair for one prepared definition
-and config table. Pass them together to `lib.createModuleHost(...)`; do not mix a
-store from one `createStore(...)` call with a session from another.
+`lib.createModule(...)` is the recommended path. The lower-level
+`prepareDefinition(...)`, `createStore(...)`, and `createModuleHost(...)`
+functions remain available when a module needs custom construction.
 
 ## Definition Rules
 
@@ -95,12 +88,8 @@ Meaningful prepared definition fields:
 - `tooltip`
 - `storage`
 - `hashGroupPlan`
-- `affectsRunData`
-- `patchPlan`
-- `apply`
-- `revert`
 
-In debug mode, Lib warns on any definition key outside the list above so typos surface early.
+Lib rejects any definition key outside the list above so typos and stale author code fail at module load.
 
 Coordinated modules should declare:
 - `modpack`
@@ -118,7 +107,7 @@ Framework behavior:
 
 After store creation:
 - use `store.read(alias)` for persisted runtime state
-- use the explicit `session` return for staged UI state
+- use the callback-provided `session` for staged UI state
 - keep raw Chalk config local to `main.lua`
 
 Draw code should usually read from:
@@ -127,9 +116,9 @@ Draw code should usually read from:
 Runtime/gameplay code should usually read from:
 - `store.read(...)`
 
-Lifecycle/framework plumbing can persist built-in host state through:
-- `lib.lifecycle.setEnabled(def, store, enabled)`
-- `lib.lifecycle.setDebugMode(store, enabled)`
+Host/framework plumbing owns built-in state changes:
+- `Enabled` is toggled by Framework or the standalone host
+- `DebugMode` is toggled by Framework or the standalone host
 
 Hash/profile plumbing should stage arbitrary decoded aliases through:
 - `session.write(alias, value)`
@@ -289,10 +278,16 @@ function internal.RegisterHooks()
     end)
 end
 
-lib.createModuleHost({
-    definition = definition,
-    store = store,
-    session = session,
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = MODULE_ID,
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
     hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
@@ -303,47 +298,53 @@ lib.createModuleHost({
 Rules:
 - use a persistent owner table such as the module `internal`
 - declare hook sites inside `RegisterHooks()`
-- let `createModuleHost(...)` own the registration pass
+- let `createModule(...)` own the registration pass
 - use the keyed overload when one owner needs several hooks on the same path
 
 ## Mutation Lifecycle
 
-Use `affectsRunData = true` only when the module actually mutates live run data.
+Register mutation callbacks only when the module actually mutates live run data.
 
-Supported lifecycle shapes:
-- patch only: `patchPlan(plan, store)`
-- manual only: `apply(store)` + `revert(store)`
+Supported mutation shapes:
+- patch only: `registerPatchMutation(plan, store)`
+- manual only: `registerManualMutation = { apply = ..., revert = ... }`
 - hybrid: both
 
 Patch-plan example:
 
 ```lua
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    affectsRunData = true,
-    storage = internal.BuildStorage(),
-    patchPlan = function(plan, store)
-    plan:set(SomeTable, "Enabled", true)
-    plan:appendUnique(SomeTable, "Pool", "NewEntry")
+internal.host, internal.store = lib.createModule({
+    owner = internal,
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = MODULE_ID,
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
+    registerPatchMutation = function(plan, store)
+        plan:set(SomeTable, "Enabled", true)
+        plan:appendUnique(SomeTable, "Pool", "NewEntry")
     end,
+    drawTab = internal.DrawTab,
 })
 ```
 
-Lib helpers:
-- `lib.lifecycle.setEnabled(def, store, enabled)`
-- `lib.lifecycle.applyMutation(def, store)`
-- `lib.lifecycle.revertMutation(def, store)`
-- `lib.lifecycle.reapplyMutation(def, store)`
+Lib applies and reverts these mutations through the live host. Module authors
+normally provide the callbacks and let `createModule(...)` wire the lifecycle.
 
 ## Coordinated Modules
 
 Framework discovery requires:
-- a live host registered by `lib.createModuleHost(...)`
+- a live host registered by `lib.createModule(...)`
 - `host.getIdentity()`
 - `host.getMeta()`
 - a prepared definition with `storage`
+
+`lib.getLiveModuleHost(...)` exposes that full runtime host for Framework,
+standalone hosting, and Lib internals. Module code should normally use the
+author host returned by `lib.createModule(...)` instead.
 
 Framework behavior:
 - each coordinated module gets its own top-level tab
@@ -357,20 +358,16 @@ For non-framework hosting, use:
 ```lua
 local PLUGIN_GUID = _PLUGIN.guid
 
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    storage = internal.BuildStorage(),
-})
-
-local store, session = lib.createStore(config, definition)
-
-lib.createModuleHost({
+internal.host, internal.store = lib.createModule({
+    owner = internal,
     pluginGuid = PLUGIN_GUID,
-    definition = definition,
-    store = store,
-    session = session,
+    config = config,
+    definition = {
+        modpack = PACK_ID,
+        id = "ExampleModule",
+        name = "Example Module",
+        storage = internal.BuildStorage(),
+    },
     hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
@@ -431,44 +428,36 @@ ExampleModule_Internal = ExampleModule_Internal or {}
 ---@type ExampleModuleInternal
 local internal = ExampleModule_Internal
 
-local store = nil
-local session = nil
 internal.standaloneUi = nil
 
 local function init()
     import_as_fallback(rom.game)
 
-    local definition = lib.prepareDefinition(internal, {
-        modpack = PACK_ID,
-        id = "ExampleModule",
-        name = "Example Module",
-        shortName = "Example",
-        tooltip = "Demonstrates the Lib module contract.",
-        affectsRunData = false,
-        storage = {
-            { type = "bool", alias = "FeatureEnabled", default = false },
-            { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
-            { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
-            {
-                type = "packedInt",
-                alias = "PackedFlags",
-                default = 0,
-                bits = {
-                    { alias = "PackedFlags_Attack", label = "Attack", type = "bool", offset = 0, width = 1, default = false },
-                    { alias = "PackedFlags_Special", label = "Special", type = "bool", offset = 1, width = 1, default = false },
+    internal.host, internal.store = lib.createModule({
+        owner = internal,
+        pluginGuid = PLUGIN_GUID,
+        config = config,
+        definition = {
+            modpack = PACK_ID,
+            id = "ExampleModule",
+            name = "Example Module",
+            shortName = "Example",
+            tooltip = "Demonstrates the Lib module contract.",
+            storage = {
+                { type = "bool", alias = "FeatureEnabled", default = false },
+                { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+                { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
+                {
+                    type = "packedInt",
+                    alias = "PackedFlags",
+                    default = 0,
+                    bits = {
+                        { alias = "PackedFlags_Attack", label = "Attack", type = "bool", offset = 0, width = 1, default = false },
+                        { alias = "PackedFlags_Special", label = "Special", type = "bool", offset = 1, width = 1, default = false },
+                    },
                 },
             },
         },
-    })
-
-    store, session = lib.createStore(config, definition)
-    internal.store = store
-
-    lib.createModuleHost({
-        pluginGuid = PLUGIN_GUID,
-        definition = definition,
-        store = store,
-        session = session,
         hookOwner = internal,
         registerHooks = internal.RegisterHooks,
         drawTab = internal.DrawTab,
@@ -497,7 +486,7 @@ function internal.DrawTab(ui, session)
 
     ui.Separator()
     lib.widgets.text(ui, "Packed Flags")
-    lib.widgets.packedCheckboxList(ui, session, "PackedFlags", store, {
+    lib.widgets.packedCheckboxList(ui, session, "PackedFlags", internal.store, {
         optionsPerLine = 2,
     })
 end
@@ -538,8 +527,8 @@ end)
 Notes on the example:
 - `config` and `reload` stay local to `main.lua`
 - `store` is recreated on every reload
-- `session` stays local to `main.lua`; draw callbacks receive the restricted author session through the live host
-- `lib.createModuleHost(...)` owns the live coordinated host registration
+- draw callbacks receive the restricted author session through the live host
+- `lib.createModule(...)` owns the live coordinated host registration
 - `internal.RegisterHooks()` is the normal place for `lib.hooks.*` declarations
 - `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `DrawQuickContent` is optional

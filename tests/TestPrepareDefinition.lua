@@ -140,7 +140,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
         DebugMode = false,
         OtherFlag = false,
     }, prepared)
-    local host = lib.createModuleHost({
+    lib.createModuleHost({
         pluginGuid = "test-module",
         definition = prepared,
         store = store,
@@ -149,7 +149,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
     })
 
     lu.assertTrue(owner.requiresFullReload)
-    lu.assertEquals(lib.getLiveModuleHost("test-module"), host)
+    lu.assertNotNil(lib.getLiveModuleHost("test-module"))
     lu.assertNotNil(rebuildReason)
     lu.assertEquals(rebuildReason.kind, "structural_definition_changed")
     lu.assertEquals(rebuildReason.moduleId, "Example")
@@ -244,31 +244,25 @@ function TestPrepareDefinition:testCreateModuleHostErrorsAndKeepsPendingReasonWh
     lu.assertNotNil(AdamantModpackLib_Internal.pendingCoordinatorRebuilds[prepared])
 end
 
-function TestPrepareDefinition:testPrepareDefinitionIgnoresBehaviorOnlyChanges()
+function TestPrepareDefinition:testPrepareDefinitionKeepsStableStructuralFingerprint()
     local owner = {}
 
     lib.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
-        affectsRunData = true,
         storage = {
             { type = "bool", alias = "EnabledFlag", default = false },
         },
-        patchPlan = function() end,
     })
 
     lib.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
-        affectsRunData = true,
         storage = {
             { type = "bool", alias = "EnabledFlag", default = false },
         },
-        patchPlan = function()
-            return "changed"
-        end,
     })
 
     lu.assertEquals(owner.requiresFullReload, nil)
