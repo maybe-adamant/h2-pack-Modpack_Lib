@@ -63,7 +63,6 @@ internal.host, internal.store = lib.createModule({
             { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
         },
     },
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
@@ -72,11 +71,13 @@ internal.host, internal.store = lib.createModule({
 
 This example assumes coordinated/framework hosting.
 For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
-If the module does not register runtime hooks, omit `hookOwner` and `registerHooks`.
+If the module does not register runtime hooks, omit `registerHooks`.
 
 `lib.createModule(...)` is the recommended path. The lower-level
 `prepareDefinition(...)`, `createStore(...)`, and `createModuleHost(...)`
 functions remain available when a module needs custom construction.
+For `createModule(...)`, `owner` is the single persistent owner for structural
+hot-reload tracking and hook refresh ownership.
 
 ## Definition Rules
 
@@ -288,7 +289,6 @@ internal.host, internal.store = lib.createModule({
         name = "Example Module",
         storage = internal.BuildStorage(),
     },
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
@@ -368,7 +368,6 @@ internal.host, internal.store = lib.createModule({
         name = "Example Module",
         storage = internal.BuildStorage(),
     },
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
@@ -458,7 +457,6 @@ local function init()
                 },
             },
         },
-        hookOwner = internal,
         registerHooks = internal.RegisterHooks,
         drawTab = internal.DrawTab,
         drawQuickContent = internal.DrawQuickContent,

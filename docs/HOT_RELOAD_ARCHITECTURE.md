@@ -132,7 +132,7 @@ The important part is the split:
 
 When host creation succeeds:
 - the module host closes over the current `definition`, `store`, and `session`
-- if `hookOwner` and `registerHooks` are provided, Lib refreshes that owner's hook registrations
+- if `registerHooks` is provided, Lib refreshes that owner's hook registrations
 - if the coordinator for `definition.modpack` is already registered, Lib immediately runs `host.applyOnLoad()`
 
 That means one coordinated module reload refreshes its live runtime behavior immediately without forcing a pack rebuild.
@@ -181,7 +181,7 @@ Supported public hook entrypoints:
 The model is:
 - use a persistent owner table, typically the module `internal`
 - register hook sites from `internal.RegisterHooks()`
-- pass `hookOwner` and `registerHooks` into `lib.createModuleHost(...)`
+- pass `owner` and `registerHooks` into `lib.createModule(...)`
 - Lib runs the full registration pass during host creation
 
 Behavior:
@@ -299,7 +299,7 @@ coordinated path, use a full reload.
 - recreate `definition`, `store`, `session`, and the Lib-created live host in `init`
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
 - register runtime hooks through `internal.RegisterHooks()` and `lib.hooks.*`
-- pass `hookOwner` and `registerHooks` to `lib.createModuleHost(...)` when the module owns runtime hooks
+- pass `owner` and `registerHooks` to `lib.createModule(...)` when the module owns runtime hooks
 - keep stable GUI callbacks outside `init`
 - late-read current framework or module state from those stable callbacks when a stale closure would matter
 - do not use raw ModUtil path wraps for repo-owned hot-reload-sensitive hook sites

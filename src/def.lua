@@ -133,11 +133,10 @@ local lib = {}
 ---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
 ---@class AdamantModpackLib.ModuleCreateOpts
----@field owner? table Persistent module owner used for structural hot-reload tracking.
+---@field owner table Persistent module owner used for structural hot-reload tracking and hook refresh ownership.
 ---@field pluginGuid string Plugin guid captured at module file load time.
 ---@field config table Module config table.
 ---@field definition AdamantModpackLib.ModuleDefinition Raw module definition.
----@field hookOwner? table Persistent table used by hot-reload-safe hooks.
 ---@field registerHooks? fun()
 ---@field registerPatchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
 ---@field registerManualMutation? AdamantModpackLib.ManualMutation

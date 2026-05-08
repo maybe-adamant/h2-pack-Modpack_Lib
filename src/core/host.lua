@@ -249,7 +249,7 @@ function public.createModuleHost(opts)
     end
 
     function host.isEnabled()
-        return public.isModuleEnabled(store, host.getIdentity().modpack)
+        return public.isModuleEnabled(store, def.modpack)
     end
 
     function host.setEnabled(enabled)

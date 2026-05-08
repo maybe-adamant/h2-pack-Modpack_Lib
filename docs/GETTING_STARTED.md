@@ -65,6 +65,8 @@ If you ignore that boundary, the module will still often "work", but you will cr
 `lib.createModule(...)` owns the normal construction pipeline so store/session
 ownership stays paired. Use the lower-level construction functions only when the
 module needs custom setup.
+The same `owner` table is used for structural hot-reload tracking and hook
+refresh ownership.
 
 ## File Roles
 
@@ -195,7 +197,6 @@ internal.host, internal.store = lib.createModule({
         name = "Example Module",
         storage = internal.BuildStorage(),
     },
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
@@ -279,7 +280,6 @@ internal.host, internal.store = lib.createModule({
         storage = internal.BuildStorage(),
     },
     registerPatchMutation = internal.BuildPatchPlan,
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
@@ -290,7 +290,7 @@ This is the main module export.
 
 Framework uses it for coordinated modules. Standalone hosting uses it for module windows and menu items.
 
-If the module has no runtime hooks, `hookOwner` and `registerHooks` may be omitted.
+If the module has no runtime hooks, `registerHooks` may be omitted.
 
 ## Coordinated vs Standalone
 

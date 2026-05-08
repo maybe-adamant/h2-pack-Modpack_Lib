@@ -48,3 +48,40 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(store.read("Flag"), true)
     lu.assertEquals(type(owner._definitionStructuralFingerprint), "string")
 end
+
+function TestCreateModule:testCreateModuleReturnsOnlyAuthorHostSurface()
+    local host = lib.createModule({
+        owner = {},
+        pluginGuid = "test-create-module-author-surface",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "AuthorSurface",
+            name = "Author Surface",
+        },
+        drawTab = function() end,
+    })
+
+    lu.assertEquals(type(host.isEnabled), "function")
+    lu.assertEquals(type(host.getIdentity), "function")
+    lu.assertEquals(type(host.getMeta), "function")
+    lu.assertNil(host.read)
+    lu.assertNil(host.writeAndFlush)
+    lu.assertNil(host.commitIfDirty)
+    lu.assertNil(host.applyMutation)
+    lu.assertNil(host.setEnabled)
+end
+
+function TestCreateModule:testCreateModuleRequiresOwner()
+    lu.assertErrorMsgContains("owner is required", function()
+        lib.createModule({
+            pluginGuid = "test-create-module-hooks-no-owner",
+            config = {},
+            definition = {
+                id = "HooksNoOwner",
+                name = "Hooks No Owner",
+            },
+            drawTab = function() end,
+        })
+    end)
+end

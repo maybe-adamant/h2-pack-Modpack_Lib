@@ -1,11 +1,10 @@
 local internal = AdamantModpackLib_Internal
 
 ---@class ModuleCreateOpts
----@field owner table|nil
+---@field owner table
 ---@field pluginGuid string
 ---@field config table
 ---@field definition ModuleDefinition
----@field hookOwner table|nil
 ---@field registerHooks fun()|nil
 ---@field registerPatchMutation fun(plan: table, store: ManagedStore)|nil
 ---@field registerManualMutation table|nil
@@ -19,7 +18,6 @@ local KnownModuleOpts = {
     pluginGuid = true,
     config = true,
     definition = true,
-    hookOwner = true,
     registerHooks = true,
     registerPatchMutation = true,
     registerManualMutation = true,
@@ -49,6 +47,9 @@ function public.createModule(opts)
     if type(opts.config) ~= "table" then
         internal.violate("host.invalid_create_opts", "createModule: config is required")
     end
+    if type(opts.owner) ~= "table" then
+        internal.violate("host.invalid_create_opts", "createModule: owner is required")
+    end
 
     local definition = public.prepareDefinition(opts.owner, opts.definition)
     local store, session = public.createStore(opts.config, definition)
@@ -57,7 +58,7 @@ function public.createModule(opts)
         definition = definition,
         store = store,
         session = session,
-        hookOwner = opts.hookOwner or opts.owner,
+        hookOwner = opts.owner,
         registerHooks = opts.registerHooks,
         registerPatchMutation = opts.registerPatchMutation,
         registerManualMutation = opts.registerManualMutation,

@@ -29,7 +29,7 @@ internal.pendingCoordinatorRebuilds = internal.pendingCoordinatorRebuilds
 ---@field config table
 ---@field createStore fun(modConfig: table, definition: ModuleDefinition): ManagedStore, Session
 ---@field resetStorageToDefaults fun(storage: StorageSchema, session: Session, opts: table|nil)
----@field createModule fun(opts: ModuleCreateOpts): AuthorHost, ManagedStore, Session, ModuleDefinition
+---@field createModule fun(opts: ModuleCreateOpts): AuthorHost, ManagedStore
 ---@field createModuleHost fun(opts: ModuleHostOpts): AuthorHost
 ---@field standaloneHost fun(pluginGuid: string): StandaloneRuntime
 ---@field getLiveModuleHost fun(pluginGuid: string|nil): ModuleHost|nil

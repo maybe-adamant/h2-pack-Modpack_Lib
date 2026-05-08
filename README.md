@@ -24,14 +24,14 @@ internal.host, internal.store = lib.createModule({
     definition = {
         ...
     },
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
 ```
 
-`hookOwner` and `registerHooks` are the standard way to declare a module's runtime hooks when it uses `lib.hooks.*`.
+`owner` is used for structural hot-reload tracking and hook refresh ownership.
+Pass `registerHooks` when the module uses `lib.hooks.*`.
 `lib.createModule(...)` also registers the live host for coordinated discovery and standalone hosting.
 
 ## Docs

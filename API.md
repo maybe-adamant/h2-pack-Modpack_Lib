@@ -203,6 +203,8 @@ Rules:
 ### `lib.createModule(opts)`
 
 Canonical module-construction helper.
+`owner` is used for structural hot-reload tracking and, when `registerHooks` is
+provided, hook refresh ownership.
 
 ```lua
 local host, store = lib.createModule({
@@ -216,7 +218,6 @@ local host, store = lib.createModule({
         storage = internal.BuildStorage(),
     },
     registerPatchMutation = internal.BuildPatchPlan,
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
@@ -478,7 +479,6 @@ internal.host, internal.store = lib.createModule({
         name = "Example Module",
         storage = internal.BuildStorage(),
     },
-    hookOwner = internal,
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
 })
