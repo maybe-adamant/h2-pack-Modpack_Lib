@@ -70,3 +70,16 @@ function TestHashing:testPackWidthAndPackedBitReadWrite()
     packed = lib.hashing.writePackedBits(packed, 1, 2, 99)
     lu.assertEquals(lib.hashing.readPackedBits(packed, 1, 2), 3)
 end
+
+function TestHashing:testPackedAliasesResolveFromPreparedNode()
+    local storage = prepareStorage()
+    local aliases = lib.hashing.getAliases(storage)
+    local packedAliases = AdamantModpackLib_Internal.storage.getPackedAliases(aliases.Packed)
+
+    lu.assertEquals(#packedAliases, 2)
+    lu.assertEquals(packedAliases[1].alias, "EnabledBit")
+    lu.assertEquals(packedAliases[1].label, "EnabledBit")
+    lu.assertEquals(packedAliases[1].node, aliases.EnabledBit)
+    lu.assertEquals(packedAliases[2].alias, "ModeBits")
+    lu.assertEquals(packedAliases[2].node, aliases.ModeBits)
+end

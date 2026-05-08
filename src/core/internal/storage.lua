@@ -946,3 +946,21 @@ function storageInternal.getAliases(storage)
     if type(storage) ~= "table" then return {} end
     return rawget(storage, "_aliasNodes") or {}
 end
+
+---@param node StorageNode|PackedBitNode|nil
+---@return table[] aliases
+function storageInternal.getPackedAliases(node)
+    if not node or node.type ~= "packedInt" then
+        return {}
+    end
+
+    local packedAliases = {}
+    for _, child in ipairs(node._bitAliases or {}) do
+        packedAliases[#packedAliases + 1] = {
+            alias = child.alias,
+            label = child.label or child.alias,
+            node = child,
+        }
+    end
+    return packedAliases
+end

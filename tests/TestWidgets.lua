@@ -17,6 +17,7 @@ local function makeDropdownImgui()
     local state = {
         beginComboPreview = nil,
         customPreviewCalls = 0,
+        customPreviewText = nil,
     }
 
     local imgui = {
@@ -51,7 +52,9 @@ local function makeDropdownImgui()
         GetFrameHeight = function() return 20 end,
         GetColorU32 = function() return 1 end,
         PushClipRect = function() end,
-        ImDrawListAddText = function() end,
+        ImDrawListAddText = function(_, _, _, _, text)
+            state.customPreviewText = text
+        end,
         PopClipRect = function() end,
     }
 
@@ -66,6 +69,27 @@ local function makeStepperImgui(clickedLabel)
         return label == clickedLabel
     end
     return imgui, clickedButtons
+end
+
+local function makePackedStore()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "Packed",
+            bits = {
+                { alias = "First", offset = 0, width = 1, type = "bool", default = false },
+                { alias = "Second", offset = 1, width = 1, type = "bool", default = false },
+            },
+        },
+    }
+    local definition = lib.prepareDefinition({}, {
+        modpack = "test-pack",
+        id = "PackedWidgetTest",
+        name = "Packed Widget Test",
+        storage = storage,
+    })
+    local config = { Enabled = false, DebugMode = false, Packed = 0 }
+    return lib.createStore(config, definition)
 end
 
 function TestWidgets:testPlainDropdownUsesNativePreview()
@@ -137,4 +161,20 @@ function TestWidgets:testStepperUsesStableButtonIdsAndWritesIncrement()
     lu.assertEquals(session.read("Runs"), 4)
     lu.assertEquals(clickedButtons[1], "-##Runs_dec")
     lu.assertEquals(clickedButtons[2], "+##Runs_inc")
+end
+
+function TestWidgets:testPackedDropdownResolvesChildrenFromStoreMetadata()
+    local store, session = makePackedStore()
+    session.write("Second", true)
+    local imgui, state = makeDropdownImgui()
+
+    lib.widgets.packedDropdown(imgui, session, "Packed", store, {
+        label = "Packed",
+        displayValues = {
+            Second = "Second Choice",
+        },
+    })
+
+    lu.assertEquals(state.beginComboPreview, "")
+    lu.assertEquals(state.customPreviewText, "Second Choice")
 end

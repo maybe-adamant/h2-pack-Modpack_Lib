@@ -324,25 +324,11 @@ function public.createStore(modConfig, definition)
         return true
     end
 
-    local function getPackedAliases(alias)
-        local node = aliasNodes[alias]
-        if not node or node.type ~= "packedInt" then
-            return {}
-        end
-
-        local packedAliases = {}
-        for _, child in ipairs(node._bitAliases or {}) do
-            packedAliases[#packedAliases + 1] = {
-                alias = child.alias,
-                label = child.label or child.alias,
-            }
-        end
-        return packedAliases
-    end
-
     internal.store.bindManagedStore(store, {
         write = writeStoreValue,
-        getPackedAliases = getPackedAliases,
+        getAliasNode = function(alias)
+            return aliasNodes[alias]
+        end,
     })
 
     local session = internal.store.createSession(modConfig, backend, storage)

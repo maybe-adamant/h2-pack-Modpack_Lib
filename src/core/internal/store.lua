@@ -28,11 +28,11 @@ end
 
 ---@param store ManagedStore
 ---@param alias string
----@return table[]
-function storeInternal.getPackedAliases(store, alias)
+---@return StorageNode|PackedBitNode|nil node
+function storeInternal.getAliasNode(store, alias)
     local state = store and StoreState[store] or nil
     if not state then
-        return {}
+        return nil
     end
-    return state.getPackedAliases(alias)
+    return state.getAliasNode(alias)
 end
