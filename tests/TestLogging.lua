@@ -72,6 +72,35 @@ function TestLogging:testViolationPolicyMatchesSourceCallSites()
         "src/core/host.lua",
         "src/core/integrations.lua",
         "src/core/lifecycle.lua",
+        "src/core/module.lua",
+        "src/core/overlays.lua",
+        "src/core/store.lua",
+        "src/core/internal/logging.lua",
+        "src/core/internal/session.lua",
+        "src/core/internal/storage.lua",
+        "src/core/internal/storage_types.lua",
+        "src/core/internal/store.lua",
+    }
+
+    for _, path in ipairs(files) do
+        local handle = assert(io.open(path, "r"))
+        local source = handle:read("*a")
+        handle:close()
+        for id in string.gmatch(source, "internal%.violate%s*%(%s*[\"']([^\"']+)[\"']") do
+            lu.assertNotNil(AdamantModpackLib_Internal.violationPolicy[id], id)
+        end
+    end
+end
+
+function TestLogging:testViolationPolicyHasNoOrphanIds()
+    local files = {
+        "src/core/definition.lua",
+        "src/core/game_object.lua",
+        "src/core/hooks.lua",
+        "src/core/host.lua",
+        "src/core/integrations.lua",
+        "src/core/lifecycle.lua",
+        "src/core/module.lua",
         "src/core/overlays.lua",
         "src/core/store.lua",
         "src/core/internal/logging.lua",
@@ -88,7 +117,6 @@ function TestLogging:testViolationPolicyMatchesSourceCallSites()
         handle:close()
         for id in string.gmatch(source, "internal%.violate%s*%(%s*[\"']([^\"']+)[\"']") do
             referenced[id] = true
-            lu.assertNotNil(AdamantModpackLib_Internal.violationPolicy[id], id)
         end
     end
 

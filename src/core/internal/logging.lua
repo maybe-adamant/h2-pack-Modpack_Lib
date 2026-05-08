@@ -247,6 +247,10 @@ local DefaultViolationPolicy = {
         severity = "error",
         description = "Storage schemas must be valid arrays of storage nodes.",
     },
+    ["storage.unknown_field"] = {
+        severity = "error",
+        description = "Storage nodes only accept fields supported by their declared storage type.",
+    },
     ["storage.invalid_table_row"] = {
         severity = "error",
         description = "Table row schemas must be flat storage schemas owned by the table root.",

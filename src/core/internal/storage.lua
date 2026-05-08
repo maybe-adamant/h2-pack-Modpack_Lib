@@ -69,6 +69,72 @@ local values = internal.values
 ---@field _runtimeCacheRootNodes StorageNode[]|nil
 ---@field _aliasNodes table<string, StorageNode|PackedBitNode>|nil
 
+local CommonNodeFields = {
+    alias = true,
+    default = true,
+    hash = true,
+    label = true,
+    persist = true,
+    stage = true,
+    tooltip = true,
+    type = true,
+    visibleIf = true,
+}
+
+local RootNodeFieldsByType = {
+    bool = {},
+    int = {
+        max = true,
+        min = true,
+        width = true,
+    },
+    string = {
+        maxLen = true,
+    },
+    packedInt = {
+        bits = true,
+        width = true,
+    },
+    table = {
+        defaultRows = true,
+        maxRows = true,
+        minRows = true,
+        row = true,
+    },
+}
+
+local PackedBitFields = {
+    alias = true,
+    default = true,
+    label = true,
+    max = true,
+    min = true,
+    offset = true,
+    tooltip = true,
+    type = true,
+    width = true,
+}
+
+local function IsInternalField(key)
+    return type(key) == "string" and string.sub(key, 1, 1) == "_"
+end
+
+local function ValidateKnownFields(node, allowedFields, prefix)
+    for key in pairs(node) do
+        if not IsInternalField(key) and not allowedFields[key] and not CommonNodeFields[key] then
+            internal.violate("storage.unknown_field", "%s: unknown storage field '%s'", prefix, tostring(key))
+        end
+    end
+end
+
+local function ValidateKnownPackedBitFields(node, prefix)
+    for key in pairs(node) do
+        if not IsInternalField(key) and not PackedBitFields[key] then
+            internal.violate("storage.unknown_field", "%s: unknown packed bit field '%s'", prefix, tostring(key))
+        end
+    end
+end
+
 local function PrepareRootNodeMetadata(node)
     node._storageKey = node.alias
 end
@@ -168,6 +234,7 @@ local function ValidatePackedBits(node, prefix)
     local occupiedBits = {}
     for index, bitNode in ipairs(node.bits or {}) do
         local bitPrefix = prefix .. " bits[" .. index .. "]"
+        ValidateKnownPackedBitFields(bitNode, bitPrefix)
         if type(bitNode.alias) ~= "string" or bitNode.alias == "" then
             internal.violate("storage.invalid_packed_bit", "%s: packed bit alias must be a non-empty string", bitPrefix)
         elseif seenAliases[bitNode.alias] then
@@ -269,6 +336,7 @@ function storageInternal.validate(storage, label)
             elseif not stage and node.type == "packedInt" then
                 internal.violate("storage.packed_requires_stage", "%s: stage=false packedInt roots are not supported", prefix)
             else
+                ValidateKnownFields(node, RootNodeFieldsByType[node.type] or {}, prefix)
                 storageType.validate(node, prefix)
                 PrepareRootNodeMetadata(node)
                 node._isRoot = true

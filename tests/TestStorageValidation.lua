@@ -64,6 +64,51 @@ function TestStorageValidation:testRuntimePackedIntFails()
     end)
 end
 
+function TestStorageValidation:testUnknownRootStorageFieldFails()
+    lu.assertErrorMsgContains("storage.unknown_field", function()
+        AdamantModpackLib_Internal.storage.validate({
+            { type = "int", alias = "Count", default = 0, min = 0, max = 10, defalt = 1 },
+        }, "UnknownRootField")
+    end)
+end
+
+function TestStorageValidation:testUnknownFieldForStorageTypeFails()
+    lu.assertErrorMsgContains("storage.unknown_field", function()
+        AdamantModpackLib_Internal.storage.validate({
+            { type = "bool", alias = "Flag", default = false, width = 1 },
+        }, "UnknownTypeField")
+    end)
+end
+
+function TestStorageValidation:testUnknownPackedBitFieldFails()
+    lu.assertErrorMsgContains("storage.unknown_field", function()
+        AdamantModpackLib_Internal.storage.validate({
+            {
+                type = "packedInt",
+                alias = "Packed",
+                bits = {
+                    { alias = "Bit", offset = 0, width = 1, type = "bool", default = false, defalt = true },
+                },
+            },
+        }, "UnknownPackedBitField")
+    end)
+end
+
+function TestStorageValidation:testUnknownTableRowFieldFails()
+    lu.assertErrorMsgContains("storage.unknown_field", function()
+        AdamantModpackLib_Internal.storage.validate({
+            {
+                type = "table",
+                alias = "Rows",
+                defaultRows = 1,
+                row = {
+                    { type = "int", alias = "Count", default = 0, min = 0, max = 10, with = 4 },
+                },
+            },
+        }, "UnknownTableRowField")
+    end)
+end
+
 function TestStorageValidation:testPackedIntDerivesChildAliasesAndDefault()
     local storage = {
         {
