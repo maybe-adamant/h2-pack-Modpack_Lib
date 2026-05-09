@@ -170,6 +170,7 @@ function public.createModuleHost(opts)
     local authorSession = {
         view = session.view,
         read = session.read,
+        table = session.table,
         write = session.write,
         reset = session.reset,
         getAliasSchema = session.getAliasSchema,

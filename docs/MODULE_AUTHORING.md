@@ -232,11 +232,18 @@ local tiers = session.table("Tiers")
 tiers:append({ Enabled = true, ChoiceA = true })
 tiers:write(1, "ChoiceMode", 2)
 local mode = tiers:read(1, "ChoiceMode")
+
+local row = tiers:rowHandle(1)
+row.write("ChoiceMode", 2)
+local selected = row.read("ChoiceMode")
 ```
 
 Use `store.table(alias)` for read-only runtime access and `session.table(alias)` for staged UI edits.
 Table handles are object methods, so call row operations with colon syntax:
 `tiers:read(rowIndex, alias)`, `tiers:write(rowIndex, alias, value)`, and `tiers:append(rowValues)`.
+Row handles are positional cursors into the current table rows. They expose `read(alias)` and
+`getAliasSchema(alias)`, and session-backed row handles also expose `write(alias, value)` and
+`reset(alias)`.
 
 ## Immediate-Mode UI
 

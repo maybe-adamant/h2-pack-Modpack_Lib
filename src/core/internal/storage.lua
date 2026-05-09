@@ -759,6 +759,68 @@ function storageInternal.CreateTableHandle(node, opts)
         return values.deepCopy(readRows())
     end
 
+    function handle.rowHandle(self, rowIndex)
+        ValidateReceiver(self, "rowHandle")
+        ValidateRowIndex(rowIndex, "rowHandle")
+        rowIndex = math.floor(tonumber(rowIndex) or 0)
+
+        local rowHandle = {
+            read = function(alias)
+                ValidateAlias(alias, "rowHandle.read")
+                local row = readRow(readRows(), rowIndex)
+                if not row then
+                    return nil
+                end
+                return readRowAlias(row, alias)
+            end,
+            getAliasSchema = function(alias)
+                ValidateAlias(alias, "rowHandle.getAliasSchema")
+                return aliasNodes[alias]
+            end,
+        }
+
+        if opts.writeRoot ~= nil then
+            rowHandle.write = function(alias, value)
+                ValidateAlias(alias, "rowHandle.write")
+                local rows = copyRows()
+                local row = readRow(rows, rowIndex)
+                if not row then
+                    return false
+                end
+                local changed = writeRowAlias(row, alias, value)
+                if changed then
+                    writeRows(rows)
+                end
+                return changed
+            end
+
+            rowHandle.reset = function(alias)
+                ValidateAlias(alias, "rowHandle.reset")
+                local rows = copyRows()
+                local row = readRow(rows, rowIndex)
+                if not row then
+                    return false
+                end
+                local aliasNode = aliasNodes[alias]
+                if not aliasNode then
+                    internal.violate(
+                        "storage.unknown_table_row_alias",
+                        "table storage '%s': unknown row alias '%s'",
+                        tostring(node.alias),
+                        tostring(alias)
+                    )
+                end
+                local changed = writeRowAlias(row, alias, values.deepCopy(aliasNode.default))
+                if changed then
+                    writeRows(rows)
+                end
+                return changed
+            end
+        end
+
+        return rowHandle
+    end
+
     if opts.writeRoot ~= nil then
         function handle.write(self, rowIndex, alias, value)
             ValidateReceiver(self, "write")

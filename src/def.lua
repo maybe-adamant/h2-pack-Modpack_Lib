@@ -59,9 +59,11 @@ local lib = {}
 ---@field read fun(self: AdamantModpackLib.StorageTableReadOnly, rowIndex: integer, alias: string): any
 ---@field row fun(self: AdamantModpackLib.StorageTableReadOnly, rowIndex: integer): table?
 ---@field rows fun(self: AdamantModpackLib.StorageTableReadOnly): table[]
+---@field rowHandle fun(self: AdamantModpackLib.StorageTableReadOnly, rowIndex: integer): AdamantModpackLib.StorageTableRowReadOnly
 
 ---Writable table handles are object handles; call methods with colon syntax (`rows:write(...)`).
 ---@class AdamantModpackLib.StorageTableSession: AdamantModpackLib.StorageTableReadOnly
+---@field rowHandle fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer): AdamantModpackLib.StorageTableRowSession
 ---@field write fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer, alias: string, value: any): boolean
 ---@field reset fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer, alias: string): boolean
 ---@field resetRow fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer): boolean
@@ -69,6 +71,14 @@ local lib = {}
 ---@field insert fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer, rowValues?: table): boolean
 ---@field remove fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer): boolean
 ---@field clear fun(self: AdamantModpackLib.StorageTableSession): boolean
+
+---@class AdamantModpackLib.StorageTableRowReadOnly
+---@field read fun(alias: string): any
+---@field getAliasSchema fun(alias: string): AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode|nil
+
+---@class AdamantModpackLib.StorageTableRowSession: AdamantModpackLib.StorageTableRowReadOnly
+---@field write fun(alias: string, value: any): boolean
+---@field reset fun(alias: string): boolean
 
 ---@class AdamantModpackLib.ManagedStore
 ---@field read fun(alias: string): any
@@ -92,6 +102,7 @@ local lib = {}
 ---@class AdamantModpackLib.AuthorSession
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
+---@field table fun(alias: string): AdamantModpackLib.StorageTableSession?
 ---@field write fun(alias: string, value: any)
 ---@field reset fun(alias: string)
 ---@field getAliasSchema fun(alias: string): AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode|nil Read-only schema metadata.

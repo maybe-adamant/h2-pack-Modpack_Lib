@@ -15,6 +15,7 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     local callbackHost = nil
     local drawHost = nil
     local authorSchemaNode = nil
+    local authorRowValue = nil
     local config = {}
 
     local host, store = lib.createModule({
@@ -27,6 +28,14 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
             name = "Create Module",
             storage = {
                 { type = "bool", alias = "Flag", default = false },
+                {
+                    type = "table",
+                    alias = "Rows",
+                    defaultRows = 1,
+                    row = {
+                        { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
+                    },
+                },
             },
         },
         registerIntegrations = function(authorHost)
@@ -35,6 +44,8 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
         drawTab = function(_, authorSession, authorHost)
             drawHost = authorHost
             authorSchemaNode = authorSession.getAliasSchema("Flag")
+            local row = authorSession.table("Rows"):rowHandle(1)
+            authorRowValue = row.read("Limit")
             authorSession.write("Flag", true)
         end,
     })
@@ -51,6 +62,7 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertNotNil(authorSchemaNode)
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
+    lu.assertEquals(authorRowValue, 2)
     lu.assertEquals(type(owner._definitionStructuralFingerprint), "string")
 end
 

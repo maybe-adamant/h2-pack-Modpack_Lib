@@ -398,6 +398,44 @@ function TestSession:testTableStorageStagesRowWritesAndFlushesRoot()
     lu.assertEquals(store.table("Tiers"):read(2, "ChoiceMode"), 3)
 end
 
+function TestSession:testTableRowHandleReadsAndWritesThroughParentTable()
+    local config = {}
+    local store, session = lib.createStore(config, makeTableDefinition())
+    local tiers = session.table("Tiers")
+
+    tiers:append({ Limit = 3, ChoiceA = true })
+    local row = tiers:rowHandle(2)
+
+    lu.assertEquals(row.read("Limit"), 3)
+    lu.assertTrue(row.read("ChoiceA"))
+    lu.assertEquals(row.getAliasSchema("PackedChoices").alias, "PackedChoices")
+
+    lu.assertTrue(row.write("ChoiceMode", 2))
+    lu.assertEquals(row.read("PackedChoices"), 5)
+    lu.assertTrue(row.reset("ChoiceA"))
+    lu.assertFalse(row.read("ChoiceA"))
+
+    session._flushToConfig()
+    local storeRow = store.table("Tiers"):rowHandle(2)
+
+    lu.assertEquals(storeRow.read("ChoiceMode"), 2)
+    lu.assertEquals(storeRow.getAliasSchema("ChoiceMode").alias, "ChoiceMode")
+    lu.assertNil(storeRow.write)
+    lu.assertNil(storeRow.reset)
+end
+
+function TestSession:testTableRowHandleIsPositionalAndMissingRowsAreNil()
+    local _, session = lib.createStore({}, makeTableDefinition())
+    local tiers = session.table("Tiers")
+    local row = tiers:rowHandle(2)
+
+    lu.assertNil(row.read("Limit"))
+    lu.assertFalse(row.write("Limit", 4))
+
+    tiers:append({ Limit = 4 })
+    lu.assertEquals(row.read("Limit"), 4)
+end
+
 function TestSession:testTableStorageMutatesRowsAsCompactList()
     local config = {}
     local _, session = lib.createStore(config, makeTableDefinition())

@@ -352,6 +352,10 @@ local tiers = session.table("Tiers")
 tiers:append({ Enabled = true, ChoiceA = true })
 tiers:write(1, "ChoiceMode", 2)
 local enabled = tiers:read(1, "Enabled")
+
+local row = tiers:rowHandle(1)
+row.write("ChoiceMode", 2)
+local selected = row.read("ChoiceMode")
 ```
 
 Table handles:
@@ -359,6 +363,9 @@ Table handles:
 - `session.table(alias)` returns a staged writable table handle
 - table handles are object methods; call them with colon syntax such as `tiers:read(rowIndex, alias)`
 - row aliases can address scalar row roots, packed row roots, or packed child aliases
+- `rowHandle(rowIndex)` returns a positional row cursor with `read(alias)` and `getAliasSchema(alias)`
+- writable session row handles also expose `write(alias, value)` and `reset(alias)`
+- read-only store row handles do not expose write methods
 - table storage participates in hash/profile serialization when `hash` is true
 
 Aliases are direct flat storage identifiers. Managed storage reads and writes the
@@ -405,6 +412,7 @@ Host/framework plumbing methods:
 When a module is rendered through `lib.createModuleHost(...)`, draw callbacks receive a restricted author-facing session view with:
 - `view`
 - `read(alias)`
+- `table(alias)`
 - `write(alias, value)`
 - `reset(alias)`
 - `getAliasSchema(alias)`

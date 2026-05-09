@@ -181,3 +181,41 @@ function TestWidgets:testPackedDropdownResolvesChildrenFromSessionSchema()
     lu.assertEquals(state.beginComboPreview, "")
     lu.assertEquals(state.customPreviewText, "Second Choice")
 end
+
+function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
+    local definition = lib.prepareDefinition({}, {
+        modpack = "test-pack",
+        id = "PackedWidgetRowTest",
+        name = "Packed Widget Row Test",
+        storage = {
+            {
+                type = "table",
+                alias = "Rows",
+                defaultRows = 1,
+                row = {
+                    {
+                        type = "packedInt",
+                        alias = "Packed",
+                        bits = {
+                            { alias = "First", offset = 0, width = 1, type = "bool", default = false },
+                            { alias = "Second", offset = 1, width = 1, type = "bool", default = false },
+                        },
+                    },
+                },
+            },
+        },
+    })
+    local _, session = lib.createStore({}, definition)
+    local row = session.table("Rows"):rowHandle(1)
+    row.write("Second", true)
+    local imgui, state = makeDropdownImgui()
+
+    lib.widgets.packedDropdown(imgui, row, "Packed", {
+        label = "Packed",
+        displayValues = {
+            Second = "Second Choice",
+        },
+    })
+
+    lu.assertEquals(state.customPreviewText, "Second Choice")
+end

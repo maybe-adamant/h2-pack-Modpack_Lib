@@ -385,6 +385,7 @@ Table storage models compact ordered rows with one shared row schema:
 
 Use `session.table("Tiers")` for staged UI edits and `store.table("Tiers")` for read-only runtime access.
 Table handles use colon method syntax, such as `tiers:read(rowIndex, alias)`.
+Use `tiers:rowHandle(rowIndex)` when a widget or helper should operate on one row's aliases.
 
 ## Common Mistakes
 
