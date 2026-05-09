@@ -58,7 +58,19 @@ local DefaultViolationPolicy = {
 
     ["host.invalid_create_opts"] = {
         severity = "error",
-        description = "Module hosts require prepared definitions, store/session handles, drawTab, pluginGuid, and valid callbacks.",
+        description = "Module host creation requires prepared definition, pluginGuid, store/session handles, drawTab, and valid callbacks.",
+    },
+    ["host.invalid_activate_opts"] = {
+        severity = "error",
+        description = "Module host activation requires a constructed host.",
+    },
+    ["host.already_activated"] = {
+        severity = "error",
+        description = "Module hosts can only be activated once.",
+    },
+    ["host.not_activated"] = {
+        severity = "error",
+        description = "Side-effecting module host methods require explicit activation first.",
     },
     ["host.unknown_opt"] = {
         severity = "error",

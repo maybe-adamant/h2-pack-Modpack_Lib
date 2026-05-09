@@ -17,7 +17,7 @@ The library is designed around immediate-mode UI. Module authors write normal
 draw functions, then expose them through a module host:
 
 ```lua
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -28,11 +28,12 @@ internal.host, internal.store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
+host.activate()
 ```
 
 `owner` is used for structural hot-reload tracking and hook refresh ownership.
 Pass `registerHooks` when the module uses `lib.hooks.*`.
-`lib.createModule(...)` also registers the live host for coordinated discovery and standalone hosting.
+`host.activate()` registers the live host for coordinated discovery and standalone hosting.
 
 ## Docs
 

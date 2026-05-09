@@ -109,6 +109,9 @@ local lib = {}
 ---@field resetToDefaults fun(opts?: AdamantModpackLib.ResetOpts): boolean, integer
 
 ---@class AdamantModpackLib.AuthorHost
+---Activates module hooks, integrations, live-host registration, and initial runtime sync.
+---Call once after construction.
+---@field activate fun(): AdamantModpackLib.AuthorHost
 ---@field isEnabled fun(): boolean
 ---@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
 ---@field getMeta fun(): AdamantModpackLib.ModuleMeta
@@ -133,32 +136,34 @@ local lib = {}
 ---@field patchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
 ---@field manualMutation? AdamantModpackLib.ManualMutation
 
+---@alias AdamantModpackLib.RegisterHooks
+---| fun(store: AdamantModpackLib.ManagedStore, host: AdamantModpackLib.AuthorHost)
+
 ---@class AdamantModpackLib.ModuleHostOpts
 ---@field definition AdamantModpackLib.PreparedDefinition
 ---@field pluginGuid string Plugin guid captured at module file load time.
 ---@field store AdamantModpackLib.ManagedStore
 ---@field session AdamantModpackLib.Session
 ---@field hookOwner? table Persistent table used by hot-reload-safe hooks.
----@field registerHooks? fun()
+---@field registerHooks? AdamantModpackLib.RegisterHooks
 ---@field registerPatchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
 ---@field registerManualMutation? AdamantModpackLib.ManualMutation
 ---@field onSettingsCommitted? fun(store: AdamantModpackLib.ManagedStore) Post-commit observer for rebuilding derived runtime/UI structures.
----@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost)
+---@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
 ---@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 ---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
 ---@class AdamantModpackLib.ModuleCreateOpts
 --- Persistent module owner used for structural hot-reload tracking and hook refresh ownership.
---- `createModule` publishes `owner.store` before hook registration and `owner.host` after host construction.
 ---@field owner table
 ---@field pluginGuid string Plugin guid captured at module file load time.
 ---@field config table Module config table.
 ---@field definition AdamantModpackLib.ModuleDefinition Raw module definition.
----@field registerHooks? fun()
+---@field registerHooks? AdamantModpackLib.RegisterHooks
 ---@field registerPatchMutation? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
 ---@field registerManualMutation? AdamantModpackLib.ManualMutation
 ---@field onSettingsCommitted? fun(store: AdamantModpackLib.ManagedStore) Post-commit observer for rebuilding derived runtime/UI structures.
----@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost)
+---@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
 ---@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 ---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
@@ -937,8 +942,14 @@ function lib.createModule(opts)
 end
 
 ---@param opts AdamantModpackLib.ModuleHostOpts
----@return AdamantModpackLib.AuthorHost host
+---@return AdamantModpackLib.ModuleHost host
+---@return AdamantModpackLib.AuthorHost authorHost
 function lib.createModuleHost(opts)
+end
+
+---@param host AdamantModpackLib.ModuleHost
+---@return AdamantModpackLib.AuthorHost host
+function lib.activateModuleHost(host)
 end
 
 ---@param pluginGuid string Plugin guid used when creating the module host.

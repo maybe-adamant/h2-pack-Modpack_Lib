@@ -42,13 +42,13 @@ A module is built from four main pieces:
 - `session`
   Staged UI state. Draw code edits this and host/framework plumbing commits it later.
 - `host`
-  The author-facing view returned by `lib.createModule(...)`. Framework and standalone hosting use the internal live host registered by the same call.
+  The author-facing view returned by `lib.createModule(...)`. Call `host.activate()` after construction so Framework and standalone hosting can use the registered live host.
 
 Typical module flow:
 
 1. `main.lua` calls `lib.createModule(...)`.
-2. The returned author host is assigned to `internal.host`.
-3. The returned store is assigned to `internal.store` when gameplay logic needs it.
+2. The returned author host is kept local in `main.lua`.
+3. `host.activate()` registers hooks, integrations, and the live host.
 4. UI code edits staged values through the session passed into draw callbacks.
 5. Host/framework plumbing commits staged persistent values when appropriate.
 6. Gameplay logic reads persisted state through `store.read(...)`.
@@ -79,7 +79,7 @@ Owns module wiring:
 - imports Lib and stack dependencies
 - imports `data.lua`, `logic.lua`, and `ui.lua`
 - creates the module through `lib.createModule(...)`
-- assigns returned `host` and `store` to `internal` when needed
+- activates the returned host
 - wires optional standalone UI
 
 Keep store/session/host creation here even if the module grows.
@@ -108,11 +108,13 @@ This code should read and write staged values through the author-facing `session
 
 Owns gameplay and mutation behavior:
 
-- `internal.RegisterHooks()`
+- `internal.RegisterHooks(store, authorHost)`
 - optional `internal.BuildPatchPlan(...)`
 - optional manual mutation apply/revert callbacks
 
-This code should read persisted state through `internal.store`.
+This code should read persisted state through the `store` passed to
+`RegisterHooks(...)`, mutation callbacks, or narrower access/read closures
+derived from that store.
 
 ## First Module Checklist
 
@@ -123,7 +125,7 @@ Start with the template, then fill in these pieces in order.
 At minimum:
 
 ```lua
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -133,6 +135,7 @@ internal.host, internal.store = lib.createModule({
         name = "Example Module",
     },
 })
+host.activate()
 ```
 
 For coordinated modules, `modpack`, `id`, `name`, and `storage` are the important discovery fields.
@@ -156,7 +159,7 @@ end
 Then attach it to the module definition:
 
 ```lua
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -167,6 +170,7 @@ internal.host, internal.store = lib.createModule({
         storage = BuildStorage(),
     },
 })
+host.activate()
 ```
 
 Rules:
@@ -187,7 +191,7 @@ hashes, declare `stage = false, hash = false` and use
 ### 3. Create the module in `main.lua`
 
 ```lua
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -201,6 +205,7 @@ internal.host, internal.store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
+host.activate()
 ```
 
 The draw path receives the restricted author-facing session through the live host.
@@ -250,14 +255,14 @@ end
 Use `registerPatchMutation` when possible. Reach for `registerManualMutation`
 only when the mutation is not naturally expressed as reversible table edits.
 
-If the module installs runtime hooks, declare them through `lib.hooks.*` from `internal.RegisterHooks()`:
+If the module installs runtime hooks, declare them through `lib.hooks.*` from `internal.RegisterHooks(...)`:
 
 ```lua
-function internal.RegisterHooks()
+function internal.RegisterHooks(store, host)
     lib.hooks.Wrap(internal, "SomeGameFunction", function(base, ...)
         local result = base(...)
 
-        if internal.store.read("FeatureEnabled") then
+        if host.isEnabled() and store.read("FeatureEnabled") then
             -- apply module-specific logic to the wrapped call here
         end
 
@@ -269,7 +274,7 @@ end
 ### 6. Create the module in `main.lua`
 
 ```lua
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -284,6 +289,7 @@ internal.host, internal.store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
+host.activate()
 ```
 
 This is the main module export.
@@ -298,7 +304,7 @@ If the module has no runtime hooks, `registerHooks` may be omitted.
 
 If the module belongs to a Framework-managed pack:
 
-- `lib.createModule(...)` registers the module in Lib's live-host registry
+- `host.activate()` registers the module in Lib's live-host registry
 - Framework calls `host.drawTab(...)`
 - optional quick setup uses `host.drawQuickContent(...)`
 

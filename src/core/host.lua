@@ -1,4 +1,5 @@
 local internal = AdamantModpackLib_Internal
+local HostState = setmetatable({}, { __mode = "k" })
 
 ---@class StandaloneRuntime
 ---@field renderWindow fun()
@@ -16,6 +17,7 @@ local internal = AdamantModpackLib_Internal
 ---@field isEnabled fun(): boolean
 ---@field getIdentity fun(): table
 ---@field getMeta fun(): table
+---@field activate fun(): AuthorHost
 
 ---@class ModuleHostOpts
 ---@field definition ModuleDefinition
@@ -23,11 +25,11 @@ local internal = AdamantModpackLib_Internal
 ---@field store ManagedStore
 ---@field session Session
 ---@field hookOwner table|nil
----@field registerHooks fun()|nil
+---@field registerHooks fun(store: ManagedStore, host: AuthorHost)|nil
 ---@field registerPatchMutation fun(plan: table, store: ManagedStore)|nil
 ---@field registerManualMutation table|nil
 ---@field onSettingsCommitted fun(store: ManagedStore)|nil
----@field registerIntegrations fun(host: AuthorHost)|nil
+---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
 
@@ -113,22 +115,28 @@ local function BuildMutationBundle(opts)
     }, opts.onSettingsCommitted
 end
 
---- Creates a behavior-only host object for Framework and standalone hosting.
---- Registers the created host into Lib's live-host registry under `opts.pluginGuid`
---- so coordinated discovery can resolve it immediately.
---- The host closes over store/session without exposing those state handles publicly.
+--- Creates full and author-facing host objects for Framework and standalone hosting.
+--- Activation is explicit through the returned author host.
 ---@param opts ModuleHostOpts
----@return AuthorHost host Module author host view.
+---@return ModuleHost host Full module host.
+---@return AuthorHost authorHost Module author host view.
 function public.createModuleHost(opts)
     if type(opts) ~= "table" then
         internal.violate("host.invalid_create_opts", "createModuleHost: opts must be a table")
     end
     ValidateKnownOpts(opts, "createModuleHost")
     local def = opts.definition
+    local pluginGuid = opts.pluginGuid
     local store = opts.store
     local session = opts.session
+    local hookOwner = opts.hookOwner
+    local registerHooks = opts.registerHooks
+    local registerIntegrations = opts.registerIntegrations
     if type(def) ~= "table" or def._preparedDefinition ~= true then
         internal.violate("host.invalid_create_opts", "createModuleHost: prepared definition is required")
+    end
+    if type(pluginGuid) ~= "string" or pluginGuid == "" then
+        internal.violate("host.invalid_create_opts", "createModuleHost: pluginGuid is required")
     end
     if not (store and type(store.read) == "function") then
         internal.violate("host.invalid_create_opts", "createModuleHost: store is required")
@@ -140,19 +148,11 @@ function public.createModuleHost(opts)
 
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
-    local registerHooks = opts.registerHooks
-    local registerIntegrations = opts.registerIntegrations
-    local hookOwner = opts.hookOwner
-    local pluginGuid = opts.pluginGuid
     local mutationBundle, settingsObserver = BuildMutationBundle(opts)
 
     if type(drawTab) ~= "function" then
         internal.violate("host.invalid_create_opts", "createModuleHost: drawTab is required")
     end
-    if type(pluginGuid) ~= "string" or pluginGuid == "" then
-        internal.violate("host.invalid_create_opts", "createModuleHost: pluginGuid is required")
-    end
-
     if registerHooks ~= nil then
         if type(registerHooks) ~= "function" then
             internal.violate("host.invalid_create_opts", "createModuleHost: registerHooks must be a function")
@@ -160,7 +160,6 @@ function public.createModuleHost(opts)
         if type(hookOwner) ~= "table" then
             internal.violate("host.invalid_create_opts", "createModuleHost: hookOwner is required when registerHooks is provided")
         end
-        internal.hooks.refresh(hookOwner, registerHooks)
     end
     if registerIntegrations ~= nil and type(registerIntegrations) ~= "function" then
         internal.violate("host.invalid_create_opts", "createModuleHost: registerIntegrations must be a function")
@@ -181,6 +180,13 @@ function public.createModuleHost(opts)
 
     ---@type ModuleHost
     local host = {}
+
+    local function requireActivated(methodName)
+        local state = HostState[host]
+        if not state or state.activated ~= true then
+            internal.violate("host.not_activated", "host.%s requires host.activate() before it can run", methodName)
+        end
+    end
 
     function host.getIdentity()
         return {
@@ -214,6 +220,7 @@ function public.createModuleHost(opts)
     end
 
     function host.writeAndFlush(alias, value)
+        requireActivated("writeAndFlush")
         session.write(alias, value)
         session._flushToConfig()
         return public.lifecycle.notifySettingsCommitted(def, settingsObserver, store)
@@ -225,6 +232,7 @@ function public.createModuleHost(opts)
     end
 
     function host.flush()
+        requireActivated("flush")
         if not session.isDirty() then
             return true
         end
@@ -233,18 +241,22 @@ function public.createModuleHost(opts)
     end
 
     function host.reloadFromConfig()
+        requireActivated("reloadFromConfig")
         session._reloadFromConfig()
     end
 
     function host.resync()
+        requireActivated("resync")
         return public.lifecycle.resyncSession(def, session)
     end
 
     function host.resetToDefaults(resetOpts)
+        requireActivated("resetToDefaults")
         return public.resetStorageToDefaults(def.storage, session, resetOpts)
     end
 
     function host.commitIfDirty()
+        requireActivated("commitIfDirty")
         if not session.isDirty() then
             return true, nil, false
         end
@@ -257,22 +269,27 @@ function public.createModuleHost(opts)
     end
 
     function host.setEnabled(enabled)
+        requireActivated("setEnabled")
         return public.lifecycle.setEnabled(def, mutationBundle, store, enabled)
     end
 
     function host.setDebugMode(enabled)
+        requireActivated("setDebugMode")
         return public.lifecycle.setDebugMode(store, enabled)
     end
 
     function host.applyOnLoad()
+        requireActivated("applyOnLoad")
         return public.lifecycle.applyOnLoad(def, mutationBundle, store)
     end
 
     function host.applyMutation()
+        requireActivated("applyMutation")
         return public.lifecycle.applyMutation(def, mutationBundle, store)
     end
 
     function host.revertMutation()
+        requireActivated("revertMutation")
         return public.lifecycle.revertMutation(def, mutationBundle, store)
     end
 
@@ -283,47 +300,119 @@ function public.createModuleHost(opts)
         getMeta = host.getMeta,
     }
 
+    function authorHost.activate()
+        return public.activateModuleHost(host)
+    end
+
     function host.drawTab(imgui)
+        requireActivated("drawTab")
         return drawTab(imgui, authorSession, authorHost)
     end
 
     if type(drawQuickContent) == "function" then
         function host.drawQuickContent(imgui)
+            requireActivated("drawQuickContent")
             return drawQuickContent(imgui, authorSession, authorHost)
         end
     end
 
+    HostState[host] = {
+        definition = def,
+        mutationBundle = mutationBundle,
+        pluginGuid = pluginGuid,
+        store = store,
+        hookOwner = hookOwner,
+        registerHooks = registerHooks,
+        registerIntegrations = registerIntegrations,
+        authorSession = authorSession,
+        authorHost = authorHost,
+        activated = false,
+    }
+
+    return host, authorHost
+end
+
+--- Activates a constructed module host by registering external side effects.
+---@param host ModuleHost
+---@return AuthorHost host Module author host view.
+function public.activateModuleHost(host)
+    local state = type(host) == "table" and HostState[host] or nil
+    if not state then
+        internal.violate("host.invalid_activate_opts", "activateModuleHost: host is required")
+    end
+
+    local pluginGuid = state.pluginGuid
+    local hookOwner = state.hookOwner
+    local registerHooks = state.registerHooks
+    local registerIntegrations = state.registerIntegrations
+    local store = state.store
+    local authorHost = state.authorHost
+    local def = state.definition
+
+    if state.activated == true then
+        internal.violate("host.already_activated", "activateModuleHost: host is already activated")
+    end
+    if state.activating == true then
+        internal.violate("host.already_activated", "activateModuleHost: host activation is already in progress")
+    end
     local identity = host.getIdentity()
     local meta = host.getMeta()
     local packId = identity.modpack
     local pendingCoordinatorRebuild = internal.pendingCoordinatorRebuilds[def]
     local hasPendingCoordinatorRebuild = pendingCoordinatorRebuild ~= nil
+    local previousHost = internal.liveModuleHosts[pluginGuid]
+    local hadPreviousHost = previousHost ~= nil
+    local integrationTransaction = internal.integrations.beginTransaction()
+    state.activating = true
+
     internal.liveModuleHosts[pluginGuid] = host
-    if registerIntegrations then
-        registerIntegrations(authorHost)
-    end
-    if not hasPendingCoordinatorRebuild
-        and type(packId) == "string"
-        and packId ~= ""
-        and public.isModuleCoordinated(packId) then
-        local ok, err = host.applyOnLoad()
-        if not ok then
-            internal.violate("host.coordinated_runtime_sync_failed", "%s coordinated runtime sync failed: %s",
-                tostring(meta.name or identity.id or "module"),
-                tostring(err))
+    local ok, err = pcall(function()
+        if registerHooks ~= nil then
+            internal.hooks.refresh(hookOwner, function()
+                return registerHooks(store, authorHost)
+            end)
         end
-    elseif hasPendingCoordinatorRebuild then
-        local requested = public.lifecycle.requestCoordinatorRebuild(packId, pendingCoordinatorRebuild)
-        if requested then
-            internal.pendingCoordinatorRebuilds[def] = nil
+        if registerIntegrations then
+            registerIntegrations(authorHost, store)
+        end
+
+        if not hasPendingCoordinatorRebuild
+            and type(packId) == "string"
+            and packId ~= ""
+            and public.isModuleCoordinated(packId) then
+            local syncOk, syncErr = public.lifecycle.applyOnLoad(def, state.mutationBundle, store)
+            if not syncOk then
+                internal.violate("host.coordinated_runtime_sync_failed", "%s coordinated runtime sync failed: %s",
+                    tostring(meta.name or identity.id or "module"),
+                    tostring(syncErr))
+            end
+        elseif hasPendingCoordinatorRebuild then
+            local requested = public.lifecycle.requestCoordinatorRebuild(packId, pendingCoordinatorRebuild)
+            if requested then
+                internal.pendingCoordinatorRebuilds[def] = nil
+            else
+                internal.violate(
+                    "host.structural_rebuild_unavailable",
+                    "%s structural definition changed during hot reload; full reload required",
+                    tostring(meta.name or identity.id or "module"))
+            end
+        end
+    end)
+
+    if not ok then
+        state.activating = false
+        integrationTransaction.rollback()
+        if hadPreviousHost then
+            internal.liveModuleHosts[pluginGuid] = previousHost
         else
-            internal.violate(
-                "host.structural_rebuild_unavailable",
-                "%s structural definition changed during hot reload; full reload required",
-                tostring(meta.name or identity.id or "module"))
+            internal.liveModuleHosts[pluginGuid] = nil
         end
+        error(err, 0)
     end
 
+    integrationTransaction.commit()
+    state.activating = false
+    state.activated = true
     return authorHost
 end
 

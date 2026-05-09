@@ -90,33 +90,36 @@ local function restorePathMock()
 end
 
 local function createHostWithHooks(owner, registerHooks)
-    return lib.createModuleHost({
+    local store = {
+        read = function()
+            return false
+        end,
+    }
+    local session = {
+        view = {},
+        read = function() end,
+        write = function() end,
+        reset = function() end,
+        getAliasSchema = function() end,
+        isDirty = function()
+            return false
+        end,
+        _flushToConfig = function() end,
+        _reloadFromConfig = function() end,
+        auditMismatches = function()
+            return {}
+        end,
+    }
+    local host = lib.createModuleHost({
         pluginGuid = "hook-test-module",
         definition = lib.prepareDefinition({}, { id = "HookTest", name = "Hook Test", storage = {} }),
-        store = {
-            read = function()
-                return false
-            end,
-        },
-        session = {
-            view = {},
-            read = function() end,
-            write = function() end,
-            reset = function() end,
-            getAliasSchema = function() end,
-            isDirty = function()
-                return false
-            end,
-            _flushToConfig = function() end,
-            _reloadFromConfig = function() end,
-            auditMismatches = function()
-                return {}
-            end,
-        },
-        drawTab = function() end,
+        store = store,
+        session = session,
         hookOwner = owner,
         registerHooks = registerHooks,
+        drawTab = function() end,
     })
+    return lib.activateModuleHost(host)
 end
 
 function TestHooks:testWrapRegistersOnceAndUpdatesHandler()
@@ -330,14 +333,38 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
     local revertCalls = 0
     lib.lifecycle.registerCoordinator(packId, { ModEnabled = true })
 
-    lib.createModuleHost({
-        pluginGuid = "hook-pack.Alpha",
-        definition = lib.prepareDefinition({}, {
+    local definition = lib.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
             storage = {},
-        }),
+        })
+    local store = {
+        read = function(key)
+            if key == "Enabled" then
+                return true
+            end
+            return false
+        end,
+    }
+    local session = {
+        view = {},
+        read = function() end,
+        write = function() end,
+        reset = function() end,
+        getAliasSchema = function() end,
+        isDirty = function()
+            return false
+        end,
+        _flushToConfig = function() end,
+        _reloadFromConfig = function() end,
+        auditMismatches = function()
+            return {}
+        end,
+    }
+    local host = lib.createModuleHost({
+        pluginGuid = "hook-pack.Alpha",
+        definition = definition,
         registerManualMutation = {
             apply = function()
                 applyCalls = applyCalls + 1
@@ -346,31 +373,11 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
                 revertCalls = revertCalls + 1
             end,
         },
-        store = {
-            read = function(key)
-                if key == "Enabled" then
-                    return true
-                end
-                return false
-            end,
-        },
-        session = {
-            view = {},
-            read = function() end,
-            write = function() end,
-            reset = function() end,
-            getAliasSchema = function() end,
-            isDirty = function()
-                return false
-            end,
-            _flushToConfig = function() end,
-            _reloadFromConfig = function() end,
-            auditMismatches = function()
-                return {}
-            end,
-        },
+        store = store,
+        session = session,
         drawTab = function() end,
     })
+    lib.activateModuleHost(host)
 
     lu.assertEquals(applyCalls, 1)
     lu.assertEquals(revertCalls, 0)
@@ -412,14 +419,16 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         end,
     }
 
-    lib.createModuleHost({
-        pluginGuid = "hook-reload-pack.Alpha",
-        definition = lib.prepareDefinition({}, {
+    local firstDefinition = lib.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
             storage = {},
-        }),
+        })
+    local firstSession = createSession()
+    local firstHost = lib.createModuleHost({
+        pluginGuid = "hook-reload-pack.Alpha",
+        definition = firstDefinition,
         registerManualMutation = {
             apply = function()
                 firstApplyCalls = firstApplyCalls + 1
@@ -429,18 +438,21 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
             end,
         },
         store = store,
-        session = createSession(),
+        session = firstSession,
         drawTab = function() end,
     })
+    lib.activateModuleHost(firstHost)
 
-    lib.createModuleHost({
-        pluginGuid = "hook-reload-pack.Alpha",
-        definition = lib.prepareDefinition({}, {
+    local secondDefinition = lib.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
             storage = {},
-        }),
+        })
+    local secondSession = createSession()
+    local secondHost = lib.createModuleHost({
+        pluginGuid = "hook-reload-pack.Alpha",
+        definition = secondDefinition,
         registerManualMutation = {
             apply = function()
                 secondApplyCalls = secondApplyCalls + 1
@@ -450,9 +462,10 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
             end,
         },
         store = store,
-        session = createSession(),
+        session = secondSession,
         drawTab = function() end,
     })
+    lib.activateModuleHost(secondHost)
 
     lu.assertEquals(firstApplyCalls, 1)
     lu.assertEquals(firstRevertCalls, 1)

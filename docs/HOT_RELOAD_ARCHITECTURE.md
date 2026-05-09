@@ -38,7 +38,7 @@ Safe to rebuild on every module `init`:
 - `definition`
 - `store`
 - `session`
-- live module host created by `lib.createModuleHost(...)`
+- live module host created by `lib.createModule(...)` and activated by `host.activate()`
 - UI draw closures
 - lookup tables derived from current imports
 
@@ -98,7 +98,7 @@ Modules own their local rebuild:
 - keep `chalk`, `reload`, and raw config local to `main.lua`
 - keep persisted runtime reads on `store`
 - keep staged UI edits on the author-facing `session`
-- declare runtime hooks from `internal.RegisterHooks()`
+- declare runtime hooks from `internal.RegisterHooks(store, authorHost)`
 
 ## Bootstrap Pattern
 
@@ -128,12 +128,13 @@ The important part is the split:
 
 ## Coordinated Module Host Refresh
 
-`lib.createModuleHost(...)` is the behavior refresh boundary for a coordinated module.
+`lib.createModule(...)` plus `host.activate()` is the normal behavior refresh boundary for a coordinated module.
 
-When host creation succeeds:
+During module creation and activation:
 - the module host closes over the current `definition`, `store`, and `session`
+- `host.activate()` publishes the live host
 - if `registerHooks` is provided, Lib refreshes that owner's hook registrations
-- if the coordinator for `definition.modpack` is already registered, Lib immediately runs `host.applyOnLoad()`
+- if the coordinator for `definition.modpack` is already registered, Lib immediately syncs live mutation state
 
 That means one coordinated module reload refreshes its live runtime behavior immediately without forcing a pack rebuild.
 
@@ -180,9 +181,10 @@ Supported public hook entrypoints:
 
 The model is:
 - use a persistent owner table, typically the module `internal`
-- register hook sites from `internal.RegisterHooks()`
+- register hook sites from `internal.RegisterHooks(store, authorHost)`
 - pass `owner` and `registerHooks` into `lib.createModule(...)`
-- Lib runs the full registration pass during host creation
+- call `host.activate()` after construction
+- Lib runs the full registration pass during module activation
 
 Behavior:
 - the same owner/path/key updates the live handler instead of stacking another wrapper
@@ -239,7 +241,7 @@ Important consequences:
 
 Framework calls `applyOnLoad()` for discovered coordinated modules during pack init.
 `lib.standaloneHost(...)` calls `applyOnLoad()` for standalone modules during standalone startup.
-`lib.createModuleHost(...)` also calls `applyOnLoad()` immediately when the module is already coordinated, so behavior-only module reloads resync live runtime state without a pack rebuild.
+Activation also syncs live mutation state immediately when the module is already coordinated, so non-structural module reloads resync live runtime state without a pack rebuild.
 
 ## Safety By Scenario
 
@@ -298,8 +300,9 @@ coordinated path, use a full reload.
 - keep `chalk`, `reload`, and raw config local to `main.lua`
 - recreate `definition`, `store`, `session`, and the Lib-created live host in `init`
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
-- register runtime hooks through `internal.RegisterHooks()` and `lib.hooks.*`
+- register runtime hooks through `internal.RegisterHooks(store, authorHost)` and `lib.hooks.*`
 - pass `owner` and `registerHooks` to `lib.createModule(...)` when the module owns runtime hooks
+- call `host.activate()` after construction
 - keep stable GUI callbacks outside `init`
 - late-read current framework or module state from those stable callbacks when a stale closure would matter
 - do not use raw ModUtil path wraps for repo-owned hot-reload-sensitive hook sites

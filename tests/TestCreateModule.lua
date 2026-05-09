@@ -50,6 +50,8 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
         end,
     })
 
+    lu.assertNil(lib.getLiveModuleHost("test-create-module"))
+    host.activate()
     local liveHost = lib.getLiveModuleHost("test-create-module")
     liveHost.drawTab({})
 
@@ -63,12 +65,12 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
     lu.assertEquals(authorRowValue, 2)
-    lu.assertEquals(owner.store, store)
-    lu.assertEquals(owner.host, host)
+    lu.assertNil(owner.store)
+    lu.assertNil(owner.host)
     lu.assertEquals(type(owner._definitionStructuralFingerprint), "string")
 end
 
-function TestCreateModule:testCreateModulePublishesStoreBeforeHookRefresh()
+function TestCreateModule:testCreateModulePassesRuntimeHandlesToHookRefresh()
     local owner = {}
     local hookSawStore = false
     local hookSawHost = false
@@ -85,17 +87,21 @@ function TestCreateModule:testCreateModulePublishesStoreBeforeHookRefresh()
                 { type = "bool", alias = "Flag", default = true },
             },
         },
-        registerHooks = function()
-            hookSawStore = owner.store and owner.store.read("Flag") == true
-            hookSawHost = owner.host ~= nil
+        registerHooks = function(activeStore, authorHost)
+            hookSawStore = activeStore and activeStore.read("Flag") == true
+            hookSawHost = authorHost ~= nil
         end,
         drawTab = function() end,
     })
 
-    lu.assertEquals(owner.store, store)
-    lu.assertEquals(owner.host, host)
+    lu.assertNil(owner.store)
+    lu.assertNil(owner.host)
+    lu.assertFalse(hookSawStore)
+    host.activate()
     lu.assertTrue(hookSawStore)
-    lu.assertFalse(hookSawHost)
+    lu.assertTrue(hookSawHost)
+    lu.assertEquals(type(host.isEnabled), "function")
+    lu.assertEquals(store.read("Flag"), true)
 end
 
 function TestCreateModule:testCreateModuleReturnsOnlyAuthorHostSurface()
@@ -114,11 +120,31 @@ function TestCreateModule:testCreateModuleReturnsOnlyAuthorHostSurface()
     lu.assertEquals(type(host.isEnabled), "function")
     lu.assertEquals(type(host.getIdentity), "function")
     lu.assertEquals(type(host.getMeta), "function")
+    lu.assertEquals(type(host.activate), "function")
     lu.assertNil(host.read)
     lu.assertNil(host.writeAndFlush)
     lu.assertNil(host.commitIfDirty)
     lu.assertNil(host.applyMutation)
     lu.assertNil(host.setEnabled)
+end
+
+function TestCreateModule:testCreateModuleActivationIsSingleUse()
+    local host = lib.createModule({
+        owner = {},
+        pluginGuid = "test-create-module-single-activate",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "SingleActivate",
+            name = "Single Activate",
+        },
+        drawTab = function() end,
+    })
+
+    host.activate()
+    lu.assertErrorMsgContains("already activated", function()
+        host.activate()
+    end)
 end
 
 function TestCreateModule:testCreateModuleRequiresOwner()

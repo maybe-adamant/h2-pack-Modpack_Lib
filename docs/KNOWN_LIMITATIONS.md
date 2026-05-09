@@ -13,7 +13,8 @@ The module rebuild path is:
 - `prepareDefinition(...)`
 - `createStore(...)`
 - `createModuleHost(...)`
-- `standaloneHost(...)`
+- `host.activate()`
+- `standaloneHost(...)` when running outside Framework coordination
 
 The Framework rebuild is correct, but it is not coalesced across a multi-module reload wave.
 

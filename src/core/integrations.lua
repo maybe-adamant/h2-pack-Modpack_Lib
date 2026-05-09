@@ -5,9 +5,12 @@ local integrations = public.integrations
 
 internal.integrations = internal.integrations or {
     registry = {},
+    transactions = {},
 }
+internal.integrations.transactions = internal.integrations.transactions or {}
 
 local registry = internal.integrations.registry
+local transactions = internal.integrations.transactions
 
 local function getBucket(id, create)
     local bucket = registry[id]
@@ -60,6 +63,96 @@ local function getPreferredProvider(id)
     return nil, nil
 end
 
+local function getProviderOrderIndex(bucket, providerId)
+    for index, currentProviderId in ipairs(bucket.order) do
+        if currentProviderId == providerId then
+            return index
+        end
+    end
+    return nil
+end
+
+local function insertProviderOrder(bucket, providerId, index)
+    if getProviderOrderIndex(bucket, providerId) then
+        return
+    end
+    if index and index <= #bucket.order then
+        table.insert(bucket.order, index, providerId)
+    else
+        table.insert(bucket.order, providerId)
+    end
+end
+
+local function getActiveTransaction()
+    return transactions[#transactions]
+end
+
+local function recordRegistrationChange(id, providerId, bucket)
+    local transaction = getActiveTransaction()
+    if not transaction then
+        return
+    end
+
+    local key = id .. "\0" .. providerId
+    if transaction.seen[key] then
+        return
+    end
+
+    transaction.seen[key] = true
+    transaction.changes[#transaction.changes + 1] = {
+        id = id,
+        providerId = providerId,
+        existed = bucket.providers[providerId] ~= nil,
+        api = bucket.providers[providerId],
+        orderIndex = getProviderOrderIndex(bucket, providerId),
+    }
+end
+
+local function closeTransaction(transaction)
+    if transaction.closed then
+        return
+    end
+    for index = #transactions, 1, -1 do
+        if transactions[index] == transaction then
+            table.remove(transactions, index)
+            break
+        end
+    end
+    transaction.closed = true
+end
+
+function internal.integrations.beginTransaction()
+    local transaction = {
+        seen = {},
+        changes = {},
+        closed = false,
+    }
+    transactions[#transactions + 1] = transaction
+
+    return {
+        commit = function()
+            closeTransaction(transaction)
+        end,
+        rollback = function()
+            if transaction.closed then
+                return
+            end
+            for index = #transaction.changes, 1, -1 do
+                local change = transaction.changes[index]
+                local bucket = getBucket(change.id, change.existed)
+                if change.existed then
+                    bucket.providers[change.providerId] = change.api
+                    insertProviderOrder(bucket, change.providerId, change.orderIndex)
+                else
+                    removeProviderFromBucket(bucket, change.providerId)
+                    pruneBucket(change.id, bucket)
+                end
+            end
+            closeTransaction(transaction)
+        end,
+    }
+end
+
 --- Registers or replaces an optional cross-module integration provider.
 --- Re-registering the same `id` and `providerId` updates the API in place.
 ---@param id string Domain-named integration id, e.g. "run-director.god-availability".
@@ -78,6 +171,7 @@ function integrations.register(id, providerId, api)
     end
 
     local bucket = getBucket(id, true)
+    recordRegistrationChange(id, providerId, bucket)
     if bucket.providers[providerId] == nil then
         table.insert(bucket.order, providerId)
     end

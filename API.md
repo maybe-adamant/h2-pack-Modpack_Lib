@@ -7,6 +7,7 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.prepareDefinition(...)`
 - `lib.createStore(...)`
 - `lib.createModuleHost(...)`
+- `lib.activateModuleHost(...)`
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
@@ -110,8 +111,8 @@ Namespaced state buckets attached to live game object tables such as `CurrentRun
 Use this for object-owned runtime state whose lifetime should follow that game table. It is not persisted, staged, hashed, profiled, or reset by Lib.
 
 The normal author path is `lib.createModule(...)`, which prepares the definition,
-creates the store/session pair, publishes the live host, and returns the
-author-facing host plus the state handles to keep.
+creates the store/session pair, and returns the author-facing host plus the state
+handles to keep. `host.activate()` publishes the live host and runs side effects.
 
 Advanced use:
 
@@ -222,26 +223,29 @@ local host, store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-internal.host = host
-internal.store = store
+host.activate()
 ```
 
 Returns:
 - `host`
-  Author-facing host with `isEnabled()`, `getIdentity()`, and `getMeta()`.
+  Author-facing host with `activate()`, `isEnabled()`, `getIdentity()`, and `getMeta()`.
 - `store`
   Runtime read surface for gameplay/hooks.
 
 `createModule(...)` intentionally does not return the prepared definition or
 raw session. Draw callbacks receive the restricted author session, and custom
-construction can use `prepareDefinition(...)`, `createStore(...)`, and
-`createModuleHost(...)` directly.
+construction can use `prepareDefinition(...)`, `createStore(...)`,
+`createModuleHost(...)`, and `activateModuleHost(...)` directly.
 
-Before hook registration runs, `createModule(...)` publishes the runtime store
-to `owner.store`. After host construction completes, it publishes the author
-host to `owner.host`. This lets hot-reload-safe hook code read runtime state
-during its registration pass without waiting for the caller's assignment to
-finish.
+If `registerHooks` is provided, Lib calls it as:
+
+```lua
+registerHooks(store, authorHost)
+```
+
+Runtime helper files should receive the needed `store` or narrowed read/access
+closures from `registerHooks(...)`; draw/UI paths should continue using the
+session passed to draw callbacks.
 
 ### `lib.createStore(config, definition)`
 
@@ -415,7 +419,7 @@ Host/framework plumbing methods:
 - `session._captureDirtyConfigSnapshot()`
 - `session._restoreConfigSnapshot(snapshot)`
 
-When a module is rendered through `lib.createModuleHost(...)`, draw callbacks receive a restricted author-facing session view with:
+When a module is rendered through a Lib host, draw callbacks receive a restricted author-facing session view with:
 - `view`
 - `read(alias)`
 - `table(alias)`
@@ -484,17 +488,19 @@ Also supports:
 ### Typical module pattern
 
 ```lua
-function internal.RegisterHooks()
+function internal.RegisterHooks(store, host)
     lib.hooks.Wrap(internal, "GetEligibleLootNames", function(base, ...)
         local result = base(...)
-        -- inspect or transform the wrapped call here
+        if host.isEnabled() and store.read("FeatureEnabled") then
+            -- inspect or transform the wrapped call here
+        end
         return result
     end)
 end
 
 local PLUGIN_GUID = _PLUGIN.guid
 
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -507,9 +513,10 @@ internal.host, internal.store = lib.createModule({
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
 })
+host.activate()
 ```
 
-When `createModuleHost(...)` receives `hookOwner` and `registerHooks`, it runs the registration pass as part of host creation and deactivates hooks omitted by a later pass for the same owner.
+When `host.activate()` runs with `owner` and `registerHooks`, activation runs the registration pass and deactivates hooks omitted by a later pass for the same owner.
 
 ## `lib.overlays`
 
@@ -729,9 +736,9 @@ Runs `settingsObserver(store)` when present. Host flush paths use this after dir
 
 ### `lib.createModuleHost(opts)`
 
-Creates a behavior-only host object around:
-- `pluginGuid`
+Creates full and author-facing host objects around:
 - `definition`
+- `pluginGuid`
 - `store`
 - `session`
 - optional `hookOwner`
@@ -751,18 +758,34 @@ Creates a behavior-only host object around:
 - `session.getAliasSchema(alias)`
 - `session.resetToDefaults(opts?)`
 
-Commit and reload behavior stays on Lib's internal live host. Modules do not receive
-that object directly.
+Returns the full host and the author-facing projection. Construction is side-effect
+free; `authorHost.activate()` publishes the full host, refreshes optional hooks,
+runs optional integrations, and syncs initial runtime behavior. Commit and reload
+behavior stays on the full host. Normal module code should use the author host
+returned by `createModule(...)`.
+
+### `lib.activateModuleHost(host)`
+
+Activates a host created by `lib.createModuleHost(...)`. Normal author code
+should call `authorHost.activate()` instead.
 
 If `registerHooks` is provided:
 - `hookOwner` must be a persistent table
-- the host runs `registerHooks()` during host creation
+- Lib runs `registerHooks(store, authorHost)` during activation
 - hook declarations made through `lib.hooks.*` are refreshed as one registration pass for that owner
+
+If `registerIntegrations` is provided, Lib runs
+`registerIntegrations(authorHost, store)` during activation.
 
 Returned author surface:
 - `host.isEnabled()`
 - `host.getIdentity()`
 - `host.getMeta()`
+
+`activateModuleHost(...)` is single-use for a constructed host. Calling it
+twice for the same host is a state-machine error. Side-effecting full-host
+methods such as `drawTab`, `commitIfDirty`, `setEnabled`, and `applyOnLoad`
+require activation first.
 
 Runtime host behavior is resolved internally through the live-host registry.
 
@@ -771,7 +794,9 @@ Use this as the bridge between module state and either:
 - standalone window/menu hosting
 
 Behavior:
-- when a coordinator is already registered for `definition.modpack`, host creation immediately syncs the module's live mutation state through `host.applyOnLoad()`
+- activation publishes the host to Lib's live-host registry
+- activation runs optional integrations
+- when a coordinator is already registered for `definition.modpack`, activation immediately syncs the module's live mutation state
 - otherwise startup sync is owned by Framework or standalone hosting
 
 ### `lib.standaloneHost(pluginGuid)`
@@ -780,7 +805,8 @@ Initializes standalone module hosting and returns window/menu-bar renderers.
 
 Useful when the module is not framework-hosted.
 
-`pluginGuid` must be the same plugin guid passed to `lib.createModuleHost(...)`.
+`pluginGuid` must be the same plugin guid passed to `lib.createModuleHost(...)`
+or `lib.createModule(...)`.
 
 Returned surface:
 - `runtime.renderWindow()`
@@ -801,11 +827,11 @@ Behavior:
 
 ### `lib.getLiveModuleHost(pluginGuid)`
 
-Returns the full runtime host registered by `lib.createModuleHost(...)`.
+Returns the full runtime host registered by `lib.activateModuleHost(...)`.
 
 This is an infrastructure API for Framework discovery, standalone hosting, and
 Lib internals. Normal module code should keep the author host returned by
-`lib.createModuleHost(...)` and use `store`/`session` for state access.
+`lib.createModule(...)` and use `store`/callback sessions for state access.
 
 ## Module Coordination Queries
 

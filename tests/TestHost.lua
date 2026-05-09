@@ -14,6 +14,17 @@ function TestHost:tearDown()
     RestoreWarnings()
 end
 
+local function createActivatedHost(pluginGuid, opts, activationOpts)
+    activationOpts = activationOpts or {}
+    opts.pluginGuid = pluginGuid
+    opts.hookOwner = activationOpts.hookOwner
+    opts.registerHooks = activationOpts.registerHooks
+    opts.registerIntegrations = activationOpts.registerIntegrations
+    local host, authorHost = lib.createModuleHost(opts)
+    authorHost.activate()
+    return host, authorHost
+end
+
 function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
     local drawCalls = 0
     local pluginGuid = "test-standalone-commit"
@@ -44,8 +55,7 @@ function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
         Spacing = noop,
     }
 
-    lib.createModuleHost({
-        pluginGuid = pluginGuid,
+    createActivatedHost(pluginGuid, {
         definition = definition,
         store = store,
         session = session,
@@ -80,8 +90,7 @@ function TestHost:testStandaloneHostCanResolveCurrentModuleHostFromLibRegistry()
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local authorHost = lib.createModuleHost({
-        pluginGuid = pluginGuid,
+    local _, authorHost = createActivatedHost(pluginGuid, {
         definition = definition,
         store = store,
         session = session,
@@ -110,8 +119,7 @@ function TestHost:testHostFlushNotifiesSettingsObserver()
     local store, session = lib.createStore({
         Value = false,
     }, definition)
-    lib.createModuleHost({
-        pluginGuid = "test-settings-observer-host",
+    createActivatedHost("test-settings-observer-host", {
         definition = definition,
         store = store,
         session = session,
@@ -132,6 +140,26 @@ function TestHost:testHostFlushNotifiesSettingsObserver()
     lu.assertTrue(observedValue)
 end
 
+function TestHost:testSideEffectingHostMethodsRequireActivation()
+    local definition = lib.prepareDefinition({}, {
+        id = "InactiveHost",
+        name = "Inactive Host",
+        storage = {},
+    })
+    local store, session = lib.createStore({}, definition)
+    local host = lib.createModuleHost({
+        pluginGuid = "test-inactive-host",
+        definition = definition,
+        store = store,
+        session = session,
+        drawTab = function() end,
+    })
+
+    lu.assertErrorMsgContains("host.not_activated", function()
+        host.flush()
+    end)
+end
+
 function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
     local capturedAuthorSession = nil
     local definition = lib.prepareDefinition({}, {
@@ -146,8 +174,7 @@ function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
         EnabledFlag = true,
         Count = 7,
     }, definition)
-    lib.createModuleHost({
-        pluginGuid = "test-reset-host",
+    createActivatedHost("test-reset-host", {
         definition = definition,
         store = store,
         session = session,
@@ -190,19 +217,19 @@ function TestHost:testCreateModuleHostPassesAuthorHostToCallbacks()
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local returnedHost = lib.createModuleHost({
-        pluginGuid = "test-author-host",
+    local _, returnedHost = createActivatedHost("test-author-host", {
         definition = definition,
         store = store,
         session = session,
-        registerIntegrations = function(authorHost)
-            callbackHost = authorHost
-        end,
         drawTab = function(_, _, authorHost)
             drawHost = authorHost
         end,
         drawQuickContent = function(_, _, authorHost)
             quickHost = authorHost
+        end,
+    }, {
+        registerIntegrations = function(authorHost)
+            callbackHost = authorHost
         end,
     })
 
@@ -243,8 +270,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         DebugMode = false,
         EnabledFlag = false,
     }, definition)
-    lib.createModuleHost({
-        pluginGuid = "reload-pack.ReloadHost",
+    createActivatedHost("reload-pack.ReloadHost", {
         definition = definition,
         store = store,
         session = session,
@@ -273,8 +299,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         DebugMode = false,
         OtherFlag = false,
     }, prepared)
-    lib.createModuleHost({
-        pluginGuid = "reload-pack.ReloadHost",
+    createActivatedHost("reload-pack.ReloadHost", {
         definition = prepared,
         store = reloadStore,
         session = reloadSession,
@@ -288,4 +313,92 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
     lu.assertEquals(applyCalls, 0)
     lu.assertNotNil(rebuildReason)
     lu.assertEquals(lib.getLiveModuleHost("reload-pack.ReloadHost"), reloadedHost)
+end
+
+function TestHost:testActivationFailureRestoresLiveHostAndIntegrations()
+    local pluginGuid = "test-activation-rollback"
+    local integrationId = "test.activation.rollback"
+    local providerId = "RollbackProvider"
+    local previousApi = { value = "previous" }
+
+    local firstDefinition = lib.prepareDefinition({}, {
+        id = "ActivationRollback",
+        name = "Activation Rollback",
+        storage = {},
+    })
+    local firstStore, firstSession = lib.createStore({
+        Enabled = true,
+        DebugMode = false,
+    }, firstDefinition)
+    local firstHost = createActivatedHost(pluginGuid, {
+        definition = firstDefinition,
+        store = firstStore,
+        session = firstSession,
+        drawTab = function() end,
+    })
+    lib.integrations.register(integrationId, providerId, previousApi)
+
+    local secondDefinition = lib.prepareDefinition({}, {
+        id = "ActivationRollback",
+        name = "Activation Rollback",
+        storage = {},
+    })
+    local secondStore, secondSession = lib.createStore({
+        Enabled = true,
+        DebugMode = false,
+    }, secondDefinition)
+    local secondHost, secondAuthorHost = lib.createModuleHost({
+        pluginGuid = pluginGuid,
+        definition = secondDefinition,
+        store = secondStore,
+        session = secondSession,
+        registerIntegrations = function()
+            lib.integrations.register(integrationId, providerId, { value = "replacement" })
+            error("integration boom")
+        end,
+        drawTab = function() end,
+    })
+
+    lu.assertErrorMsgContains("integration boom", function()
+        secondAuthorHost.activate()
+    end)
+    local api = lib.integrations.get(integrationId)
+
+    lu.assertEquals(lib.getLiveModuleHost(pluginGuid), firstHost)
+    lu.assertEquals(api, previousApi)
+    lu.assertErrorMsgContains("host.not_activated", function()
+        secondHost.flush()
+    end)
+
+    lib.integrations.unregisterProvider(providerId)
+end
+
+function TestHost:testActivationRejectsReentrantActivateCalls()
+    local definition = lib.prepareDefinition({}, {
+        id = "ReentrantActivate",
+        name = "Reentrant Activate",
+        storage = {},
+    })
+    local store, session = lib.createStore({
+        Enabled = true,
+        DebugMode = false,
+    }, definition)
+    local host, authorHost
+    host, authorHost = lib.createModuleHost({
+        pluginGuid = "test-reentrant-activate",
+        definition = definition,
+        store = store,
+        session = session,
+        registerIntegrations = function()
+            authorHost.activate()
+        end,
+        drawTab = function() end,
+    })
+
+    lu.assertErrorMsgContains("already in progress", function()
+        authorHost.activate()
+    end)
+    lu.assertErrorMsgContains("host.not_activated", function()
+        host.flush()
+    end)
 end

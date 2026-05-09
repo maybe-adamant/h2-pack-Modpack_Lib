@@ -5,11 +5,11 @@ local internal = AdamantModpackLib_Internal
 ---@field pluginGuid string
 ---@field config table
 ---@field definition ModuleDefinition
----@field registerHooks fun()|nil
+---@field registerHooks fun(store: ManagedStore, host: AuthorHost)|nil
 ---@field registerPatchMutation fun(plan: table, store: ManagedStore)|nil
 ---@field registerManualMutation table|nil
 ---@field onSettingsCommitted fun(store: ManagedStore)|nil
----@field registerIntegrations fun(host: AuthorHost)|nil
+---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
 
@@ -36,6 +36,7 @@ local function ValidateKnownOpts(opts)
 end
 
 --- Creates a module through the canonical prepare -> store -> host pipeline.
+--- Call `host.activate()` after construction.
 ---@param opts ModuleCreateOpts
 ---@return AuthorHost host
 ---@return ManagedStore store
@@ -53,10 +54,9 @@ function public.createModule(opts)
 
     local definition = public.prepareDefinition(opts.owner, opts.definition)
     local store, session = public.createStore(opts.config, definition)
-    opts.owner.store = store
-    local host = public.createModuleHost({
-        pluginGuid = opts.pluginGuid,
+    local _, authorHost = public.createModuleHost({
         definition = definition,
+        pluginGuid = opts.pluginGuid,
         store = store,
         session = session,
         hookOwner = opts.owner,
@@ -68,7 +68,5 @@ function public.createModule(opts)
         drawTab = opts.drawTab,
         drawQuickContent = opts.drawQuickContent,
     })
-    opts.owner.host = host
-
-    return host, store
+    return authorHost, store
 end

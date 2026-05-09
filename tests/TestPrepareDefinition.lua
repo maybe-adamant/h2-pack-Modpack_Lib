@@ -14,6 +14,17 @@ function TestPrepareDefinition:tearDown()
     RestoreWarnings()
 end
 
+local function createAndActivate(pluginGuid, definition, store, session)
+    local _, authorHost = lib.createModuleHost({
+        pluginGuid = pluginGuid,
+        definition = definition,
+        store = store,
+        session = session,
+        drawTab = function() end,
+    })
+    return authorHost.activate()
+end
+
 function TestPrepareDefinition:testPrepareDefinitionReturnsPreparedClone()
     local owner = {}
     local raw = {
@@ -140,13 +151,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
         DebugMode = false,
         OtherFlag = false,
     }, prepared)
-    lib.createModuleHost({
-        pluginGuid = "test-module",
-        definition = prepared,
-        store = store,
-        session = session,
-        drawTab = function() end,
-    })
+    createAndActivate("test-module", prepared, store, session)
 
     lu.assertTrue(owner.requiresFullReload)
     lu.assertNotNil(lib.getLiveModuleHost("test-module"))
@@ -186,13 +191,7 @@ function TestPrepareDefinition:testCreateModuleHostErrorsWhenCoordinatedRebuildC
         OtherFlag = false,
     }, prepared)
     lu.assertErrorMsgContains("host.structural_rebuild_unavailable", function()
-        lib.createModuleHost({
-            pluginGuid = "test-module",
-            definition = prepared,
-            store = store,
-            session = session,
-            drawTab = function() end,
-        })
+        createAndActivate("test-module", prepared, store, session)
     end)
 
     lu.assertTrue(owner.requiresFullReload)
@@ -231,13 +230,7 @@ function TestPrepareDefinition:testCreateModuleHostErrorsAndKeepsPendingReasonWh
         OtherFlag = false,
     }, prepared)
     lu.assertErrorMsgContains("host.structural_rebuild_unavailable", function()
-        lib.createModuleHost({
-            pluginGuid = "test-module",
-            definition = prepared,
-            store = store,
-            session = session,
-            drawTab = function() end,
-        })
+        createAndActivate("test-module", prepared, store, session)
     end)
 
     lu.assertTrue(owner.requiresFullReload)

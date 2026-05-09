@@ -48,7 +48,7 @@ function internal.DrawQuickContent(ui, session)
     })
 end
 
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -67,6 +67,7 @@ internal.host, internal.store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
+host.activate()
 ```
 
 This example assumes coordinated/framework hosting.
@@ -78,10 +79,25 @@ If the module does not register runtime hooks, omit `registerHooks`.
 functions remain available when a module needs custom construction.
 For `createModule(...)`, `owner` is the single persistent owner for structural
 hot-reload tracking and hook refresh ownership.
-During construction, Lib publishes `owner.store` before hook registration and
-`owner.host` after host construction. Runtime hook files may read
-`internal.store`, but should not assume `internal.host` exists during the
-registration pass.
+Call `host.activate()` after construction. That activation step publishes the
+live host, registers hooks, runs integrations, and syncs initial runtime behavior.
+When `registerHooks` is provided, Lib calls it as
+`registerHooks(store, authorHost)`. Modules that use shared runtime helper files
+should pass the needed store or narrower access/read closures into those helpers:
+
+```lua
+function internal.RegisterHooks(store, host)
+    lib.hooks.Wrap(internal, "SomeGameFunction", function(base, ...)
+        if not host.isEnabled() then
+            return base(...)
+        end
+        if store.read("FeatureEnabled") then
+            -- Runtime behavior reads persisted state through store.
+        end
+        return base(...)
+    end)
+end
+```
 
 ## Definition Rules
 
@@ -284,15 +300,17 @@ Modules that register ModUtil path hooks should do that through `lib.hooks.*`.
 Typical shape:
 
 ```lua
-function internal.RegisterHooks()
+function internal.RegisterHooks(store, host)
     lib.hooks.Wrap(internal, "GetEligibleLootNames", function(base, ...)
         local result = base(...)
-        -- inspect or transform the wrapped call here
+        if host.isEnabled() and store.read("FeatureEnabled") then
+            -- inspect or transform the wrapped call here
+        end
         return result
     end)
 end
 
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -306,12 +324,13 @@ internal.host, internal.store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
+host.activate()
 ```
 
 Rules:
 - use a persistent owner table such as the module `internal`
-- declare hook sites inside `RegisterHooks()`
-- let `createModule(...)` own the registration pass
+- declare hook sites inside `RegisterHooks(store, authorHost)`
+- call `host.activate()` after construction
 - use the keyed overload when one owner needs several hooks on the same path
 
 ## Mutation Lifecycle
@@ -326,7 +345,7 @@ Supported mutation shapes:
 Patch-plan example:
 
 ```lua
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -342,6 +361,7 @@ internal.host, internal.store = lib.createModule({
     end,
     drawTab = internal.DrawTab,
 })
+host.activate()
 ```
 
 Lib applies and reverts these mutations through the live host. Module authors
@@ -350,7 +370,7 @@ normally provide the callbacks and let `createModule(...)` wire the lifecycle.
 ## Coordinated Modules
 
 Framework discovery requires:
-- a live host registered by `lib.createModule(...)`
+- a live host registered by `host.activate()`
 - `host.getIdentity()`
 - `host.getMeta()`
 - a prepared definition with `storage`
@@ -371,7 +391,7 @@ For non-framework hosting, use:
 ```lua
 local PLUGIN_GUID = _PLUGIN.guid
 
-internal.host, internal.store = lib.createModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -385,6 +405,7 @@ internal.host, internal.store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
+host.activate()
 
 local runtime = lib.standaloneHost(PLUGIN_GUID)
 
@@ -431,9 +452,8 @@ local config = chalk.auto("config.lua")
 local PACK_ID = "example-pack"
 local PLUGIN_GUID = _PLUGIN.guid
 ---@class ExampleModuleInternal
----@field store ManagedStore|nil
 ---@field standaloneUi StandaloneRuntime|nil
----@field RegisterHooks fun()|nil
+---@field RegisterHooks fun(store: ManagedStore, host: AuthorHost)|nil
 ---@field DrawTab fun(imgui: table, session: AuthorSession)|nil
 ---@field DrawQuickContent fun(imgui: table, session: AuthorSession)|nil
 ExampleModule_Internal = ExampleModule_Internal or {}
@@ -445,7 +465,7 @@ internal.standaloneUi = nil
 local function init()
     import_as_fallback(rom.game)
 
-    internal.host, internal.store = lib.createModule({
+    local host = lib.createModule({
         owner = internal,
         pluginGuid = PLUGIN_GUID,
         config = config,
@@ -474,6 +494,7 @@ local function init()
         drawTab = internal.DrawTab,
         drawQuickContent = internal.DrawQuickContent,
     })
+    host.activate()
 
     internal.standaloneUi = lib.standaloneHost(PLUGIN_GUID)
 end
@@ -510,8 +531,13 @@ function internal.DrawQuickContent(ui, session)
     })
 end
 
-function internal.RegisterHooks()
-    -- Optional: register runtime hooks here through lib.hooks.*
+function internal.RegisterHooks(store, host)
+    lib.hooks.Wrap(internal, "SomeGameFunction", function(base, ...)
+        if host.isEnabled() and store.read("FeatureEnabled") then
+            -- Optional runtime behavior goes here.
+        end
+        return base(...)
+    end)
 end
 
 local loader = reload.auto_single()
@@ -537,10 +563,10 @@ end)
 
 Notes on the example:
 - `config` and `reload` stay local to `main.lua`
-- `store` is recreated on every reload
+- `store` is passed to runtime hooks and mutation callbacks
 - draw callbacks receive the restricted author session through the live host
-- `lib.createModule(...)` owns the live coordinated host registration
-- `internal.RegisterHooks()` is the normal place for `lib.hooks.*` declarations
+- `host.activate()` owns live coordinated host registration
+- `internal.RegisterHooks(store, authorHost)` is the normal place for `lib.hooks.*` declarations
 - `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `DrawQuickContent` is optional
-- packed widgets need the module `store`
+- packed widgets use the session or row handle passed to the draw path
