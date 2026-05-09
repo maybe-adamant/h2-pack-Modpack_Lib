@@ -16,6 +16,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
     local dirty = false
     local dirtyRoots = {}
     local configEntries = {}
+    local tableHandles = {}
 
     if configBackend then
         for _, root in ipairs(stageRootNodes) do
@@ -203,6 +204,11 @@ function internal.store.createSession(modConfig, configBackend, storage)
     end
 
     local function getTableHandle(alias)
+        local cached = tableHandles[alias]
+        if cached then
+            return cached
+        end
+
         local node = type(alias) == "string" and aliasNodes[alias] or nil
         if not node then
             internal.violate("session.unknown_table_alias", "session.table: unknown alias '%s'", tostring(alias))
@@ -221,7 +227,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
             return nil
         end
 
-        return storageInternal.CreateTableHandle(node, {
+        local handle = storageInternal.CreateTableHandle(node, {
             readRoot = function(root)
                 if staging[root.alias] == nil then
                     loadStageRootIntoStaging(root)
@@ -231,6 +237,8 @@ function internal.store.createSession(modConfig, configBackend, storage)
             writeRoot = writeRootToStaging,
             normalizedRoot = true,
         })
+        tableHandles[alias] = handle
+        return handle
     end
 
     local function resetAliasValue(alias)

@@ -63,7 +63,39 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
     lu.assertEquals(authorRowValue, 2)
+    lu.assertEquals(owner.store, store)
+    lu.assertEquals(owner.host, host)
     lu.assertEquals(type(owner._definitionStructuralFingerprint), "string")
+end
+
+function TestCreateModule:testCreateModulePublishesStoreBeforeHookRefresh()
+    local owner = {}
+    local hookSawStore = false
+    local hookSawHost = false
+
+    local host, store = lib.createModule({
+        owner = owner,
+        pluginGuid = "test-create-module-publish-store",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "PublishStore",
+            name = "Publish Store",
+            storage = {
+                { type = "bool", alias = "Flag", default = true },
+            },
+        },
+        registerHooks = function()
+            hookSawStore = owner.store and owner.store.read("Flag") == true
+            hookSawHost = owner.host ~= nil
+        end,
+        drawTab = function() end,
+    })
+
+    lu.assertEquals(owner.store, store)
+    lu.assertEquals(owner.host, host)
+    lu.assertTrue(hookSawStore)
+    lu.assertFalse(hookSawHost)
 end
 
 function TestCreateModule:testCreateModuleReturnsOnlyAuthorHostSurface()

@@ -78,6 +78,10 @@ If the module does not register runtime hooks, omit `registerHooks`.
 functions remain available when a module needs custom construction.
 For `createModule(...)`, `owner` is the single persistent owner for structural
 hot-reload tracking and hook refresh ownership.
+During construction, Lib publishes `owner.store` before hook registration and
+`owner.host` after host construction. Runtime hook files may read
+`internal.store`, but should not assume `internal.host` exists during the
+registration pass.
 
 ## Definition Rules
 

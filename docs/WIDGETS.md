@@ -194,6 +194,7 @@ Notes:
 ### `lib.widgets.inputText(imgui, session, alias, opts?)`
 
 Options:
+- `id`
 - `label`
 - `tooltip`
 - `maxLen`
@@ -214,6 +215,7 @@ Use when:
 ### `lib.widgets.dropdown(imgui, session, alias, opts?)`
 
 Options:
+- `id`
 - `label`
 - `tooltip`
 - `values`
@@ -237,6 +239,7 @@ Use when:
 ### `lib.widgets.mappedDropdown(imgui, session, alias, opts?)`
 
 Options:
+- `id`
 - `label`
 - `tooltip`
 - `labelWidth`
@@ -315,6 +318,7 @@ Behavior:
   - none
   - single
   - multiple
+- `id` overrides the ImGui control id when multiple widgets bind the same row-local alias
 
 Use when:
 - a packed root represents one selected child out of many

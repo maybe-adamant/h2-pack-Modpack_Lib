@@ -219,15 +219,8 @@ function widgetHelpers.ResolvePackedChildren(session, alias)
         )
     end
 
-    local children = {}
     local node = session.getAliasSchema(alias)
-    for _, child in ipairs(storageInternal.getPackedAliases(node)) do
-        children[#children + 1] = {
-            alias = child.alias,
-            label = child.label or child.alias,
-        }
-    end
-    return children
+    return storageInternal.getPackedAliases(node)
 end
 
 return widgetHelpers

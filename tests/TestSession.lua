@@ -424,6 +424,25 @@ function TestSession:testTableRowHandleReadsAndWritesThroughParentTable()
     lu.assertNil(storeRow.reset)
 end
 
+function TestSession:testStoreTableReadOnlyHandleClampsRawPersistedRows()
+    local config = {
+        Tiers = {
+            { Limit = 1 },
+            { Limit = 2 },
+            { Limit = 3 },
+            { Limit = 4 },
+        },
+    }
+    local store = lib.createStore(config, makeTableDefinition())
+    local tiers = store.table("Tiers")
+
+    lu.assertEquals(#config.Tiers, 3)
+    lu.assertNil(config.Tiers[4])
+    lu.assertEquals(tiers:count(), 3)
+    lu.assertEquals(tiers:rowHandle(3).read("Limit"), 3)
+    lu.assertNil(tiers:rowHandle(4).read("Limit"))
+end
+
 function TestSession:testTableRowHandleIsPositionalAndMissingRowsAreNil()
     local _, session = lib.createStore({}, makeTableDefinition())
     local tiers = session.table("Tiers")

@@ -63,6 +63,21 @@ rom.gui.add_to_menu_bar(function()
     end
 end)
 
+if type(rom.gui.add_always_draw_imgui) == "function" and type(rom.gui.is_open) == "function" then
+    local wasGuiOpen = rom.gui.is_open() == true
+    rom.gui.add_always_draw_imgui(function()
+        local isGuiOpen = rom.gui.is_open() == true
+        if wasGuiOpen and not isGuiOpen then
+            for _, runtime in pairs(internal.standaloneRuntimes or {}) do
+                if runtime.handleHostGuiClosed then
+                    runtime.handleHostGuiClosed()
+                end
+            end
+        end
+        wasGuiOpen = isGuiOpen
+    end)
+end
+
 modutil.once_loaded.game(function()
     fallbackHud.createMarker()
 end)

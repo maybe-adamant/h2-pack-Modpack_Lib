@@ -15,6 +15,7 @@ end
 
 local function makeDropdownImgui()
     local state = {
+        beginComboId = nil,
         beginComboPreview = nil,
         customPreviewCalls = 0,
         customPreviewText = nil,
@@ -32,7 +33,8 @@ local function makeDropdownImgui()
         Dummy = function() end,
         PushItemWidth = function() end,
         PopItemWidth = function() end,
-        BeginCombo = function(_, preview)
+        BeginCombo = function(id, preview)
+            state.beginComboId = id
             state.beginComboPreview = preview
             return false
         end,
@@ -218,4 +220,16 @@ function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
     })
 
     lu.assertEquals(state.customPreviewText, "Second Choice")
+end
+
+function TestWidgets:testPackedDropdownSupportsExplicitControlId()
+    local session = makePackedStore()
+    local imgui, state = makeDropdownImgui()
+
+    lib.widgets.packedDropdown(imgui, session, "Packed", {
+        id = "Packed_Row_2",
+        label = "Packed",
+    })
+
+    lu.assertEquals(state.beginComboId, "##Packed_Row_2")
 end

@@ -382,6 +382,24 @@ function public.standaloneHost(pluginGuid)
         runDataDirty = false
     end
 
+    local function suppressOverlays()
+        if not uiSuppressionToken then
+            uiSuppressionToken = public.overlays.suppressForUi()
+        end
+    end
+
+    local function releaseOverlaySuppression()
+        if uiSuppressionToken then
+            uiSuppressionToken.release()
+            uiSuppressionToken = nil
+        end
+    end
+
+    local function handleHostGuiClosed()
+        flushPendingRunData()
+        releaseOverlaySuppression()
+    end
+
     local function setWindowOpen(open)
         open = open == true
         if showWindow == open then
@@ -390,16 +408,13 @@ function public.standaloneHost(pluginGuid)
 
         if open then
             showWindow = true
-            uiSuppressionToken = public.overlays.suppressForUi()
+            suppressOverlays()
             return
         end
 
         flushPendingRunData()
         showWindow = false
-        if uiSuppressionToken then
-            uiSuppressionToken.release()
-            uiSuppressionToken = nil
-        end
+        releaseOverlaySuppression()
     end
 
     local function seedWindowSize(imgui)
@@ -419,6 +434,8 @@ function public.standaloneHost(pluginGuid)
         if not showWindow then
             return
         end
+
+        suppressOverlays()
 
         local imgui = rom.ImGui
         local title = tostring(meta.name or identity.id or "Module") .. "###" .. tostring(identity.id)
@@ -478,8 +495,12 @@ function public.standaloneHost(pluginGuid)
         end
     end
 
-    return {
+    local runtime = {
         renderWindow = renderWindow,
         addMenuBar = addMenuBar,
+        handleHostGuiClosed = handleHostGuiClosed,
     }
+    internal.standaloneRuntimes = internal.standaloneRuntimes or {}
+    internal.standaloneRuntimes[pluginGuid] = runtime
+    return runtime
 end

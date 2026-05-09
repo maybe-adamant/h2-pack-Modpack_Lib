@@ -4,6 +4,7 @@ local storageInternal = internal.storage
 local StorageTypes = storageInternal.types
 local NormalizeInteger = storageInternal.NormalizeInteger
 local values = internal.values
+local EMPTY_LIST = {}
 
 -- Storage schemas are prepared once by prepareDefinition, then treated as
 -- runtime-stable metadata by store/session/Framework consumers. Validation is
@@ -622,6 +623,7 @@ end
 function storageInternal.CreateTableHandle(node, opts)
     opts = opts or {}
     local aliasNodes = GetRowAliasNodes(node)
+    local rowHandles = {}
 
     local function readRows()
         local rows = opts.readRoot(node)
@@ -645,8 +647,15 @@ function storageInternal.CreateTableHandle(node, opts)
         return opts.writeRoot(node, storageInternal.NormalizeTableValue(node, rows))
     end
 
+    local function getRowCount(rows)
+        return ClampRowCount(node, type(rows) == "table" and #rows or 0)
+    end
+
     local function readRow(rows, rowIndex)
         rowIndex = math.floor(tonumber(rowIndex) or 0)
+        if rowIndex < 1 or rowIndex > getRowCount(rows) then
+            return nil, rowIndex
+        end
         return rows[rowIndex], rowIndex
     end
 
@@ -655,7 +664,10 @@ function storageInternal.CreateTableHandle(node, opts)
             readRoot = function(root)
                 local value = row[root.alias]
                 if value == nil then
-                    value = values.deepCopy(root.default)
+                    return values.deepCopy(root.default)
+                end
+                if opts.normalizedRoot == true then
+                    return value
                 end
                 return storageInternal.NormalizeStorageValue(root, value)
             end,
@@ -676,7 +688,10 @@ function storageInternal.CreateTableHandle(node, opts)
             readRoot = function(root)
                 local raw = row[root.alias]
                 if raw == nil then
-                    raw = values.deepCopy(root.default)
+                    return values.deepCopy(root.default)
+                end
+                if opts.normalizedRoot == true then
+                    return raw
                 end
                 return storageInternal.NormalizeStorageValue(root, raw)
             end,
@@ -733,7 +748,7 @@ function storageInternal.CreateTableHandle(node, opts)
 
     function handle.count(self)
         ValidateReceiver(self, "count")
-        return #readRows()
+        return getRowCount(readRows())
     end
 
     function handle.read(self, rowIndex, alias)
@@ -763,6 +778,32 @@ function storageInternal.CreateTableHandle(node, opts)
         ValidateReceiver(self, "rowHandle")
         ValidateRowIndex(rowIndex, "rowHandle")
         rowIndex = math.floor(tonumber(rowIndex) or 0)
+        local cached = rowHandles[rowIndex]
+        if cached then
+            return cached
+        end
+
+        local currentReadRow = nil
+        local rowReadBackend = {
+            readRoot = function(root)
+                local value = currentReadRow[root.alias]
+                if value == nil then
+                    return values.deepCopy(root.default)
+                end
+                if opts.normalizedRoot == true then
+                    return value
+                end
+                return storageInternal.NormalizeStorageValue(root, value)
+            end,
+            onUnknownRead = function(rowAlias)
+                internal.violate(
+                    "storage.unknown_table_row_alias",
+                    "table storage '%s': unknown row alias '%s'",
+                    tostring(node.alias),
+                    tostring(rowAlias)
+                )
+            end,
+        }
 
         local rowHandle = {
             read = function(alias)
@@ -771,7 +812,10 @@ function storageInternal.CreateTableHandle(node, opts)
                 if not row then
                     return nil
                 end
-                return readRowAlias(row, alias)
+                currentReadRow = row
+                local value = storageInternal.readAlias(aliasNodes, rowReadBackend, alias)
+                currentReadRow = nil
+                return value
             end,
             getAliasSchema = function(alias)
                 ValidateAlias(alias, "rowHandle.getAliasSchema")
@@ -780,6 +824,32 @@ function storageInternal.CreateTableHandle(node, opts)
         }
 
         if opts.writeRoot ~= nil then
+            local currentWriteRow = nil
+            local rowWriteBackend = {
+                readRoot = function(root)
+                    local raw = currentWriteRow[root.alias]
+                    if raw == nil then
+                        return values.deepCopy(root.default)
+                    end
+                    if opts.normalizedRoot == true then
+                        return raw
+                    end
+                    return storageInternal.NormalizeStorageValue(root, raw)
+                end,
+                writeRoot = function(root, rootValue)
+                    currentWriteRow[root.alias] = storageInternal.NormalizeStorageValue(root, rootValue)
+                    return true
+                end,
+                onUnknownWrite = function(rowAlias)
+                    internal.violate(
+                        "storage.unknown_table_row_alias",
+                        "table storage '%s': unknown row alias '%s'",
+                        tostring(node.alias),
+                        tostring(rowAlias)
+                    )
+                end,
+            }
+
             rowHandle.write = function(alias, value)
                 ValidateAlias(alias, "rowHandle.write")
                 local rows = copyRows()
@@ -787,7 +857,9 @@ function storageInternal.CreateTableHandle(node, opts)
                 if not row then
                     return false
                 end
-                local changed = writeRowAlias(row, alias, value)
+                currentWriteRow = row
+                local changed = storageInternal.writeAlias(aliasNodes, rowWriteBackend, alias, value)
+                currentWriteRow = nil
                 if changed then
                     writeRows(rows)
                 end
@@ -810,7 +882,9 @@ function storageInternal.CreateTableHandle(node, opts)
                         tostring(alias)
                     )
                 end
-                local changed = writeRowAlias(row, alias, values.deepCopy(aliasNode.default))
+                currentWriteRow = row
+                local changed = storageInternal.writeAlias(aliasNodes, rowWriteBackend, alias, values.deepCopy(aliasNode.default))
+                currentWriteRow = nil
                 if changed then
                     writeRows(rows)
                 end
@@ -818,6 +892,7 @@ function storageInternal.CreateTableHandle(node, opts)
             end
         end
 
+        rowHandles[rowIndex] = rowHandle
         return rowHandle
     end
 
@@ -1013,7 +1088,11 @@ end
 ---@return table[] aliases
 function storageInternal.getPackedAliases(node)
     if not node or node.type ~= "packedInt" then
-        return {}
+        return EMPTY_LIST
+    end
+
+    if node._packedAliasViews then
+        return node._packedAliasViews
     end
 
     local packedAliases = {}
@@ -1024,5 +1103,6 @@ function storageInternal.getPackedAliases(node)
             node = child,
         }
     end
+    node._packedAliasViews = packedAliases
     return packedAliases
 end

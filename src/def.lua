@@ -148,7 +148,9 @@ local lib = {}
 ---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
 ---@class AdamantModpackLib.ModuleCreateOpts
----@field owner table Persistent module owner used for structural hot-reload tracking and hook refresh ownership.
+--- Persistent module owner used for structural hot-reload tracking and hook refresh ownership.
+--- `createModule` publishes `owner.store` before hook registration and `owner.host` after host construction.
+---@field owner table
 ---@field pluginGuid string Plugin guid captured at module file load time.
 ---@field config table Module config table.
 ---@field definition AdamantModpackLib.ModuleDefinition Raw module definition.
@@ -198,6 +200,7 @@ local lib = {}
 ---@class AdamantModpackLib.StandaloneRuntime
 ---@field renderWindow fun()
 ---@field addMenuBar fun()
+---@field handleHostGuiClosed fun()
 
 ---@class AdamantModpackLib.CoordinatorConfig
 ---@field ModEnabled boolean
@@ -272,6 +275,7 @@ local lib = {}
 ---@field controlGap? number
 
 ---@class AdamantModpackLib.DropdownOpts
+---@field id? string|number
 ---@field label? string
 ---@field tooltip? string
 ---@field values? AdamantModpackLib.ChoiceValue[]
@@ -289,6 +293,7 @@ local lib = {}
 ---@field onSelect? fun(option: AdamantModpackLib.MappedDropdownOption, session: AdamantModpackLib.Session): boolean?
 
 ---@class AdamantModpackLib.MappedDropdownOpts
+---@field id? string|number
 ---@field label? string
 ---@field tooltip? string
 ---@field controlWidth? number
@@ -298,6 +303,7 @@ local lib = {}
 ---@field getOptions? fun(view: table<string, any>): AdamantModpackLib.MappedDropdownOption[]|any[]
 
 ---@class AdamantModpackLib.PackedDropdownOpts
+---@field id? string|number
 ---@field label? string
 ---@field tooltip? string
 ---@field controlWidth? number

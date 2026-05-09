@@ -2,6 +2,7 @@ local internal = AdamantModpackLib_Internal
 local chalk = rom.mods['SGG_Modding-Chalk']
 local storageInternal = internal.storage
 local storeInternal = internal.store
+local values = internal.values
 local ClonePersistedValue = storeInternal.ClonePersistedValue
 local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 
@@ -169,6 +170,7 @@ function public.createStore(modConfig, definition)
 
     local aliasNodes = storageInternal.getAliases(storage)
     local unstagedAliases = {}
+    local tableHandles = {}
     for _, node in ipairs(storageInternal.getRuntimeCacheRoots(storage)) do
         if type(node.alias) == "string" and node.alias ~= "" then
             unstagedAliases[node.alias] = node
@@ -194,19 +196,18 @@ function public.createStore(modConfig, definition)
     end
 
     local function readRootNode(root)
-        if not root._persist then
-            local raw = runtimeValues[root]
-            if raw == nil then
-                raw = ClonePersistedValue(root.default)
+        if root._persist then
+            local raw = readRaw(root._storageKey)
+            if raw ~= nil then
+                return raw
             end
-            return NormalizeStorageValue(root, raw)
+        else
+            local raw = runtimeValues[root]
+            if raw ~= nil then
+                return raw
+            end
         end
-
-        local raw = readRaw(root._storageKey)
-        if raw == nil then
-            raw = ClonePersistedValue(root.default)
-        end
-        return NormalizeStorageValue(root, raw)
+        return ClonePersistedValue(root.default)
     end
 
     local function writeRootNode(root, value)
@@ -217,23 +218,29 @@ function public.createStore(modConfig, definition)
         end
     end
 
-    local function ensureRootNode(root)
+    local function hydratePersistRoot(root)
         if not root._persist then
             return
         end
-        if readRaw(root._storageKey) ~= nil then
+
+        local raw = readRaw(root._storageKey)
+        local source = raw
+        if source == nil then
+            source = ClonePersistedValue(root.default)
+        end
+        local normalized = NormalizeStorageValue(root, source)
+        if raw ~= nil and values.deepEqual(raw, normalized) then
             return
         end
 
-        local value = NormalizeStorageValue(root, ClonePersistedValue(root.default))
-        if backend and backend.ensureValue(root._storageKey, value) then
+        if raw == nil and backend and backend.ensureValue(root._storageKey, normalized) then
             return
         end
-        modConfig[root._storageKey] = value
+        writeRaw(root._storageKey, normalized)
     end
 
     for _, root in ipairs(storageInternal.getPersistRoots(storage)) do
-        ensureRootNode(root)
+        hydratePersistRoot(root)
     end
 
     local storeReadBackend = {
@@ -285,6 +292,11 @@ function public.createStore(modConfig, definition)
     ---@param alias string
     ---@return StorageTableReadOnly|nil tableHandle
     function store.table(alias)
+        local cached = tableHandles[alias]
+        if cached then
+            return cached
+        end
+
         local node = type(alias) == "string" and aliasNodes[alias] or nil
         if not node then
             internal.violate("store.unknown_table_alias", "store.table: unknown storage alias '%s'", tostring(alias))
@@ -298,10 +310,12 @@ function public.createStore(modConfig, definition)
             internal.violate("store.invalid_table_surface", "store.table: alias '%s' is staged-only; use session.table()", tostring(alias))
             return nil
         end
-        return storageInternal.CreateTableHandle(node, {
+        local handle = storageInternal.CreateTableHandle(node, {
             readRoot = readRootNode,
             normalizedRoot = true,
         })
+        tableHandles[alias] = handle
+        return handle
     end
 
     local function writeStoreValue(alias, value)

@@ -53,6 +53,7 @@ function public.createModule(opts)
 
     local definition = public.prepareDefinition(opts.owner, opts.definition)
     local store, session = public.createStore(opts.config, definition)
+    opts.owner.store = store
     local host = public.createModuleHost({
         pluginGuid = opts.pluginGuid,
         definition = definition,
@@ -67,6 +68,7 @@ function public.createModule(opts)
         drawTab = opts.drawTab,
         drawQuickContent = opts.drawQuickContent,
     })
+    opts.owner.host = host
 
     return host, store
 end

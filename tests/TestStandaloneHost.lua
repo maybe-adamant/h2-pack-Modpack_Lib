@@ -191,6 +191,7 @@ function TestStandaloneHost:testAppliesOnLoadWhenModuleIsNotCoordinated()
     restoreHost()
     lu.assertEquals(type(runtime.renderWindow), "function")
     lu.assertEquals(type(runtime.addMenuBar), "function")
+    lu.assertEquals(type(runtime.handleHostGuiClosed), "function")
     lu.assertEquals(host.calls.applyOnLoad, 1)
 end
 
@@ -326,4 +327,33 @@ function TestStandaloneHost:testStandaloneWindowSuppressesOverlaysUntilClose()
     restoreHost()
     lu.assertEquals(suppressCalls, 1)
     lu.assertEquals(releaseCalls, 1)
+end
+
+function TestStandaloneHost:testHostGuiClosedReleasesSuppressionWithoutClosingWindow()
+    local suppressCalls = 0
+    local releaseCalls = 0
+    lib.overlays.suppressForUi = function()
+        suppressCalls = suppressCalls + 1
+        return {
+            release = function()
+                releaseCalls = releaseCalls + 1
+            end,
+        }
+    end
+
+    local host = makeHost({ modpack = "standalone-pack" })
+    local restoreHost = installHost(host)
+    lib.lifecycle.registerCoordinator("standalone-pack", nil)
+    local imgui = makeImgui({ menuClicked = true })
+    rom.ImGui = imgui
+
+    local runtime = lib.standaloneHost(PLUGIN_GUID)
+    runtime.addMenuBar()
+    runtime.handleHostGuiClosed()
+    runtime.renderWindow()
+
+    restoreHost()
+    lu.assertEquals(suppressCalls, 2)
+    lu.assertEquals(releaseCalls, 1)
+    lu.assertEquals(host.calls.drawTab, 1)
 end

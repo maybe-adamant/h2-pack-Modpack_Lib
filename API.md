@@ -237,6 +237,12 @@ raw session. Draw callbacks receive the restricted author session, and custom
 construction can use `prepareDefinition(...)`, `createStore(...)`, and
 `createModuleHost(...)` directly.
 
+Before hook registration runs, `createModule(...)` publishes the runtime store
+to `owner.store`. After host construction completes, it publishes the author
+host to `owner.host`. This lets hot-reload-safe hook code read runtime state
+during its registration pass without waiting for the caller's assignment to
+finish.
+
 ### `lib.createStore(config, definition)`
 
 Creates the managed store facade around persisted module config from a prepared
@@ -779,11 +785,13 @@ Useful when the module is not framework-hosted.
 Returned surface:
 - `runtime.renderWindow()`
 - `runtime.addMenuBar()`
+- `runtime.handleHostGuiClosed()`
 
 Behavior:
 - resolves the module's live host through the explicit `pluginGuid`
 - applies on-load lifecycle state for non-coordinated modules
 - suppresses the standalone window/menu when the module is coordinated
+- releases overlay suppression when the host ImGui layer is hidden globally, matching Framework-hosted UI behavior
 - renders built-in controls for:
   - `Enabled`
   - `Debug Mode`

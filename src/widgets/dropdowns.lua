@@ -2,6 +2,7 @@ local helpers = ...
 local WidgetFns = public.widgets
 local imguiHelpers = public.imguiHelpers
 ---@class DropdownOpts
+---@field id string|number|nil
 ---@field label string|nil
 ---@field tooltip string|nil
 ---@field values ChoiceValue[]|nil
@@ -19,6 +20,7 @@ local imguiHelpers = public.imguiHelpers
 ---@field onSelect fun(option: MappedDropdownOption, session: Session): boolean|nil
 
 ---@class MappedDropdownOpts
+---@field id string|number|nil
 ---@field label string|nil
 ---@field tooltip string|nil
 ---@field controlWidth number|nil
@@ -28,6 +30,7 @@ local imguiHelpers = public.imguiHelpers
 ---@field getOptions fun(view: table<string, any>): MappedDropdownOption[]|any[]
 
 ---@class PackedDropdownOpts
+---@field id string|number|nil
 ---@field label string|nil
 ---@field tooltip string|nil
 ---@field controlWidth number|nil
@@ -109,6 +112,7 @@ end
 ---@return boolean
 function WidgetFns.dropdown(imgui, session, alias, opts)
     opts = opts or {}
+    local controlId = opts.id or alias
     local current = helpers.NormalizeChoiceValue(opts, session.read(alias))
     local optionEntries = {}
     local valueColors = type(opts.valueColors) == "table" and opts.valueColors or nil
@@ -133,7 +137,7 @@ function WidgetFns.dropdown(imgui, session, alias, opts)
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
         local opened = imgui.BeginCombo(
-            "##" .. tostring(alias),
+            "##" .. tostring(controlId),
             previewColor and "" or previewText,
             COMBO_FLAG_NONE
         )
@@ -166,6 +170,7 @@ end
 ---@return boolean
 function WidgetFns.mappedDropdown(imgui, session, alias, opts)
     opts = opts or {}
+    local controlId = opts.id or alias
     local preview = type(opts.getPreview) == "function"
         and tostring(opts.getPreview(session.view) or "")
         or tostring(session.read(alias) or "")
@@ -176,7 +181,7 @@ function WidgetFns.mappedDropdown(imgui, session, alias, opts)
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
         local opened = imgui.BeginCombo(
-            "##" .. tostring(alias),
+            "##" .. tostring(controlId),
             previewColor and "" or preview,
             COMBO_FLAG_NONE
         )
@@ -215,6 +220,7 @@ end
 ---@return boolean
 function WidgetFns.packedDropdown(imgui, session, alias, opts)
     opts = opts or {}
+    local controlId = opts.id or alias
     local children = helpers.ResolvePackedChildren(session, alias)
     local valueColors = type(opts.valueColors) == "table" and opts.valueColors or nil
     local selection = helpers.ClassifyPackedChoice(opts, session, children)
@@ -229,7 +235,7 @@ function WidgetFns.packedDropdown(imgui, session, alias, opts)
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
         local opened = imgui.BeginCombo(
-            "##" .. tostring(alias),
+            "##" .. tostring(controlId),
             "",
             COMBO_FLAG_NONE
         )
