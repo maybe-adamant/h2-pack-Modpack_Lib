@@ -138,6 +138,16 @@ function TestPrepareDefinition:testPrepareDefinitionRejectsDefinitionWithoutId()
     end)
 end
 
+function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidDefinitionId()
+    lu.assertErrorMsgContains("definition.id 'Bad.Id' must start with a letter", function()
+        lib.prepareDefinition({}, {
+            id = "Bad.Id",
+            name = "Bad ID",
+            storage = {},
+        })
+    end)
+end
+
 function TestPrepareDefinition:testPrepareDefinitionRejectsDefinitionWithoutName()
     lu.assertErrorMsgContains("definition.missing_name", function()
         lib.prepareDefinition({}, {
@@ -403,6 +413,26 @@ function TestPrepareDefinition:testPrepareDefinitionPreservesHashGroupPlan()
     lu.assertEquals(#Warnings, 0)
 end
 
+function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidHashGroupPrefix()
+    lu.assertErrorMsgContains("hashGroupPlan[1].keyPrefix 'bad-prefix' must start with a letter", function()
+        lib.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "bad-prefix",
+                    items = {
+                        "EnabledFlag",
+                    },
+                },
+            },
+        })
+    end)
+end
+
 function TestPrepareDefinition:testPrepareDefinitionUsesStorageDefaultsInFingerprint()
     local owner = {}
     local prepared = lib.prepareDefinition(owner, {
@@ -458,6 +488,42 @@ function TestPrepareDefinition:testPrepareDefinitionRejectsLegacyDataDefaultsArg
             storage = {
                 { type = "int", alias = "Count", default = 3, min = 0, max = 10 },
             },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionTracksQuickContentForLowerLevelHosts()
+    local owner = {}
+
+    lib.prepareDefinition(owner, {
+        modpack = "test-pack",
+        id = "QuickSurface",
+        name = "Quick Surface",
+    }, {
+        hasQuickContent = false,
+    })
+
+    lib.prepareDefinition(owner, {
+        modpack = "test-pack",
+        id = "QuickSurface",
+        name = "Quick Surface",
+    }, {
+        hasQuickContent = true,
+    })
+
+    lu.assertTrue(owner.requiresFullReload)
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsUnknownStructuralSurfaceOption()
+    lu.assertErrorMsgContains("unknown option 'quickContent'", function()
+        lib.prepareDefinition({}, {
+            id = "UnknownSurface",
+            name = "Unknown Surface",
+        }, {
+            hasQuickContent = true,
+            quickContent = true,
         })
     end)
 end
@@ -528,6 +594,30 @@ function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksHashGroupPl
                 },
             },
         },
+    })
+
+    lu.assertTrue(owner.requiresFullReload)
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
+end
+
+function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksTooltipChanges()
+    local owner = {}
+
+    lib.prepareDefinition(owner, {
+        modpack = "test-pack",
+        id = "Example",
+        name = "Example",
+        tooltip = "old",
+        storage = {},
+    })
+
+    lib.prepareDefinition(owner, {
+        modpack = "test-pack",
+        id = "Example",
+        name = "Example",
+        tooltip = "new",
+        storage = {},
     })
 
     lu.assertTrue(owner.requiresFullReload)

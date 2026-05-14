@@ -19,6 +19,43 @@ function TestStorageValidation:testDuplicateAliasFails()
     end)
 end
 
+function TestStorageValidation:testInvalidRootAliasFails()
+    lu.assertErrorMsgContains("alias 'Bad-Alias' must start with a letter", function()
+        AdamantModpackLib_Internal.storage.validate({
+            { type = "bool", alias = "Bad-Alias", default = false },
+        }, "InvalidRootAlias")
+    end)
+end
+
+function TestStorageValidation:testInvalidPackedChildAliasFails()
+    lu.assertErrorMsgContains("alias 'Bad.Child' must start with a letter", function()
+        AdamantModpackLib_Internal.storage.validate({
+            {
+                type = "packedInt",
+                alias = "Packed",
+                bits = {
+                    { alias = "Bad.Child", offset = 0, width = 1, type = "bool", default = false },
+                },
+            },
+        }, "InvalidPackedChildAlias")
+    end)
+end
+
+function TestStorageValidation:testInvalidTableRowAliasFails()
+    lu.assertErrorMsgContains("alias 'Bad=Row' must start with a letter", function()
+        AdamantModpackLib_Internal.storage.validate({
+            {
+                type = "table",
+                alias = "Rows",
+                defaultRows = 1,
+                row = {
+                    { type = "bool", alias = "Bad=Row", default = false },
+                },
+            },
+        }, "InvalidTableRowAlias")
+    end)
+end
+
 function TestStorageValidation:testTransientRootRegistersAliasButNotPersistedRoots()
     local storage = {
         { type = "bool", alias = "Enabled", default = false },

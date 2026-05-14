@@ -81,6 +81,13 @@ local CommonNodeFields = {
     visibleIf = true,
 }
 
+local StableIdentifierPattern = "^[A-Za-z][A-Za-z0-9_]*$"
+local StableIdentifierDescription = "must start with a letter and contain only letters, digits, and underscores"
+
+local function IsStableIdentifier(value)
+    return type(value) == "string" and string.match(value, StableIdentifierPattern) ~= nil
+end
+
 local RootNodeFieldsByType = {
     bool = {},
     int = {
@@ -119,10 +126,18 @@ local function PrepareRootNodeMetadata(node)
     node._storageKey = node.alias
 end
 
+local function ValidateAliasIdentifier(alias, prefix)
+    if not IsStableIdentifier(alias) then
+        internal.violate("storage.invalid_node", "%s: alias '%s' %s",
+            prefix, tostring(alias), StableIdentifierDescription)
+    end
+end
+
 local function ValidateChildAlias(bitNode, root, storage, seenAliases, seenRootKeys, prefix)
     if type(bitNode.alias) ~= "string" or bitNode.alias == "" then
         return
     end
+    ValidateAliasIdentifier(bitNode.alias, prefix)
 
     if seenAliases[bitNode.alias] then
         internal.violate("storage.duplicate_alias", "%s: duplicate alias '%s'", prefix, bitNode.alias)
@@ -222,6 +237,7 @@ function storageInternal.validate(storage, label)
             else
                 ValidateKnownFields(node, RootNodeFieldsByType[node.type] or {}, prefix)
                 storageType.validate(node, prefix)
+                ValidateAliasIdentifier(node.alias, prefix)
                 PrepareRootNodeMetadata(node)
                 node._isRoot = true
                 node._persist = persist

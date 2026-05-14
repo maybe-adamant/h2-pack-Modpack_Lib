@@ -26,6 +26,97 @@ local BuiltInStorageAliases = {
     DebugMode = true,
 }
 
+local StableIdentifierPattern = "^[A-Za-z][A-Za-z0-9_]*$"
+local StableIdentifierDescription = "must start with a letter and contain only letters, digits, and underscores"
+
+local function IsStableIdentifier(value)
+    return type(value) == "string" and string.match(value, StableIdentifierPattern) ~= nil
+end
+
+local KnownStructuralSurfaceKeys = {
+    hasQuickContent = true,
+}
+
+local function NormalizeStructuralSurface(surface)
+    if surface == nil then
+        return nil
+    end
+    if type(surface) ~= "table" then
+        internal.violate(
+            "definition.invalid_args",
+            "prepareDefinition: pass storage defaults on definition.storage nodes, not as a separate argument"
+        )
+    end
+
+    local hasKnownKey = false
+    for key in pairs(surface) do
+        if KnownStructuralSurfaceKeys[key] then
+            hasKnownKey = true
+        end
+    end
+
+    if not hasKnownKey and next(surface) ~= nil then
+        internal.violate(
+            "definition.invalid_args",
+            "prepareDefinition: pass storage defaults on definition.storage nodes, not as a separate argument"
+        )
+    end
+
+    for key in pairs(surface) do
+        if not KnownStructuralSurfaceKeys[key] then
+            internal.violate("definition.invalid_args", "prepareDefinition: unknown option '%s'", tostring(key))
+        end
+    end
+
+    if surface.hasQuickContent ~= nil and type(surface.hasQuickContent) ~= "boolean" then
+        internal.violate("definition.invalid_args", "prepareDefinition: hasQuickContent must be boolean when provided")
+    end
+
+    return {
+        hasQuickContent = surface.hasQuickContent == true,
+    }
+end
+
+local function ValidateHashGroupPlan(definition, prefix)
+    local hashGroupPlan = definition.hashGroupPlan
+    if hashGroupPlan == nil then
+        return
+    end
+    if type(hashGroupPlan) ~= "table" then
+        return
+    end
+
+    for groupIndex, group in ipairs(hashGroupPlan) do
+        if type(group) ~= "table" then
+            internal.violate(
+                "definition.invalid_field_type",
+                "%s: hashGroupPlan[%d] must be table",
+                prefix,
+                groupIndex
+            )
+        end
+
+        local keyPrefix = group.keyPrefix
+        if type(keyPrefix) ~= "string" or keyPrefix == "" then
+            internal.violate(
+                "definition.invalid_field_type",
+                "%s: hashGroupPlan[%d].keyPrefix is required",
+                prefix,
+                groupIndex
+            )
+        elseif not IsStableIdentifier(keyPrefix) then
+            internal.violate(
+                "definition.invalid_field_type",
+                "%s: hashGroupPlan[%d].keyPrefix '%s' %s",
+                prefix,
+                groupIndex,
+                keyPrefix,
+                StableIdentifierDescription
+            )
+        end
+    end
+end
+
 local function CompareKeys(a, b)
     local typeA = type(a)
     local typeB = type(b)
@@ -137,6 +228,9 @@ function definitionInternal.validate(definition, label)
     elseif type(definition.id) ~= "string" then
         internal.violate("definition.invalid_field_type", "%s: definition.id should be string, got %s",
             prefix, type(definition.id))
+    elseif not IsStableIdentifier(definition.id) then
+        internal.violate("definition.invalid_field_type", "%s: definition.id '%s' %s",
+            prefix, definition.id, StableIdentifierDescription)
     end
 
     if definition.name == nil or definition.name == "" then
@@ -151,14 +245,17 @@ function definitionInternal.validate(definition, label)
     end
     checkType("storage", "table")
     checkType("hashGroupPlan", "table")
+    ValidateHashGroupPlan(definition, prefix)
 end
 
-function definitionInternal.getStructuralFingerprint(definition)
+function definitionInternal.getStructuralFingerprint(definition, structuralSurface)
     local structuralState = {
         modpack = definition and definition.modpack or nil,
         id = definition and definition.id or nil,
         name = definition and definition.name or nil,
         shortName = definition and definition.shortName or nil,
+        tooltip = definition and definition.tooltip or nil,
+        hasQuickContent = structuralSurface and structuralSurface.hasQuickContent == true or false,
         storage = definition and definition.storage or nil,
         hashGroupPlan = definition and definition.hashGroupPlan or nil,
     }
@@ -189,13 +286,14 @@ local function InjectBuiltInStorage(definition, label)
     end
 end
 
-function definitionInternal.prepare(owner, definition, ...)
+function definitionInternal.prepare(owner, definition, structuralSurface, ...)
     if select("#", ...) ~= 0 then
         internal.violate(
             "definition.invalid_args",
             "prepareDefinition: pass storage defaults on definition.storage nodes, not as a separate argument"
         )
     end
+    structuralSurface = NormalizeStructuralSurface(structuralSurface)
     if owner ~= nil and type(owner) ~= "table" then
         internal.violate("definition.invalid_args", "prepareDefinition: owner must be a table when provided")
     end
@@ -210,7 +308,7 @@ function definitionInternal.prepare(owner, definition, ...)
     definitionInternal.validate(prepared, label)
     storageInternal.validate(prepared.storage, label)
 
-    local fingerprint = definitionInternal.getStructuralFingerprint(prepared)
+    local fingerprint = definitionInternal.getStructuralFingerprint(prepared, structuralSurface)
     prepared._preparedDefinition = true
     prepared._structuralFingerprint = fingerprint
 

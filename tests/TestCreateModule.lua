@@ -183,3 +183,66 @@ function TestCreateModule:testCreateModuleRequiresOwner()
         })
     end)
 end
+
+function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceOnly()
+    local firstOwner = {}
+
+    lib.createModule({
+        owner = firstOwner,
+        pluginGuid = "test-create-module-quick-content-stable-1",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "QuickContentStable",
+            name = "Quick Content Stable",
+        },
+        drawTab = function() end,
+        drawQuickContent = function() end,
+    })
+
+    lib.createModule({
+        owner = firstOwner,
+        pluginGuid = "test-create-module-quick-content-stable-2",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "QuickContentStable",
+            name = "Quick Content Stable",
+        },
+        drawTab = function() end,
+        drawQuickContent = function() end,
+    })
+
+    lu.assertNil(firstOwner.requiresFullReload)
+    lu.assertEquals(#Warnings, 0)
+
+    local secondOwner = {}
+    lib.createModule({
+        owner = secondOwner,
+        pluginGuid = "test-create-module-quick-content-added-1",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "QuickContentAdded",
+            name = "Quick Content Added",
+        },
+        drawTab = function() end,
+    })
+
+    lib.createModule({
+        owner = secondOwner,
+        pluginGuid = "test-create-module-quick-content-added-2",
+        config = {},
+        definition = {
+            modpack = "create-module-pack",
+            id = "QuickContentAdded",
+            name = "Quick Content Added",
+        },
+        drawTab = function() end,
+        drawQuickContent = function() end,
+    })
+
+    lu.assertTrue(secondOwner.requiresFullReload)
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
+end

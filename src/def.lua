@@ -130,6 +130,9 @@ local lib = {}
 
 ---@class AdamantModpackLib.PreparedDefinition: AdamantModpackLib.ModuleDefinition
 
+---@class AdamantModpackLib.PrepareDefinitionOpts
+---@field hasQuickContent? boolean Whether the lower-level host will expose drawQuickContent; used for structural reload tracking.
+
 ---@class AdamantModpackLib.ManualMutation
 ---@field apply fun(host: AdamantModpackLib.AuthorHost?, store: AdamantModpackLib.ManagedStore)
 ---@field revert fun(host: AdamantModpackLib.AuthorHost?, store: AdamantModpackLib.ManagedStore)
@@ -960,8 +963,9 @@ lib.config = {}
 
 ---@param owner table?
 ---@param definition AdamantModpackLib.ModuleDefinition
+---@param opts? AdamantModpackLib.PrepareDefinitionOpts
 ---@return AdamantModpackLib.PreparedDefinition definition
-function lib.prepareDefinition(owner, definition)
+function lib.prepareDefinition(owner, definition, opts)
 end
 
 ---@param modConfig table

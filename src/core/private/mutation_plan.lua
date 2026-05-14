@@ -33,6 +33,9 @@ function mutationPlan.createBackup()
                 end
             end
         end
+        for tbl in pairs(savedValues) do
+            savedValues[tbl] = nil
+        end
     end
 
     return backup, restore
@@ -115,11 +118,7 @@ function mutationPlan.createPlan()
         })
     end
 
-    function plan.apply()
-        if applied then
-            return false
-        end
-
+    local function applyOperations()
         for _, op in ipairs(operations) do
             local tbl = op.tbl
             local key = op.key
@@ -199,6 +198,18 @@ function mutationPlan.createPlan()
                     error(("mutation plan setElement requires table at key '%s'"):format(tostring(key)), 0)
                 end
             end
+        end
+    end
+
+    function plan.apply()
+        if applied then
+            return false
+        end
+
+        local ok, err = pcall(applyOperations)
+        if not ok then
+            restore()
+            error(err, 0)
         end
 
         applied = true

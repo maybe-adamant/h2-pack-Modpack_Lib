@@ -145,6 +145,71 @@ function TestMutation:testPlanListOperationsRejectNonTableTargets()
     end)
 end
 
+function TestMutation:testPlanApplyRestoresEarlierMutationsWhenLaterOperationFails()
+    local tbl = {
+        Count = 1,
+        Values = "not-list",
+    }
+    local plan = lib.mutation.createPlan()
+        :set(tbl, "Count", 2)
+        :append(tbl, "Values", "a")
+
+    lu.assertErrorMsgContains("append requires table", function()
+        plan:apply()
+    end)
+
+    lu.assertEquals(tbl, {
+        Count = 1,
+        Values = "not-list",
+    })
+    lu.assertFalse(plan:revert())
+end
+
+function TestMutation:testPlanReapplyAfterRevertCapturesFreshSnapshot()
+    local tbl = {
+        Count = 1,
+    }
+    local plan = lib.mutation.createPlan()
+        :set(tbl, "Count", 2)
+
+    lu.assertTrue(plan:apply())
+    lu.assertEquals(tbl.Count, 2)
+    lu.assertTrue(plan:revert())
+    lu.assertEquals(tbl.Count, 1)
+
+    tbl.Count = 5
+
+    lu.assertTrue(plan:apply())
+    lu.assertEquals(tbl.Count, 2)
+    lu.assertTrue(plan:revert())
+    lu.assertEquals(tbl.Count, 5)
+end
+
+function TestMutation:testFailedPlanRetryRestoresToLatestSnapshot()
+    local tbl = {
+        Count = 1,
+        Values = "not-list",
+    }
+    local plan = lib.mutation.createPlan()
+        :set(tbl, "Count", 2)
+        :append(tbl, "Values", "a")
+
+    lu.assertErrorMsgContains("append requires table", function()
+        plan:apply()
+    end)
+    lu.assertEquals(tbl.Count, 1)
+
+    tbl.Count = 4
+
+    lu.assertErrorMsgContains("append requires table", function()
+        plan:apply()
+    end)
+    lu.assertEquals(tbl, {
+        Count = 4,
+        Values = "not-list",
+    })
+end
+
 function TestMutation:testManualLifecycleHooksReceiveStore()
     local reads = {}
     local store = {

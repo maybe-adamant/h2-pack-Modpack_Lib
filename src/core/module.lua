@@ -52,7 +52,9 @@ function public.createModule(opts)
         internal.violate("host.invalid_create_opts", "createModule: owner is required")
     end
 
-    local definition = public.prepareDefinition(opts.owner, opts.definition)
+    local definition = internal.definition.prepare(opts.owner, opts.definition, {
+        hasQuickContent = type(opts.drawQuickContent) == "function",
+    })
     local store, session = public.createStore(opts.config, definition)
     local _, authorHost = public.createModuleHost({
         owner = opts.owner,

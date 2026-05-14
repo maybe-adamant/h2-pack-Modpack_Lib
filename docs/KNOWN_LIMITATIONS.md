@@ -121,3 +121,51 @@ What would remove it:
 
 - ModUtil support for keyed wrapper replacement/removal
 - or a full process restart, which clears wrapper chains
+
+## Thunderstore Dependency Pins Are Edge Checks
+
+Thunderstore resolves package dependencies to the latest available version for a package, not to the exact source snapshot checked out in a shell repo.
+
+What this means in practice:
+
+- package manifests must declare the required dependency edges
+- shell release validation checks that required dependency edges are present
+- release validation does not require the dependency pin in each `thunderstore.toml` to equal the checked-out source package version
+- lower dependency pins can be intentional compatibility metadata, not release drift
+
+Why this exists:
+
+- package resolution is owned by Thunderstore
+- the shell repo owns a source snapshot through submodule pointers
+- those are related release surfaces, but they are not the same contract
+
+What would remove it:
+
+- exact dependency-version resolution support from Thunderstore
+- or a project policy that intentionally pins every package dependency to the currently checked-out source version before each release
+
+## Trusted Runtime Boundaries Are Not Locally Revalidated
+
+The stack treats established runtime systems as trusted boundaries after startup-time integration has succeeded. This includes the base game function reached through `base(...)`, ROM APIs, ImGui, ModUtil, Chalk, ENVY, and ReLoad.
+
+What this means in practice:
+
+- Lib and modules validate data and callbacks at their own public boundaries
+- internal calls do not repeatedly revalidate trusted runtime APIs before every use
+- wrappers may temporarily adjust module or game state before calling `base(...)`
+- wrappers restore that temporary state after normal base-game calls
+- wrappers do not attempt to recover from exceptions thrown by trusted runtime code itself
+- a trusted-runtime failure is treated as a broader runtime failure that needs restart or upstream investigation
+
+Why this exists:
+
+- `base(...)` is the original game behavior being wrapped
+- ROM, ImGui, ModUtil, Chalk, ENVY, and ReLoad are platform dependencies, not Lib-owned data
+- adding local recovery around every trusted runtime call would add defensive noise to hot paths
+- failures inside trusted runtime code are outside Lib and module ownership
+
+What would remove it:
+
+- a demonstrated recoverable base-game failure mode that Lib can handle generically
+- a demonstrated recoverable platform failure mode that Lib can handle generically
+- or a project policy that every trusted runtime call must use explicit protected-call cleanup

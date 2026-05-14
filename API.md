@@ -144,7 +144,7 @@ Rules:
 
 ## Store And Session
 
-### `lib.prepareDefinition(owner, definition)`
+### `lib.prepareDefinition(owner, definition, opts)`
 
 Creates the canonical definition object for a module from a raw authored definition table.
 
@@ -167,10 +167,17 @@ Structural reload checks cover:
 - `id`
 - `name`
 - `shortName`
+- `tooltip`
 - `storage`
 - `hashGroupPlan`
+- `opts.hasQuickContent`
 
 Behavior callbacks are not valid definition fields and do not participate in structural fingerprinting.
+When using the lower-level `prepareDefinition(...)` -> `createStore(...)` ->
+`createModuleHost(...)` pipeline directly, pass
+`{ hasQuickContent = type(drawQuickContent) == "function" }` so quick-content
+add/remove changes are tracked as structural UI changes. `createModule(...)`
+does this automatically.
 
 Typical use:
 
