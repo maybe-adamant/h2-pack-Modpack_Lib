@@ -346,9 +346,10 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
 
     local applyCalls = 0
 
-    local runtime = AdamantModpackLib_Internal.moduleRuntime.get("reload-pack.ReloadHost")
-    runtime.definitionState._definitionStructuralFingerprint = definition._structuralFingerprint
-    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(runtime.definitionState, {
+    local previousState = AdamantModpackLib_Internal.moduleHost.getState(lib.getLiveModuleHost("reload-pack.ReloadHost"))
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition({
+        _definitionStructuralFingerprint = previousState.definition._structuralFingerprint,
+    }, {
         modpack = packId,
         id = "ReloadHost",
         name = "Reload Host",
@@ -438,6 +439,45 @@ function TestHost:testActivationFailureRestoresLiveHostAndIntegrations()
     lib.integrations.unregisterProvider(providerId)
 end
 
+function TestHost:testActivationFailureDropsNewStagedIntegrationProvider()
+    local pluginGuid = "test-activation-new-integration-rollback"
+    local integrationId = "test.activation.new.rollback"
+    local providerId = "NewRollbackProvider"
+
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        id = "ActivationNewIntegrationRollback",
+        name = "Activation New Integration Rollback",
+        storage = {},
+    })
+    local store, session = CreateModuleState({
+        Enabled = true,
+        DebugMode = false,
+    }, definition)
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
+        pluginGuid = pluginGuid,
+        definition = definition,
+        store = store,
+        session = session,
+        registerIntegrations = function()
+            lib.integrations.register(integrationId, providerId, { value = "candidate" })
+            error("new integration boom")
+        end,
+        drawTab = function() end,
+    })
+
+    local ok, err = authorHost.tryActivate()
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "new integration boom")
+    lu.assertNil(lib.getLiveModuleHost(pluginGuid))
+    lu.assertNil(lib.integrations.get(integrationId))
+    lu.assertErrorMsgContains("host.not_activated", function()
+        host.flush()
+    end)
+
+    lib.integrations.unregisterProvider(providerId)
+end
+
 function TestHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
     local packId = "activation-runtime-rollback-pack"
     local pluginGuid = "test-activation-runtime-rollback"
@@ -495,13 +535,13 @@ function TestHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
     lib.coordinator.register(packId, previousCoordinator)
     AdamantModpackLib_Internal.liveModuleHosts[pluginGuid] = previousLiveHost
 
-    lu.assertTrue(ok)
-    lu.assertNil(err)
-    lu.assertEquals(liveHost, secondHost)
-    lu.assertNotEquals(liveHost, firstHost)
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "replacement boom")
+    lu.assertEquals(liveHost, firstHost)
+    lu.assertNotEquals(liveHost, secondHost)
     lu.assertEquals(targetValue, "first")
     lu.assertEquals(#Warnings, 1)
-    lu.assertStrContains(Warnings[1], "host.coordinated_runtime_sync_failed")
+    lu.assertStrContains(Warnings[1], "host.activate_failed")
     lu.assertStrContains(Warnings[1], "replacement boom")
 end
 

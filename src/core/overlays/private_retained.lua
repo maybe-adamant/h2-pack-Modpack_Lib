@@ -47,8 +47,15 @@ local function retainedRowId(registry, name, index)
     return retainedHandleId(registry, name) .. ":row:" .. tostring(index)
 end
 
+local function isRegistryVisible(registry, visible)
+    if registry.hidden == true then
+        return false
+    end
+    return resolveValue(visible) ~= false
+end
+
 local function ensureRegistryShape(registry, owner, explicitOwner)
-    registry.hookOwner = registry.hookOwner or {}
+    registry.refreshPass = registry.refreshPass or 0
     registry.owner = owner
     registry.explicitOwner = explicitOwner == true
 end
@@ -59,10 +66,9 @@ local function getRegistry(owner, create)
         if not registry and create then
             registry = {
                 owner = owner,
-                hookOwner = {},
                 ownerId = owner,
                 explicitOwner = true,
-                generation = 0,
+                refreshPass = 0,
                 refreshing = false,
                 elements = {},
                 events = {
@@ -88,9 +94,8 @@ local function getRegistry(owner, create)
         retainedState.nextOwnerId = retainedState.nextOwnerId + 1
         registry = {
             owner = owner,
-            hookOwner = {},
             ownerId = "owner" .. tostring(retainedState.nextOwnerId),
-            generation = 0,
+            refreshPass = 0,
             refreshing = false,
             elements = {},
             events = {
@@ -162,7 +167,7 @@ local function createLineSlot(registry, name, spec, existingValues)
     local slot = {
         kind = "line",
         name = name,
-        generation = registry.generation,
+        refreshPass = registry.refreshPass,
         spec = spec,
         values = existingValues,
     }
@@ -179,7 +184,9 @@ local function createLineSlot(registry, name, spec, existingValues)
         region = spec.region,
         order = spec.order,
         columnGap = spec.columnGap,
-        visible = spec.visible,
+        visible = function()
+            return isRegistryVisible(registry, spec.visible)
+        end,
         columns = columns,
     })
     return slot
@@ -198,7 +205,7 @@ local function createTableSlot(registry, name, spec, existingRows, existingRowIn
     local slot = {
         kind = "table",
         name = name,
-        generation = registry.generation,
+        refreshPass = registry.refreshPass,
         spec = spec,
         rows = existingRows or {},
         rowIndexByKey = existingRowIndexByKey or {},
@@ -221,8 +228,7 @@ local function createTableSlot(registry, name, spec, existingRows, existingRowIn
             order = (tonumber(spec.order) or public.overlays.order.module) + rowIndex - 1,
             columnGap = spec.columnGap,
             visible = function()
-                local visible = resolveValue(spec.visible)
-                return visible ~= false and slot.rows[rowIndex] ~= nil
+                return isRegistryVisible(registry, spec.visible) and slot.rows[rowIndex] ~= nil
             end,
             columns = columns,
         })
@@ -236,7 +242,7 @@ local function snapshotSlot(slot)
         return {
             kind = slot.kind,
             name = slot.name,
-            generation = slot.generation,
+            refreshPass = slot.refreshPass,
             spec = slot.spec,
             values = slot.values,
         }
@@ -244,7 +250,7 @@ local function snapshotSlot(slot)
     return {
         kind = slot.kind,
         name = slot.name,
-        generation = slot.generation,
+        refreshPass = slot.refreshPass,
         spec = slot.spec,
         rows = slot.rows,
         rowIndexByKey = slot.rowIndexByKey,
@@ -258,7 +264,8 @@ local function snapshotRegistry(registry)
     end
     return {
         ownerId = registry.ownerId,
-        generation = registry.generation,
+        hidden = registry.hidden,
+        refreshPass = registry.refreshPass,
         refreshing = registry.refreshing,
         elements = elements,
         events = {
@@ -275,7 +282,8 @@ local function restoreRegistry(registry, snapshot)
     end
 
     registry.ownerId = snapshot.ownerId
-    registry.generation = snapshot.generation
+    registry.hidden = snapshot.hidden == true
+    registry.refreshPass = snapshot.refreshPass
     registry.refreshing = snapshot.refreshing
     registry.events = {
         commit = copyArray(snapshot.events.commit),
@@ -287,7 +295,7 @@ local function restoreRegistry(registry, snapshot)
     for name, slotSnapshot in pairs(snapshot.elements) do
         if slotSnapshot.kind == "line" then
             local slot = createLineSlot(registry, name, slotSnapshot.spec, slotSnapshot.values)
-            slot.generation = slotSnapshot.generation
+            slot.refreshPass = slotSnapshot.refreshPass
             registry.elements[name] = slot
         elseif slotSnapshot.kind == "table" then
             local slot = createTableSlot(
@@ -297,111 +305,10 @@ local function restoreRegistry(registry, snapshot)
                 slotSnapshot.rows,
                 slotSnapshot.rowIndexByKey
             )
-            slot.generation = slotSnapshot.generation
+            slot.refreshPass = slotSnapshot.refreshPass
             registry.elements[name] = slot
         end
     end
-end
-
-local function createProjectionContext(registry)
-    local authorHost = registry.authorHost
-    local store = registry.store
-    local ctx = {}
-
-    function ctx.read(alias)
-        if store and type(store.read) == "function" then
-            return store.read(alias)
-        end
-        return nil
-    end
-
-    function ctx.isEnabled()
-        if authorHost and type(authorHost.isEnabled) == "function" then
-            return authorHost.isEnabled()
-        end
-        return true
-    end
-
-    function ctx.log(fmt, ...)
-        if authorHost and type(authorHost.log) == "function" then
-            return authorHost.log(fmt, ...)
-        end
-        print(internal.formatLogMessage("[overlays:" .. tostring(registry.ownerId) .. "] ", fmt, ...))
-    end
-
-    function ctx.logIf(fmt, ...)
-        if authorHost and type(authorHost.logIf) == "function" then
-            return authorHost.logIf(fmt, ...)
-        end
-    end
-
-    function ctx.setLine(name, valuesTable)
-        local slot = registry.elements[name]
-        if slot and slot.kind == "line" then
-            slot.values = valuesTable
-            return true
-        end
-        return false
-    end
-
-    function ctx.setTable(name, rows)
-        local slot = registry.elements[name]
-        if not (slot and slot.kind == "table") then
-            return false
-        end
-        slot.rows = {}
-        slot.rowIndexByKey = {}
-        for index, row in ipairs(rows or {}) do
-            if index > #slot.handles then
-                break
-            end
-            slot.rows[index] = row
-            if type(row) == "table" and row.key ~= nil then
-                slot.rowIndexByKey[row.key] = index
-            end
-        end
-        return true
-    end
-
-    function ctx.setCell(tableName, rowKey, columnKey, value)
-        local slot = registry.elements[tableName]
-        if not (slot and slot.kind == "table") then
-            return false
-        end
-        local rowIndex = slot.rowIndexByKey[rowKey]
-        local row = rowIndex and slot.rows[rowIndex] or nil
-        if type(row) ~= "table" then
-            return false
-        end
-        row[columnKey] = value
-        return true
-    end
-
-    function ctx.refresh(name)
-        local slot = registry.elements[name]
-        if not slot then
-            return false
-        end
-        if slot.kind == "line" then
-            slot.handle.refresh()
-        elseif slot.kind == "table" then
-            for _, handle in ipairs(slot.handles) do
-                handle.refresh()
-            end
-        end
-        return true
-    end
-
-    function ctx.refreshRegion(region)
-        renderer.refreshStackRows(region)
-    end
-
-    function ctx.refreshAll()
-        renderer.refreshStackRows()
-        renderer.refreshTextElements(true)
-    end
-
-    return ctx
 end
 
 local function ensureIntervalDriver()
@@ -499,15 +406,20 @@ local function registerAfterHookProjection(registry, path, callback)
         path = path,
         callback = callback,
     }
-    public.hooks.WrapOwned(registry.hookOwner, path, "overlay.after:" .. path, function(base, ...)
-        local args = { ... }
-        local results = { base(...) }
-        internal.overlays.dispatchAfterHook(registry.owner, path, args, results)
-        return table.unpack(results)
-    end)
 end
 
-local function createDeclarationSurface(registry)
+local function createDeclarationSurface(registry, opts)
+    if opts and opts.system == true then
+        return {
+            createLine = function(name, spec)
+                return declareLine(registry, name, spec)
+            end,
+            onCommit = function(callback)
+                return registerCommitProjection(registry, callback)
+            end,
+        }
+    end
+
     return {
         createLine = function(name, spec)
             return declareLine(registry, name, spec)
@@ -518,8 +430,8 @@ local function createDeclarationSurface(registry)
         onCommit = function(callback)
             return registerCommitProjection(registry, callback)
         end,
-        onInterval = function(name, seconds, callback, opts)
-            return registerIntervalProjection(registry, name, seconds, callback, opts)
+        onInterval = function(name, seconds, callback, intervalOpts)
+            return registerIntervalProjection(registry, name, seconds, callback, intervalOpts)
         end,
         afterHook = function(path, callback)
             return registerAfterHookProjection(registry, path, callback)
@@ -530,37 +442,35 @@ end
 local function beginTransaction(owner)
     local registry = getRegistry(owner, true)
     local snapshot = snapshotRegistry(registry)
-    local hookTransaction = internal.hooks.beginTransaction(registry.hookOwner)
     local closed = false
 
     return {
         commit = function()
-            hookTransaction.commit()
             closed = true
         end,
         rollback = function()
             if closed then
                 return
             end
-            hookTransaction.rollback()
             restoreRegistry(registry, snapshot)
             closed = true
         end,
     }
 end
 
-local function refresh(owner, ownerId, authorHost, store, register)
+local function refresh(owner, ownerId, authorHost, store, register, opts)
     if type(register) ~= "function" then
-        internal.violate("overlays.invalid_registration", "internal.overlays.refresh: register must be a function")
+        internal.violate("overlays.invalid_registration", "overlay refresh: register must be a function")
     end
 
     local registry = getRegistry(owner, true)
     if type(ownerId) == "string" and ownerId ~= "" then
         registry.ownerId = ownerId
     end
+    registry.hidden = opts and opts.hidden == true
     registry.authorHost = authorHost
     registry.store = store
-    registry.generation = registry.generation + 1
+    registry.refreshPass = registry.refreshPass + 1
     registry.refreshing = true
     registry.seenElements = {}
     registry.pendingEvents = {
@@ -569,11 +479,7 @@ local function refresh(owner, ownerId, authorHost, store, register)
         afterHooks = {},
     }
 
-    local ok, err = pcall(function()
-        internal.hooks.refresh(registry.hookOwner, function()
-            return register(createDeclarationSurface(registry))
-        end)
-    end)
+    local ok, err = pcall(register, createDeclarationSurface(registry, opts))
     registry.refreshing = false
 
     if ok then
@@ -582,7 +488,7 @@ local function refresh(owner, ownerId, authorHost, store, register)
                 unregisterElement(slot)
                 registry.elements[name] = nil
             else
-                slot.generation = registry.generation
+                slot.refreshPass = registry.refreshPass
             end
         end
         registry.events = registry.pendingEvents
@@ -596,68 +502,112 @@ local function refresh(owner, ownerId, authorHost, store, register)
     end
 end
 
-local function dispatchCommit(owner, commit)
+local function getAfterHookPaths(owner)
     local registry = getRegistry(owner, false)
+    local paths = {}
+    local afterHooks = registry and registry.events and registry.events.afterHooks or nil
+    for path in pairs(afterHooks or {}) do
+        paths[#paths + 1] = path
+    end
+    table.sort(paths)
+    return paths
+end
+
+local function recreateElementSlots(registry)
+    local snapshots = {}
+    for name, slot in pairs(registry.elements) do
+        snapshots[name] = snapshotSlot(slot)
+        unregisterElement(slot)
+    end
+
+    registry.elements = {}
+    for name, slotSnapshot in pairs(snapshots) do
+        if slotSnapshot.kind == "line" then
+            local slot = createLineSlot(registry, name, slotSnapshot.spec, slotSnapshot.values)
+            slot.refreshPass = slotSnapshot.refreshPass
+            registry.elements[name] = slot
+        elseif slotSnapshot.kind == "table" then
+            local slot = createTableSlot(
+                registry,
+                name,
+                slotSnapshot.spec,
+                slotSnapshot.rows,
+                slotSnapshot.rowIndexByKey
+            )
+            slot.refreshPass = slotSnapshot.refreshPass
+            registry.elements[name] = slot
+        end
+    end
+end
+
+local function promoteTableRegistry(sourceOwner, targetOwner, ownerId, authorHost, store)
+    local registry = getRegistry(sourceOwner, false)
     if not registry then
         return
     end
 
-    local ctx = createProjectionContext(registry)
-    for _, callback in ipairs(registry.events.commit or {}) do
-        callback(ctx, commit)
-    end
-end
-
-local function dispatchIntervals(now)
-    now = tonumber(now) or os.clock()
-    local function dispatchRegistry(registry)
-        local ctx = nil
-        for _, event in pairs(registry.events.intervals or {}) do
-            local shouldRun = true
-            if event.opts and type(event.opts.when) == "function" then
-                shouldRun = event.opts.when() == true
-            end
-            if shouldRun and (event.lastRun == nil or now - event.lastRun >= event.seconds) then
-                event.lastRun = now
-                ctx = ctx or createProjectionContext(registry)
-                event.callback(ctx, {
-                    name = event.name,
-                    now = now,
-                })
-            end
+    local previousTargetRegistry = retainedState.tableRegistries[targetOwner]
+    if previousTargetRegistry and previousTargetRegistry ~= registry then
+        for _, slot in pairs(previousTargetRegistry.elements or {}) do
+            unregisterElement(slot)
         end
     end
 
-    for _, registry in pairs(retainedState.explicitRegistries) do
-        dispatchRegistry(registry)
+    retainedState.tableRegistries[sourceOwner] = nil
+    retainedState.tableRegistries[targetOwner] = registry
+    ensureRegistryShape(registry, targetOwner, false)
+    if type(ownerId) == "string" and ownerId ~= "" then
+        registry.ownerId = ownerId
     end
-    for _, registry in pairs(retainedState.tableRegistries) do
-        if registry.explicitOwner ~= true then
-            dispatchRegistry(registry)
+    registry.hidden = false
+    registry.authorHost = authorHost
+    registry.store = store
+    recreateElementSlots(registry)
+end
+
+local function clearTableRegistriesByOwnerId(ownerId, exceptOwner)
+    if type(ownerId) ~= "string" or ownerId == "" then
+        return true, nil
+    end
+
+    local owners = {}
+    for owner, registry in pairs(retainedState.tableRegistries) do
+        if owner ~= exceptOwner and registry.ownerId == ownerId then
+            owners[#owners + 1] = owner
         end
     end
-end
 
-local function dispatchAfterHook(owner, path, args, results)
-    local registry = getRegistry(owner, false)
-    local event = registry and registry.events.afterHooks and registry.events.afterHooks[path] or nil
-    if not event then
-        return
+    local errors = {}
+    for _, owner in ipairs(owners) do
+        local transaction = beginTransaction(owner)
+        local ok, err = pcall(refresh, owner, ownerId, nil, nil, function() end)
+        if ok then
+            transaction.commit()
+        else
+            transaction.rollback()
+            errors[#errors + 1] = tostring(err)
+        end
     end
 
-    local ctx = createProjectionContext(registry)
-    event.callback(ctx, {
-        path = path,
-        args = args or {},
-        result = results and results[1] or nil,
-        results = results or {},
-    })
+    if #errors > 0 then
+        return false, table.concat(errors, "; ")
+    end
+    return true, nil
 end
+
+local dispatch = import('core/overlays/private_retained_dispatch.lua', nil, {
+    state = retainedState,
+    renderer = renderer,
+    getRegistry = getRegistry,
+})
 
 return {
     beginTransaction = beginTransaction,
     refresh = refresh,
-    dispatchCommit = dispatchCommit,
-    dispatchIntervals = dispatchIntervals,
-    dispatchAfterHook = dispatchAfterHook,
+    getAfterHookPaths = getAfterHookPaths,
+    promoteTableRegistry = promoteTableRegistry,
+    clearTableRegistriesByOwnerId = clearTableRegistriesByOwnerId,
+    dispatchCommit = dispatch.dispatchCommit,
+    dispatchIntervals = dispatch.dispatchIntervals,
+    dispatchAfterHook = dispatch.dispatchAfterHook,
 }

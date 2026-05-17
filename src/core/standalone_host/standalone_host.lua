@@ -27,6 +27,54 @@ local function getStandaloneRuntime(pluginGuid)
     return runtime
 end
 
+local function disposeStandaloneRuntime(pluginGuid, runtime)
+    if type(runtime) ~= "table" then
+        return true, nil
+    end
+
+    local closeOk, closeErr = true, nil
+    if type(runtime.handleHostGuiClosed) == "function" then
+        closeOk, closeErr = pcall(runtime.handleHostGuiClosed)
+    end
+
+    local runtimes = internal.standaloneRuntimes
+    if type(runtimes) == "table" and runtimes[pluginGuid] == runtime then
+        runtimes[pluginGuid] = nil
+        fallbackHud.refreshMarker()
+    end
+
+    if not closeOk then
+        return false, closeErr
+    end
+    return true, nil
+end
+
+local function warnStandaloneRuntimeDispose(pluginGuid, err)
+    internal.violate(
+        "host.retire_failed",
+        "standalone runtime '%s' retirement failed: %s",
+        tostring(pluginGuid),
+        tostring(err)
+    )
+end
+
+local function attachRuntimeReceipt(pluginGuid, moduleHost, runtime)
+    local moduleHostApi = internal.moduleHost
+    if not (moduleHostApi and type(moduleHostApi.getState) == "function"
+        and type(moduleHostApi.addEffectReceipt) == "function") then
+        return
+    end
+    if not moduleHostApi.getState(moduleHost) then
+        return
+    end
+
+    moduleHostApi.addEffectReceipt(moduleHost, "standalone", {
+        dispose = function()
+            return disposeStandaloneRuntime(pluginGuid, runtime)
+        end,
+    })
+end
+
 --- Creates stable callbacks that late-read the current standalone runtime.
 ---@param pluginGuid string Plugin guid used when creating the module host.
 ---@return StandaloneRuntime bridge Standalone bridge with `renderWindow` and `addMenuBar` callbacks.
@@ -74,15 +122,6 @@ function public.standaloneHost(pluginGuid)
 
     local function getMeta()
         return moduleHost.getMeta() or {}
-    end
-
-    if not (getIdentity().modpack and internal.coordinators[getIdentity().modpack]) then
-        local ok, err = moduleHost.applyOnLoad()
-        if not ok then
-            internal.violate("host.standalone_startup_lifecycle_failed", "%s startup lifecycle failed: %s",
-                tostring(getMeta().name or getIdentity().id or "module"),
-                tostring(err))
-        end
     end
 
     local showWindow = false
@@ -226,7 +265,17 @@ function public.standaloneHost(pluginGuid)
         handleHostGuiClosed = handleHostGuiClosed,
     }
     internal.standaloneRuntimes = internal.standaloneRuntimes or {}
+
+    local previousRuntime = getStandaloneRuntime(pluginGuid)
+    if previousRuntime and previousRuntime ~= runtime then
+        local disposeOk, disposeErr = disposeStandaloneRuntime(pluginGuid, previousRuntime)
+        if not disposeOk then
+            warnStandaloneRuntimeDispose(pluginGuid, disposeErr)
+        end
+    end
+
     internal.standaloneRuntimes[pluginGuid] = runtime
+    attachRuntimeReceipt(pluginGuid, moduleHost, runtime)
     fallbackHud.refreshMarker()
     return runtime
 end

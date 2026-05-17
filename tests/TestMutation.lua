@@ -296,3 +296,29 @@ function TestMutation:testFailedPlanRetryRestoresToLatestSnapshot()
     })
 end
 
+function TestMutation:testCommittedNoopSyncReceiptDisposesSuccessfully()
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        id = "NoopMutationReceipt",
+        name = "Noop Mutation Receipt",
+        storage = {},
+    })
+    local store, session = CreateModuleState({
+        Enabled = true,
+        DebugMode = false,
+    }, definition)
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
+        pluginGuid = "test-noop-mutation-receipt",
+        definition = definition,
+        store = store,
+        session = session,
+        drawTab = function() end,
+    })
+    local receipt = AdamantModpackLib_Internal.mutation.syncForHost(host, nil, authorHost, store)
+
+    local ok, err = receipt.commit()
+    lu.assertTrue(ok, tostring(err))
+
+    ok, err = receipt.dispose()
+    lu.assertTrue(ok, tostring(err))
+end
+

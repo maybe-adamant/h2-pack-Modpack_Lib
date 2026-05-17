@@ -2,14 +2,14 @@
 
 ## Purpose
 
-The overlay subsystem provides owner-scoped retained UI elements for module HUD projections.
+The overlay subsystem provides host-scoped retained UI elements for module HUD projections plus narrow system-scoped HUD lines for first-party infrastructure.
 Modules declare the maximum retained structure they need, then update named elements from explicit
 projection events.
 
 Lib owns:
 
 - Retained overlay handles, layout, cleanup, and hot-reload refresh.
-- Owner scoping and name collision prevention.
+- Host scoping and name collision prevention.
 - Activation rollback for overlay declarations and subscriptions.
 - Event dispatch for supported overlay projection triggers.
 
@@ -35,13 +35,13 @@ registerOverlays = function(overlays, host, store)
 end
 ```
 
-`registerOverlays` is called during host activation. It uses the same Lib-owned
-per-plugin runtime slot as hooks and integrations. Overlay activation
-participates in host activation rollback.
+`registerOverlays` is called during host activation. The candidate host owns the
+overlay receipt, and overlay activation participates in host activation rollback.
 
-## Owner Scoping
+## Host Scoping
 
-Overlay element names are local to the module `pluginGuid` runtime slot:
+Overlay element names are local to the module `pluginGuid` plus the committed
+host lifecycle:
 
 ```lua
 overlays.createLine("summary.igt", spec)
@@ -59,17 +59,23 @@ Two modules may use the same local overlay name without colliding.
 
 ## System Overlays
 
-Framework and Lib may need retained overlays that are not declared by a module. These use an explicit
-stable owner API instead of ownerless retained declarations:
+Framework and Lib may need retained HUD lines that are not declared by a module.
+These use a narrow system overlay API instead of a general owner-token lifecycle
+surface:
 
 ```lua
-lib.overlays.defineOwned(owner, function(overlays)
+lib.overlays.defineSystem(ownerId, function(overlays)
     overlays.createLine("hash.marker", spec)
 end)
 ```
 
-Ownerless low-level overlay APIs may remain for compatibility, but new retained overlay declarations
-must be owner-scoped.
+The system registrar intentionally exposes only `createLine(...)` and
+`onCommit(...)`. Tables, intervals, and `afterHook(...)` remain module host
+overlay capabilities.
+
+System overlays are trusted first-party infrastructure for Lib fallback and
+Framework HUD markers. They refresh directly through `defineSystem`; they do not
+participate in host activation receipts or retained overlay transactions.
 
 ## Retained Elements
 
@@ -270,11 +276,16 @@ The implementation should not block a future `event.results` shape for multi-ret
 
 ## Hot Reload And Rollback
 
-Overlay refresh follows the same runtime-refresh principle as hooks and integrations:
+Overlay refresh is private retained-registry plumbing behind host receipts and
+the narrow system overlay API:
 
 ```lua
-internal.overlays.refresh(owner, registerFn)
+internal.overlays.installForHost(host, registerOverlays, authorHost, store)
+lib.overlays.defineSystem(ownerId, register)
 ```
+
+`installForHost` participates in host activation rollback. `defineSystem` is a
+direct first-party refresh path for fixed infrastructure overlays.
 
 Refresh behavior:
 
@@ -285,8 +296,8 @@ Refresh behavior:
 
 Activation behavior:
 
-- Host activation refreshes overlays alongside hooks and integrations.
-- If a later activation step fails, rollback restores the previous overlay registrations.
+- Host activation stages overlays alongside hooks and integrations.
+- If a later activation step fails, rollback disposes candidate overlay registrations.
 - Failed activation must not leave newly created overlay elements or subscriptions active.
 
 ## Renderer Internals
@@ -294,12 +305,13 @@ Activation behavior:
 The retained API builds on private HUD component and stacked-layout renderer functions. Module authors
 should not register HUD components or stacked rows directly.
 
-- `lib.overlays.defineOwned` is the retained system-overlay entry point.
+- `lib.overlays.defineSystem` is the retained system-overlay entry point.
 - Module `registerOverlays` is the retained module-overlay entry point.
 - `lib.overlays.suppressForUi` remains public because Framework and standalone module UIs need to hide
   overlays while foreground configuration UI is open.
 
-New code should use retained owner-scoped declarations only.
+New code should use host-owned module declarations or the narrow system line
+surface only.
 
 ## Timer Target Shape
 
@@ -351,7 +363,7 @@ return line values and table rows.
 Lib tests:
 
 - `registerOverlays` activates and receives an overlay declaration surface.
-- `createLine` creates an owner-scoped retained line.
+- `createLine` creates a host-scoped retained line.
 - `setLine` updates retained line values.
 - `createTable` creates fixed-capacity retained rows.
 - `setTable` shows provided rows up to `maxRows` and hides unused rows.
@@ -362,7 +374,7 @@ Lib tests:
 - `onCommit` runs after module `onSettingsCommitted`.
 - `onInterval` runs while active and is cleaned up on refresh/removal.
 - `afterHook` observes hook args/results and cannot alter return values.
-- `defineOwned` supports system-owned overlays and cleans omitted system declarations.
+- `defineSystem` supports system-owned HUD lines and cleans omitted system declarations.
 
 Timer tests:
 

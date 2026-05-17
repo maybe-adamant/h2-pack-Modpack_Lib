@@ -78,6 +78,28 @@ local function dispatch(owner)
     AdamantModpackLib_Internal.overlays.dispatchCommit(owner, {})
 end
 
+local function createHostWithOverlays(pluginGuid, registerOverlays)
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        id = "OverlayHost",
+        name = "Overlay Host",
+        storage = {},
+    })
+    local store, session = CreateModuleState({
+        Enabled = true,
+        DebugMode = false,
+    }, definition)
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
+        pluginGuid = pluginGuid,
+        definition = definition,
+        store = store,
+        session = session,
+        registerOverlays = registerOverlays,
+        drawTab = function() end,
+    })
+    authorHost.tryActivate()
+    return host
+end
+
 function TestOverlays:testRetainedLineUsesHudComponentAndVisibilityHooks()
     local modified = {}
     local alphas = {}
@@ -106,7 +128,7 @@ function TestOverlays:testRetainedLineUsesHudComponentAndVisibilityHooks()
         alphas[#alphas + 1] = args
     end
 
-    lib.overlays.defineOwned("test.overlay.line", function(overlays)
+    lib.overlays.defineSystem("test.overlay.line", function(overlays)
         overlays.createLine("message", {
             componentName = "TestOverlay",
             region = "middleRightStack",
@@ -147,7 +169,7 @@ function TestOverlays:testRetainedLineUsesHudComponentAndVisibilityHooks()
 end
 
 function TestOverlays:testRetainedLinesUseStableMiddleRightOrderingAndBands()
-    lib.overlays.defineOwned("test.overlay.order", function(overlays)
+    lib.overlays.defineSystem("test.overlay.order", function(overlays)
         overlays.createLine("module", {
             componentName = "ModuleOverlay",
             region = "middleRightStack",
@@ -179,7 +201,7 @@ function TestOverlays:testRetainedLinesUseStableMiddleRightOrderingAndBands()
 end
 
 function TestOverlays:testRetainedTableUsesStableColumnSpacing()
-    lib.overlays.defineOwned("test.overlay.table", function(overlays)
+    local host = createHostWithOverlays("test.overlay.table", function(overlays)
         overlays.createTable("timer", {
             componentName = "TimerTable",
             region = "middleRightStack",
@@ -211,6 +233,7 @@ function TestOverlays:testRetainedTableUsesStableColumnSpacing()
             ctx.refresh("timer")
         end)
     end)
+    dispatch(host)
 
     local label = ScreenData.HUD.ComponentData.AdamantOverlay_TimerTable_1_label
     local time = ScreenData.HUD.ComponentData.AdamantOverlay_TimerTable_1_time
@@ -228,7 +251,7 @@ function TestOverlays:testUiSuppressionTokenGloballyHidesAndRestoresRetainedOver
         alphas[#alphas + 1] = args
     end
 
-    lib.overlays.defineOwned("test.overlay.suppression", function(overlays)
+    lib.overlays.defineSystem("test.overlay.suppression", function(overlays)
         overlays.createLine("line", {
             componentName = "SuppressedOverlay",
             region = "middleRightStack",

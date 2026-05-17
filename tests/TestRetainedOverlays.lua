@@ -95,13 +95,13 @@ local function createHostWithOverlays(pluginGuid, registerOverlays, opts)
     return host, authorHost, store, session
 end
 
-function TestRetainedOverlays:testDefineOwnedLineProjectsThroughCommitContext()
+function TestRetainedOverlays:testDefineSystemLineProjectsThroughCommitContext()
     local modified = {}
     ModifyTextBox = function(args)
         modified[#modified + 1] = args
     end
 
-    lib.overlays.defineOwned("test.retained.line", function(overlays)
+    lib.overlays.defineSystem("test.retained.line", function(overlays)
         overlays.createLine("summary.igt", {
             region = "middleRightStack",
             columns = {
@@ -121,13 +121,13 @@ function TestRetainedOverlays:testDefineOwnedLineProjectsThroughCommitContext()
     lu.assertEquals(modified[#modified].Text, "01:23.45")
 end
 
-function TestRetainedOverlays:testDefineOwnedRemovesOmittedDeclarations()
+function TestRetainedOverlays:testDefineSystemRemovesOmittedDeclarations()
     local destroyed = {}
     Destroy = function(args)
         destroyed[#destroyed + 1] = args.Id
     end
 
-    lib.overlays.defineOwned("test.retained.omit", function(overlays)
+    lib.overlays.defineSystem("test.retained.omit", function(overlays)
         overlays.createLine("transient", {
             region = "middleRightStack",
             columns = {
@@ -137,7 +137,7 @@ function TestRetainedOverlays:testDefineOwnedRemovesOmittedDeclarations()
     end)
     lu.assertNotNil(next(AdamantModpackLib_OverlayState.renderer.textElements))
 
-    lib.overlays.defineOwned("test.retained.omit", function() end)
+    lib.overlays.defineSystem("test.retained.omit", function() end)
 
     lu.assertNil(next(AdamantModpackLib_OverlayState.renderer.stackRows))
     lu.assertNil(next(AdamantModpackLib_OverlayState.renderer.textElements))
@@ -154,7 +154,7 @@ function TestRetainedOverlays:testRetainedTableCapsRowsAndHidesUnusedRows()
         alphas[#alphas + 1] = args
     end
 
-    lib.overlays.defineOwned("test.retained.table", function(overlays)
+    local host, authorHost = createHostWithOverlays("test.retained.table", function(overlays)
         overlays.createTable("runs", {
             region = "middleRightStack",
             maxRows = 2,
@@ -172,8 +172,8 @@ function TestRetainedOverlays:testRetainedTableCapsRowsAndHidesUnusedRows()
             ctx.refresh("runs")
         end)
     end)
-
-    AdamantModpackLib_Internal.overlays.dispatchCommit("test.retained.table", {})
+    authorHost.tryActivate()
+    AdamantModpackLib_Internal.overlays.dispatchCommit(host, {})
 
     local text = {}
     for _, call in ipairs(modified) do
@@ -189,21 +189,23 @@ function TestRetainedOverlays:testRetainedTableCapsRowsAndHidesUnusedRows()
 end
 
 function TestRetainedOverlays:testRetainedTableRequiresPositiveMaxRows()
-    lu.assertErrorMsgContains("maxRows must be a positive integer", function()
-        lib.overlays.defineOwned("test.retained.table.invalid", function(overlays)
-            overlays.createTable("runs", {
-                region = "middleRightStack",
-                columns = {
-                    { key = "label", minWidth = 40 },
-                },
-            })
-        end)
+    local _, authorHost = createHostWithOverlays("test.retained.table.invalid", function(overlays)
+        overlays.createTable("runs", {
+            region = "middleRightStack",
+            columns = {
+                { key = "label", minWidth = 40 },
+            },
+        })
     end)
+    local ok, err = authorHost.tryActivate()
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "maxRows must be a positive integer")
 end
 
 function TestRetainedOverlays:testProjectionContextDoesNotExposeOwner()
     local exposedOwner = nil
-    lib.overlays.defineOwned("test.retained.no-owner", function(overlays)
+    lib.overlays.defineSystem("test.retained.no-owner", function(overlays)
         overlays.createLine("line", {
             region = "middleRightStack",
             columns = {
@@ -249,13 +251,135 @@ function TestRetainedOverlays:testHostCommitDispatchesOverlaysAfterSettingsObser
     lu.assertEquals(order, { "settings", "overlay" })
 end
 
+function TestRetainedOverlays:testHostCommitDispatchesOverlaysWhenSettingsObserverFails()
+    CaptureWarnings()
+    local pluginGuid = "test-retained-overlay-commit-observer-failure"
+    local order = {}
+    local host, authorHost, _, session = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.onCommit(function()
+            order[#order + 1] = "overlay"
+        end)
+    end, {
+        storage = {
+            { type = "bool", alias = "Flag", default = false },
+        },
+        config = {
+            Enabled = true,
+            DebugMode = false,
+            Flag = false,
+        },
+        onSettingsCommitted = function()
+            order[#order + 1] = "settings"
+            error("settings observer boom")
+        end,
+    })
+    authorHost.tryActivate()
+
+    session.write("Flag", true)
+    local ok, err = host.flush()
+    local warnings = Warnings
+    RestoreWarnings()
+
+    lu.assertTrue(ok, tostring(err))
+    lu.assertNil(err)
+    lu.assertEquals(order, { "settings", "overlay" })
+    lu.assertEquals(#warnings, 1)
+    lu.assertStrContains(warnings[1], "lifecycle.on_settings_committed_failed")
+    lu.assertStrContains(warnings[1], "settings observer boom")
+end
+
+function TestRetainedOverlays:testHostInstallStagesOverlayRowsHiddenUntilCommit()
+    local pluginGuid = "test-retained-overlay-staging"
+    local host, authorHost, store = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.createLine("candidate", {
+            region = "middleRightStack",
+            columns = {
+                { key = "text", minWidth = 40 },
+            },
+        })
+    end)
+    local pendingRowKey = "middleRightStack\0" .. pluginGuid .. ":pending:candidate"
+    local currentRowKey = "middleRightStack\0" .. pluginGuid .. ":current:candidate"
+
+    local receipt = AdamantModpackLib_Internal.overlays.installForHost(host, function(overlays)
+        overlays.createLine("candidate", {
+            region = "middleRightStack",
+            columns = {
+                { key = "text", minWidth = 40 },
+            },
+        })
+    end, authorHost, store)
+
+    lu.assertNil(self.rendererState.stackRows[currentRowKey])
+    lu.assertNotNil(self.rendererState.stackRows[pendingRowKey])
+    local stagedRows = 0
+    for _, row in pairs(self.rendererState.stackRows) do
+        stagedRows = stagedRows + 1
+        lu.assertFalse(row.visible())
+    end
+    lu.assertTrue(stagedRows > 0)
+
+    local ok, err = receipt.commit()
+
+    lu.assertTrue(ok, tostring(err))
+    lu.assertNil(self.rendererState.stackRows[pendingRowKey])
+    lu.assertNotNil(self.rendererState.stackRows[currentRowKey])
+    lu.assertTrue(self.rendererState.stackRows[currentRowKey].visible())
+
+    ok, err = receipt.dispose()
+
+    lu.assertTrue(ok, tostring(err))
+    lu.assertNil(self.rendererState.stackRows[currentRowKey])
+end
+
+function TestRetainedOverlays:testHotReloadSameOverlayNameSurvivesOldHostRetirement()
+    local pluginGuid = "test-retained-overlay-same-name-reload"
+    local rowKey = "middleRightStack\0" .. pluginGuid .. ":current:shared"
+    local firstHost, firstAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.createLine("shared", {
+            region = "middleRightStack",
+            columns = {
+                { key = "text", minWidth = 40 },
+            },
+        })
+    end, {
+        id = "RetainedSameNameReload",
+    })
+    firstAuthorHost.tryActivate()
+
+    local firstRow = self.rendererState.stackRows[rowKey]
+    lu.assertNotNil(firstRow)
+
+    local secondHost, secondAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.createLine("shared", {
+            region = "middleRightStack",
+            columns = {
+                { key = "text", minWidth = 40 },
+            },
+        })
+    end, {
+        id = "RetainedSameNameReload",
+    })
+    secondAuthorHost.tryActivate()
+
+    local secondRow = self.rendererState.stackRows[rowKey]
+    local firstRegistry = AdamantModpackLib_OverlayState.retained.tableRegistries[firstHost]
+    local secondRegistry = AdamantModpackLib_OverlayState.retained.tableRegistries[secondHost]
+
+    lu.assertEquals(lib.getLiveModuleHost(pluginGuid), secondHost)
+    lu.assertNotNil(secondRow)
+    lu.assertNotEquals(firstRow, secondRow)
+    lu.assertTrue(firstRegistry == nil or firstRegistry.elements.shared == nil)
+    lu.assertNotNil(secondRegistry.elements.shared)
+end
+
 function TestRetainedOverlays:testRetainedIntervalDispatchesWhenDue()
     local calls = 0
-    lib.overlays.defineOwned("test.retained.interval", function(overlays)
+    createHostWithOverlays("test.retained.interval", function(overlays)
         overlays.onInterval("tick", 1.0, function()
             calls = calls + 1
         end)
-    end)
+    end):tryActivate()
 
     AdamantModpackLib_Internal.overlays.dispatchIntervals(0)
     AdamantModpackLib_Internal.overlays.dispatchIntervals(0.5)
@@ -266,14 +390,14 @@ end
 
 function TestRetainedOverlays:testExplicitOwnerIntervalPredicateRunsOncePerDispatch()
     local whenCalls = 0
-    lib.overlays.defineOwned("test.retained.interval.once", function(overlays)
+    createHostWithOverlays("test.retained.interval.once", function(overlays)
         overlays.onInterval("tick", 1.0, function() end, {
             when = function()
                 whenCalls = whenCalls + 1
                 return true
             end,
         })
-    end)
+    end):tryActivate()
 
     AdamantModpackLib_Internal.overlays.dispatchIntervals(0)
 
@@ -287,7 +411,7 @@ function TestRetainedOverlays:testAfterHookObservesResultsWithoutChangingReturn(
         mod = {
             Path = {
                 Wrap = function(path, handler)
-                    lu.assertEquals(path, "StartNewRun")
+                    lu.assertEquals(path, "StartNewRunAfter")
                     wrapped = handler
                 end,
             },
@@ -297,7 +421,7 @@ function TestRetainedOverlays:testAfterHookObservesResultsWithoutChangingReturn(
 
     local pluginGuid = "test-retained-overlay-after-hook"
     local _, authorHost = createHostWithOverlays(pluginGuid, function(overlays)
-        overlays.afterHook("StartNewRun", function(_, event)
+        overlays.afterHook("StartNewRunAfter", function(_, event)
             observed = {
                 arg = event.args[1],
                 result = event.result,
@@ -317,50 +441,24 @@ function TestRetainedOverlays:testAfterHookObservesResultsWithoutChangingReturn(
     })
 end
 
-function TestRetainedOverlays:testExplicitOwnerAfterHookObservesResults()
-    local wrapped = nil
-    local observed = nil
-    modutil = {
-        mod = {
-            Path = {
-                Wrap = function(path, handler)
-                    lu.assertEquals(path, "StartNewRun")
-                    wrapped = handler
-                end,
-            },
-        },
-    }
-    rom.mods["SGG_Modding-ModUtil"] = modutil
-
-    lib.overlays.defineOwned("test.retained.explicit.after", function(overlays)
-        overlays.afterHook("StartNewRun", function(_, event)
-            observed = {
-                arg = event.args[1],
-                result = event.result,
-            }
-        end)
+function TestRetainedOverlays:testDefineSystemDoesNotExposeHookOrIntervalEvents()
+    lib.overlays.defineSystem("test.retained.system.surface", function(overlays)
+        lu.assertNil(overlays.afterHook)
+        lu.assertNil(overlays.onInterval)
+        lu.assertNil(overlays.createTable)
     end)
-
-    local result = wrapped(function(value)
-        return value .. ":base"
-    end, "run")
-
-    lu.assertEquals(result, "run:base")
-    lu.assertEquals(observed, {
-        arg = "run",
-        result = "run:base",
-    })
 end
 
-function TestRetainedOverlays:testExplicitOwnerAfterHookIsRemovedWhenOmitted()
+function TestRetainedOverlays:testHostAfterHookIsRemovedWhenOmitted()
     local wrapped = nil
     local wrapCalls = 0
     local observed = false
+    local pluginGuid = "test-retained-host-after-omit"
     modutil = {
         mod = {
             Path = {
                 Wrap = function(path, handler)
-                    lu.assertEquals(path, "StartNewRun")
+                    lu.assertEquals(path, "StartNewRunOmit")
                     wrapCalls = wrapCalls + 1
                     wrapped = handler
                 end,
@@ -369,12 +467,15 @@ function TestRetainedOverlays:testExplicitOwnerAfterHookIsRemovedWhenOmitted()
     }
     rom.mods["SGG_Modding-ModUtil"] = modutil
 
-    lib.overlays.defineOwned("test.retained.explicit.omit", function(overlays)
-        overlays.afterHook("StartNewRun", function()
+    local _, firstAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.afterHook("StartNewRunOmit", function()
             observed = true
         end)
     end)
-    lib.overlays.defineOwned("test.retained.explicit.omit", function() end)
+    firstAuthorHost.tryActivate()
+
+    local _, secondAuthorHost = createHostWithOverlays(pluginGuid, function() end)
+    secondAuthorHost.tryActivate()
 
     local result = wrapped(function(value)
         return value .. ":base"
@@ -385,14 +486,15 @@ function TestRetainedOverlays:testExplicitOwnerAfterHookIsRemovedWhenOmitted()
     lu.assertFalse(observed)
 end
 
-function TestRetainedOverlays:testExplicitOwnerAfterHookRollsBackOnRegistrationFailure()
+function TestRetainedOverlays:testHostAfterHookRollsBackOnActivationFailure()
     local wrapped = nil
     local observed = nil
+    local pluginGuid = "test-retained-host-after-rollback"
     modutil = {
         mod = {
             Path = {
                 Wrap = function(path, handler)
-                    lu.assertEquals(path, "StartNewRun")
+                    lu.assertEquals(path, "StartNewRunRollback")
                     wrapped = handler
                 end,
             },
@@ -400,23 +502,26 @@ function TestRetainedOverlays:testExplicitOwnerAfterHookRollsBackOnRegistrationF
     }
     rom.mods["SGG_Modding-ModUtil"] = modutil
 
-    lib.overlays.defineOwned("test.retained.explicit.rollback", function(overlays)
-        overlays.afterHook("StartNewRun", function()
+    local _, firstAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.afterHook("StartNewRunRollback", function()
             observed = "first"
         end)
     end)
+    firstAuthorHost.tryActivate()
 
-    local ok, err = pcall(function()
-        lib.overlays.defineOwned("test.retained.explicit.rollback", function(overlays)
-            overlays.afterHook("StartNewRun", function()
-                observed = "second"
-            end)
-            error("rollback after explicit overlay hook")
+    local _, secondAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
+        overlays.afterHook("StartNewRunRollback", function()
+            observed = "second"
         end)
-    end)
+    end, {
+        registerIntegrations = function()
+            error("rollback after overlay hook")
+        end,
+    })
+    local ok, err = secondAuthorHost.tryActivate()
 
     lu.assertFalse(ok)
-    lu.assertStrContains(err, "rollback after explicit overlay hook")
+    lu.assertStrContains(err, "rollback after overlay hook")
 
     wrapped(function(value)
         return value .. ":base"
@@ -457,7 +562,7 @@ function TestRetainedOverlays:testActivationFailureRollsBackOverlayDeclarations(
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "rollback after overlays")
-    local retained = AdamantModpackLib_OverlayState.retained.explicitRegistries["module:" .. pluginGuid]
+    local retained = AdamantModpackLib_OverlayState.retained.tableRegistries[firstHost]
     lu.assertNotNil(retained.elements.stable)
     lu.assertNil(retained.elements.replacement)
     lu.assertEquals(lib.getLiveModuleHost(pluginGuid), firstHost)

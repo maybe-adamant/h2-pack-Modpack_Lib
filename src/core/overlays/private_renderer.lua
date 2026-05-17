@@ -346,16 +346,16 @@ local function refreshVisibility()
 end
 
 local function ensureGameHooks()
-    public.hooks.WrapOwned(internal, "StartRoomPresentation", "overlays:roomPresentation",
+    internal.hooks.installPhysicalWrap(internal, "StartRoomPresentation", "overlays:roomPresentation",
         function(base, currentRun, currentRoom, metaPointsAwarded)
             base(currentRun, currentRoom, metaPointsAwarded)
             refreshVisibility()
         end)
-    public.hooks.WrapOwned(internal, "ShowCombatUI", "overlays:showCombatUI", function(base, flag, args)
+    internal.hooks.installPhysicalWrap(internal, "ShowCombatUI", "overlays:showCombatUI", function(base, flag, args)
         base(flag, args)
         refreshVisibility()
     end)
-    public.hooks.WrapOwned(internal, "HideCombatUI", "overlays:hideCombatUI", function(base, flag, args)
+    internal.hooks.installPhysicalWrap(internal, "HideCombatUI", "overlays:hideCombatUI", function(base, flag, args)
         base(flag, args)
         refreshVisibility()
     end)

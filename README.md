@@ -67,8 +67,6 @@ is optional and marks modules that participate in Framework coordination.
   Migration notes for ownerless module lifecycle identity.
 - [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
   Accepted architecture boundaries and runtime constraints.
-- [docs/FUTURE_RISKS.md](docs/FUTURE_RISKS.md)
-  Forward-looking design notes for tempting changes with non-obvious tradeoffs.
 - [CONTRIBUTING.md](CONTRIBUTING.md)
   Contributor expectations for changing the public Lib contract.
 

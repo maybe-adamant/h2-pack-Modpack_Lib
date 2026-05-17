@@ -6,8 +6,8 @@ It covers how `adamant-ModpackLib`, `adamant-ModpackFramework`, coordinator shel
 
 For the raw behavior of `SGG_Modding-ReLoad`, `SGG_Modding-ModUtil`, and `SGG_Modding-Chalk`, read [RELOAD_MODUTIL_CHALK_REFERENCE.md](RELOAD_MODUTIL_CHALK_REFERENCE.md) first.
 
-For the proposed next-generation host runtime transaction design, read
-[HOST_RUNTIME_SYNC_DESIGN.md](HOST_RUNTIME_SYNC_DESIGN.md).
+Accepted hot-reload boundaries are documented in
+[KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Goals
 
@@ -46,15 +46,16 @@ Safe to rebuild on every module `init`:
 
 Expected to persist across reloads:
 - Lib coordinator registrations
-- Lib per-plugin module runtime slots keyed by `pluginGuid`
-- Lib hook registries owned by those per-plugin runtime slots
+- Lib live-host registry keyed by `pluginGuid`
+- Lib hook dispatchers that map each plugin slot to its current host
 - Framework pack registry and stable GUI callbacks
 - module-owned ROM GUI callbacks that call Lib bridge functions from
   `lib.standaloneUiBridge(pluginGuid)`
 
-Modules pass `pluginGuid` as their lifecycle identity. Lib owns the internal
-runtime slot used for structural hot-reload tracking, hook refresh ownership,
-overlay ownership, integration refresh, mutation runtime, and live-host lookup.
+Modules pass `pluginGuid` as their stable lifecycle identity. The committed host
+for that plugin is the structural hot-reload baseline and the owner for managed
+hooks, overlays, integrations, and activation metadata. Mutation runtime remains
+plugin-scoped because raw game-table edits are process-global.
 
 ## Layer Responsibilities
 
@@ -230,7 +231,7 @@ implementation reloads.
 Important properties:
 - active tracked mutation state survives store recreation during module reload
 - active module-host state is keyed by `pluginGuid`
-- host startup sync synchronizes live mutation state to the module's effective enabled state
+- host activation synchronizes live mutation state to the module's effective enabled state
 - if a module is disabled on reload, tracked active mutation state is reverted
 
 This keeps run-data patch lifecycles coherent across reloads.
@@ -246,11 +247,11 @@ Coordinator metadata is persisted on `AdamantModpackLib_Internal.coordinators`.
 Important consequences:
 - a Lib reload does not forget which packs are coordinated
 - standalone module windows remain suppressed for coordinated modules
-- standalone startup lifecycle applies only when the module is not coordinated
+- activation-time mutation sync uses coordinator state when present and standalone module state otherwise
 
-Framework calls `host.applyOnLoad()` for discovered coordinated modules during pack init.
-`lib.standaloneHost(...)` calls `host.applyOnLoad()` for standalone modules during standalone startup.
-Activation also syncs live mutation state immediately when the module is already coordinated, so non-structural module reloads resync live runtime state without a pack rebuild.
+Activation syncs live mutation state for both coordinated and standalone modules.
+Framework init and `lib.standaloneHost(...)` do not run a separate startup mutation pass.
+This keeps non-structural module reloads on the same host activation path as cold startup.
 
 ## Safety By Scenario
 

@@ -25,6 +25,20 @@ local function makeStore(enabled)
     }))
 end
 
+local function activateMutationHost(pluginGuid, definition, config, patchMutation)
+    local store, session = CreateModuleState(config, definition)
+    local _, authorHost = AdamantModpackLib_Internal.moduleHost.create({
+        pluginGuid = pluginGuid,
+        definition = definition,
+        store = store,
+        session = session,
+        registerPatchMutation = patchMutation,
+        drawTab = function() end,
+    })
+    local ok, err = authorHost.tryActivate()
+    return ok, err, store
+end
+
 function TestDefinitionLifecycle:testSetApplyAndRevert()
     local plan = lib.mutation.createPlan()
     local tbl = { HP = 100 }
@@ -319,6 +333,47 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverForAction
     lu.assertEquals(calls, 1)
 end
 
+function TestDefinitionLifecycle:testCommitSessionDoesNotReapplyMutationWhenPackDisabled()
+    local packId = "test-pack-disabled-commit"
+    lib.coordinator.register(packId, { ModEnabled = false })
+
+    local buildCalls = 0
+    local target = { Value = "base" }
+    local config = {
+        Enabled = true,
+        Value = false,
+    }
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        modpack = packId,
+        id = "CommitSessionPackDisabled",
+        name = "Commit Session Pack Disabled",
+        storage = {
+            {
+                type = "bool",
+                alias = "Value",
+                default = false,
+            },
+        },
+    })
+    local store, session = CreateModuleState(config, definition)
+    local mutation = PatchMutation(function(plan)
+        buildCalls = buildCalls + 1
+        plan:set(target, "Value", "patched")
+    end)
+
+    session.write("Value", true)
+    local ok, err = HostLifecycle.commitSession(definition, mutation, nil, nil, store, session,
+        "test-pack-disabled-commit")
+
+    lib.coordinator.register(packId, nil)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertTrue(config.Value)
+    lu.assertEquals(buildCalls, 0)
+    lu.assertEquals(target.Value, "base")
+end
+
 function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()
     local store = makeStore(false)
     local target = { Value = 1 }
@@ -378,28 +433,35 @@ function TestDefinitionLifecycle:testPatchRuntimeSurvivesRecreatedStoreByPluginG
     lu.assertEquals(target.Value, 1)
 end
 
-function TestDefinitionLifecycle:testApplyOnLoadRevertsStablePatchWhenReloadedDisabled()
+function TestDefinitionLifecycle:testActivationSyncRevertsStablePatchWhenReloadedDisabled()
     local target = { Value = 1 }
-    local storeA = makeStore(true)
     local pluginGuid = "test-disabled-reload-patch-runtime"
-    local def = {
-        modpack = "test-pack",
+    local previousLiveHost = AdamantModpackLib_Internal.liveModuleHosts[pluginGuid]
+    local def = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "DisabledReloadPatchRuntime",
-    }
-    local mutation = PatchMutation(function(plan)
-            plan:set(target, "Value", 7)
-        end)
+        name = "Disabled Reload Patch Runtime",
+        storage = {},
+    })
+    local patch = function(plan)
+        plan:set(target, "Value", 7)
+    end
 
-    local ok, err = AdamantModpackLib_Internal.mutation.applyForPlugin(pluginGuid, def, mutation, nil, storeA)
-    lu.assertTrue(ok)
-    lu.assertNil(err)
+    local ok, err = activateMutationHost(pluginGuid, def, {
+        Enabled = true,
+        DebugMode = false,
+    }, patch)
+    lu.assertTrue(ok, tostring(err))
     lu.assertEquals(target.Value, 7)
 
-    local storeB = makeStore(false)
+    ok, err = activateMutationHost(pluginGuid, def, {
+        Enabled = false,
+        DebugMode = false,
+    }, patch)
 
-    ok, err = HostLifecycle.applyOnLoad(def, mutation, nil, storeB, pluginGuid)
-    lu.assertTrue(ok)
-    lu.assertNil(err)
+    AdamantModpackLib_Internal.liveModuleHosts[pluginGuid] = previousLiveHost
+    AdamantModpackLib_Internal.mutation.revertActiveForPlugin(pluginGuid)
+
+    lu.assertTrue(ok, tostring(err))
     lu.assertEquals(target.Value, 1)
 end
 
@@ -462,21 +524,60 @@ function TestDefinitionLifecycle:testApplyFailureRestoresPreviousPatchRuntime()
     lu.assertEquals(target.Value, "base")
 end
 
-function TestDefinitionLifecycle:testApplyOnLoadDisabledDoesNotBuildInactivePatch()
-    local store = makeStore(false)
-    local buildCalls = 0
+function TestDefinitionLifecycle:testReapplyFailureRestoresPreviousPatchRuntime()
+    local target = { Value = "base" }
+    local store = makeStore(true)
+    local pluginGuid = "test-restore-patch-runtime-on-reapply-failure"
     local def = {
         modpack = "test-pack",
-        id = "InactivePatchRevert",
+        id = "RestorePatchRuntimeOnReapplyFailure",
     }
-    local mutation = PatchMutation(function()
+    local mutationA = PatchMutation(function(plan)
+        plan:set(target, "Value", "first")
+    end)
+
+    local ok, err = AdamantModpackLib_Internal.mutation.applyForPlugin(pluginGuid, def, mutationA, nil, store)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, "first")
+
+    local mutationB = PatchMutation(function()
+        error("reapply patch boom")
+    end)
+
+    ok, err = AdamantModpackLib_Internal.mutation.reapplyForPlugin(pluginGuid, def, mutationB, nil, store)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "reapply patch boom")
+    lu.assertEquals(target.Value, "first")
+
+    ok, err = AdamantModpackLib_Internal.mutation.revertForPlugin(pluginGuid, def, mutationA, nil, store)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, "base")
+end
+
+function TestDefinitionLifecycle:testActivationSyncDisabledDoesNotBuildInactivePatch()
+    local buildCalls = 0
+    local pluginGuid = "test-inactive-patch-revert"
+    local previousLiveHost = AdamantModpackLib_Internal.liveModuleHosts[pluginGuid]
+    local def = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        id = "InactivePatchRevert",
+        name = "Inactive Patch Revert",
+        storage = {},
+    })
+
+    local ok, err = activateMutationHost(pluginGuid, def, {
+        Enabled = false,
+        DebugMode = false,
+    }, function()
         buildCalls = buildCalls + 1
     end)
 
-    local ok, err = HostLifecycle.applyOnLoad(def, mutation, nil, store, "test-inactive-patch-revert")
+    AdamantModpackLib_Internal.liveModuleHosts[pluginGuid] = previousLiveHost
+    AdamantModpackLib_Internal.mutation.revertActiveForPlugin(pluginGuid)
 
-    lu.assertTrue(ok)
-    lu.assertNil(err)
+    lu.assertTrue(ok, tostring(err))
     lu.assertEquals(buildCalls, 0)
 end
 
@@ -573,4 +674,30 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledNoOpsWhenAlreadyDisable
     lu.assertFalse(store.read("Enabled"))
 end
 
+function TestDefinitionLifecycle:testSetDefinitionEnabledPersistsWithoutApplyingWhenPackDisabled()
+    local packId = "test-pack-disabled-enable"
+    lib.coordinator.register(packId, { ModEnabled = false })
 
+    local store = makeStore(false)
+    local target = { Value = "base" }
+    local buildCalls = 0
+    local def = {
+        modpack = packId,
+        id = "PackDisabledEnable",
+    }
+    local mutation = PatchMutation(function(plan)
+        buildCalls = buildCalls + 1
+        plan:set(target, "Value", "patched")
+    end)
+
+    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true,
+        "test-pack-disabled-enable")
+
+    lib.coordinator.register(packId, nil)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertTrue(store.read("Enabled"))
+    lu.assertEquals(buildCalls, 0)
+    lu.assertEquals(target.Value, "base")
+end

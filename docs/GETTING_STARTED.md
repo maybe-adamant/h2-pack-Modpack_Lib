@@ -63,8 +63,8 @@ Use the right state object for the right job:
 If you ignore that boundary, the module will still often "work", but you will create drift between the UI and the persisted state model.
 
 `lib.createModule(...)` owns the normal construction pipeline so store/session
-ownership stays paired. Use the lower-level construction functions only when the
-module needs custom setup.
+ownership stays paired. Keep custom module setup around this boundary instead
+of bypassing it.
 `pluginGuid` is the stable lifecycle identity. Lib owns the internal per-plugin
 runtime state for structural hot-reload tracking and hook refresh ownership.
 

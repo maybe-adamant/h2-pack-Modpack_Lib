@@ -6,11 +6,33 @@ local hostLifecycle = import('core/module_bootstrap/private_host_lifecycle.lua',
     internal = internal,
     mutation = internal.mutation,
     clone = internal.values.deepCopy,
-    isCoordinatorRegistered = public.coordinator.isRegistered,
-    setupRunData = function()
-        return rom.game.SetupRunData()
-    end,
 })
+
+function internal.moduleHost.getState(host)
+    return type(host) == "table" and HostState[host] or nil
+end
+
+function internal.moduleHost.addEffectReceipt(host, name, receipt)
+    local state = type(host) == "table" and HostState[host] or nil
+    if not state then
+        internal.violate("host.invalid_activate_opts", "moduleHost.addEffectReceipt: host is required")
+    end
+    if state.activated ~= true then
+        internal.violate("host.not_activated", "moduleHost.addEffectReceipt requires an activated host")
+    end
+    if type(name) ~= "string" or name == "" then
+        internal.violate("host.invalid_activate_opts", "moduleHost.addEffectReceipt: receipt name is required")
+    end
+    if type(receipt) ~= "table" or type(receipt.dispose) ~= "function" then
+        internal.violate("host.invalid_activate_opts", "moduleHost.addEffectReceipt: receipt dispose function is required")
+    end
+
+    state.effectReceipts = state.effectReceipts or {}
+    state.effectReceipts[#state.effectReceipts + 1] = {
+        name = name,
+        receipt = receipt,
+    }
+end
 
 ---@class AuthorHost
 ---@field isEnabled fun(): boolean
@@ -50,7 +72,6 @@ local hostLifecycle = import('core/module_bootstrap/private_host_lifecycle.lua',
 ---@field isEnabled fun(): boolean
 ---@field setEnabled fun(enabled: boolean): boolean, string|nil
 ---@field setDebugMode fun(enabled: boolean)
----@field applyOnLoad fun(): boolean, string|nil
 ---@field applyMutation fun(): boolean, string|nil
 ---@field revertMutation fun(): boolean, string|nil
 ---@field tryActivate fun(): boolean, string|nil
@@ -153,7 +174,6 @@ function internal.moduleHost.create(opts)
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
     local mutationBundle, settingsObserver = BuildMutationBundle(opts)
-    local runtime = internal.moduleRuntime.get(pluginGuid)
 
     if type(drawTab) ~= "function" then
         internal.violate("host.invalid_create_opts", "moduleHost.create: drawTab is required")
@@ -171,15 +191,27 @@ function internal.moduleHost.create(opts)
             internal.violate("host.invalid_create_opts", "moduleHost.create: registerOverlays must be a function")
         end
     end
-    local hookOwner = runtime.hookOwner
-    local overlayOwner = runtime.overlayOwner
-    local mutationKey = runtime.mutationKey
+    ---@type ModuleHost
+    local host = {}
 
     local function notifySettingsCommitted(activeHost, activeStore, commit)
+        local observerOk = true
+        local observerResult = nil
         if settingsObserver ~= nil then
-            settingsObserver(activeHost, activeStore, commit)
+            observerOk, observerResult = pcall(settingsObserver, activeHost, activeStore, commit)
         end
-        internal.overlays.dispatchCommit(overlayOwner, commit)
+
+        local overlayOk, overlayErr = pcall(internal.overlays.dispatchCommit, host, commit)
+        if not observerOk then
+            if not overlayOk then
+                error(tostring(observerResult) .. " (overlay dispatch failed: " .. tostring(overlayErr) .. ")", 0)
+            end
+            error(observerResult, 0)
+        end
+        if not overlayOk then
+            error(overlayErr, 0)
+        end
+        return observerResult
     end
 
     local authorSession = internal.moduleState.createAuthorSession(session, {
@@ -188,8 +220,6 @@ function internal.moduleHost.create(opts)
         end,
     })
 
-    ---@type ModuleHost
-    local host = {}
     ---@type AuthorHost
     local authorHost
 
@@ -235,7 +265,7 @@ function internal.moduleHost.create(opts)
         requireActivated("writeAndFlush")
         session.write(alias, value)
         local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
-            mutationKey)
+            pluginGuid)
         return ok, err
     end
 
@@ -250,7 +280,7 @@ function internal.moduleHost.create(opts)
             return true
         end
         return hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
-            mutationKey)
+            pluginGuid)
     end
 
     function host.reloadFromConfig()
@@ -274,7 +304,7 @@ function internal.moduleHost.create(opts)
             return true, nil, false
         end
         local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
-            mutationKey)
+            pluginGuid)
         return ok, err, ok == true
     end
 
@@ -284,7 +314,7 @@ function internal.moduleHost.create(opts)
 
     function host.setEnabled(enabled)
         requireActivated("setEnabled")
-        return hostLifecycle.setEnabled(def, mutationBundle, authorHost, store, enabled, mutationKey)
+        return hostLifecycle.setEnabled(def, mutationBundle, authorHost, store, enabled, pluginGuid)
     end
 
     function host.setDebugMode(enabled)
@@ -304,19 +334,14 @@ function internal.moduleHost.create(opts)
         end
     end
 
-    function host.applyOnLoad()
-        requireActivated("applyOnLoad")
-        return hostLifecycle.applyOnLoad(def, mutationBundle, authorHost, store, mutationKey)
-    end
-
     function host.applyMutation()
         requireActivated("applyMutation")
-        return internal.mutation.applyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
+        return internal.mutation.applyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
     end
 
     function host.revertMutation()
         requireActivated("revertMutation")
-        return internal.mutation.revertForPlugin(mutationKey, def, mutationBundle, authorHost, store)
+        return internal.mutation.revertForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
     end
 
     function host.tryActivate()
@@ -342,19 +367,72 @@ function internal.moduleHost.create(opts)
         mutationBundle = mutationBundle,
         pluginGuid = pluginGuid,
         store = store,
-        runtime = runtime,
-        hookOwner = hookOwner,
-        overlayOwner = overlayOwner,
-        mutationKey = mutationKey,
         registerHooks = registerHooks,
         registerIntegrations = registerIntegrations,
         registerOverlays = registerOverlays,
         authorSession = authorSession,
         authorHost = authorHost,
+        effectReceipts = {},
         activated = false,
     }
 
     return host, authorHost
+end
+
+local function callReceipt(receipt, methodName)
+    if not (receipt and type(receipt[methodName]) == "function") then
+        return true, nil
+    end
+
+    local ok, result, err = pcall(receipt[methodName])
+    if not ok then
+        return false, result
+    end
+    if result == false then
+        return false, err
+    end
+    return true, nil
+end
+
+local function warnReceiptDisposal(warningId, warningPrefix, errors)
+    if warningId == "host.retire_failed" then
+        internal.violate("host.retire_failed", "%s: %s", warningPrefix, table.concat(errors, "; "))
+    elseif warningId == "host.activation_rollback_failed" then
+        internal.violate("host.activation_rollback_failed", "%s: %s", warningPrefix, table.concat(errors, "; "))
+    end
+end
+
+local function disposeReceipts(receipts, warningId, warningPrefix)
+    local errors = {}
+    for index = #receipts, 1, -1 do
+        local entry = receipts[index]
+        local ok, err = callReceipt(entry.receipt, "dispose")
+        if not ok then
+            errors[#errors + 1] = tostring(entry.name or "receipt") .. ": " .. tostring(err)
+        end
+    end
+    if #errors > 0 then
+        warnReceiptDisposal(warningId, warningPrefix, errors)
+    end
+    return errors
+end
+
+local function commitReceipt(entry)
+    local ok, err = callReceipt(entry.receipt, "commit")
+    if not ok then
+        return false, tostring(entry.name or "receipt") .. " commit failed: " .. tostring(err)
+    end
+    return true, nil
+end
+
+local function retireOldHost(previousHost, replacementLabel)
+    local oldState = HostState[previousHost]
+    local receipts = oldState and oldState.effectReceipts or nil
+    if type(receipts) ~= "table" or #receipts == 0 then
+        return
+    end
+    disposeReceipts(receipts, "host.retire_failed", tostring(replacementLabel) .. " old host retirement failed")
+    oldState.effectReceipts = {}
 end
 
 --- Activates a constructed module host by registering external side effects.
@@ -367,10 +445,6 @@ function internal.moduleHost.activate(host)
     end
 
     local pluginGuid = state.pluginGuid
-    local hookOwner = state.hookOwner
-    local overlayOwner = state.overlayOwner
-    local mutationKey = state.mutationKey
-    local integrationRefreshOwnerId = state.runtime.integrationRefreshOwnerId
     local registerHooks = state.registerHooks
     local registerIntegrations = state.registerIntegrations
     local registerOverlays = state.registerOverlays
@@ -390,40 +464,30 @@ function internal.moduleHost.activate(host)
     local pendingCoordinatorRebuild = internal.pendingCoordinatorRebuilds[def]
     local hasPendingCoordinatorRebuild = pendingCoordinatorRebuild ~= nil
     local previousHost = internal.liveModuleHosts[pluginGuid]
-    local hadPreviousHost = previousHost ~= nil
-    local hookTransaction = internal.hooks.beginTransaction(hookOwner)
-    local integrationTransaction = internal.integrations.beginTransaction()
-    local overlayTransaction = internal.overlays.beginTransaction(overlayOwner)
+    local candidateReceipts = {}
+    local retireReceipts = {}
+    local published = false
     state.activating = true
 
-    internal.liveModuleHosts[pluginGuid] = host
-    local ok, err = pcall(function()
-        internal.hooks.refresh(hookOwner, function()
-            if registerHooks ~= nil then
-                return registerHooks(authorHost, store)
-            end
-        end)
-        internal.integrations.refresh(integrationRefreshOwnerId, function()
-            if registerIntegrations then
-                return registerIntegrations(authorHost, store)
-            end
-        end)
-        internal.overlays.refresh(overlayOwner, pluginGuid, authorHost, store, function(overlays)
-            if registerOverlays then
-                return registerOverlays(overlays, authorHost, store)
-            end
-        end)
+    local function addReceipt(name, receipt, retire)
+        local entry = {
+            name = name,
+            receipt = receipt,
+        }
+        candidateReceipts[#candidateReceipts + 1] = entry
+        if retire == true then
+            retireReceipts[#retireReceipts + 1] = entry
+        end
+        return entry
+    end
 
-        if not hasPendingCoordinatorRebuild
-            and type(packId) == "string"
-            and packId ~= ""
-            and public.coordinator.isRegistered(packId) then
-            local syncOk, syncErr = hostLifecycle.applyOnLoad(def, state.mutationBundle, authorHost, store, mutationKey)
-            if not syncOk then
-                internal.violate("host.coordinated_runtime_sync_failed", "%s coordinated runtime sync failed: %s",
-                    tostring(meta.name or identity.id or "module"),
-                    tostring(syncErr))
-            end
+    local ok, err = pcall(function()
+        addReceipt("integrations", internal.integrations.installForHost(host, registerIntegrations, authorHost, store), true)
+        addReceipt("hooks", internal.hooks.installForHost(host, registerHooks, authorHost, store), true)
+        addReceipt("overlays", internal.overlays.installForHost(host, registerOverlays, authorHost, store), true)
+
+        if not hasPendingCoordinatorRebuild then
+            addReceipt("mutation", internal.mutation.syncForHost(host, state.mutationBundle, authorHost, store), false)
         elseif hasPendingCoordinatorRebuild then
             local requested = public.coordinator.requestRebuild(packId, pendingCoordinatorRebuild)
             if requested then
@@ -435,26 +499,44 @@ function internal.moduleHost.activate(host)
                     tostring(meta.name or identity.id or "module"))
             end
         end
+
+        for _, entry in ipairs(candidateReceipts) do
+            if entry.name == "mutation" then
+                local commitOk, commitErr = commitReceipt(entry)
+                if not commitOk then
+                    error(commitErr, 0)
+                end
+            end
+        end
+
+        for _, entry in ipairs(candidateReceipts) do
+            if entry.name ~= "mutation" then
+                local commitOk, commitErr = commitReceipt(entry)
+                if not commitOk then
+                    error(commitErr, 0)
+                end
+            end
+        end
+
+        state.effectReceipts = retireReceipts
+        state.activating = false
+        state.activated = true
+        internal.liveModuleHosts[pluginGuid] = host
+        published = true
     end)
 
     if not ok then
         state.activating = false
-        hookTransaction.rollback()
-        integrationTransaction.rollback()
-        overlayTransaction.rollback()
-        if hadPreviousHost then
+        state.activated = false
+        disposeReceipts(candidateReceipts, "host.activation_rollback_failed",
+            tostring(meta.name or identity.id or "module") .. " activation rollback failed")
+        if published then
             internal.liveModuleHosts[pluginGuid] = previousHost
-        else
-            internal.liveModuleHosts[pluginGuid] = nil
         end
         error(err, 0)
     end
 
-    hookTransaction.commit()
-    integrationTransaction.commit()
-    overlayTransaction.commit()
-    state.activating = false
-    state.activated = true
+    retireOldHost(previousHost, meta.name or identity.id or "module")
     return authorHost
 end
 

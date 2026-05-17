@@ -64,16 +64,124 @@ function public.overlays.isUiSuppressed()
     return isUiSuppressed()
 end
 
--- Internal API: snapshot owner-scoped retained declarations so host activation
--- can roll them back if a later activation step fails.
-function internal.overlays.beginTransaction(owner)
-    return retained.beginTransaction(owner)
+local function createAfterHookReceipt(host, paths)
+    if #paths == 0 then
+        return nil
+    end
+
+    return internal.hooks.installForHost(host, function()
+        for _, path in ipairs(paths) do
+            local hookPath = path
+            public.hooks.Wrap(hookPath, "overlay.after:" .. hookPath, function(base, ...)
+                local args = { ... }
+                local results = { base(...) }
+                internal.overlays.dispatchAfterHook(host, hookPath, args, results)
+                return table.unpack(results)
+            end)
+        end
+    end)
 end
 
--- Internal API: rebuild the retained declaration surface for one owner.
--- Used by module host activation and hot reload.
-function internal.overlays.refresh(owner, ownerId, authorHost, store, register)
-    return retained.refresh(owner, ownerId, authorHost, store, register)
+local function disposeReceipt(receipt)
+    if not receipt then
+        return true, nil
+    end
+    return receipt.dispose()
+end
+
+function internal.overlays.installForHost(host, register, authorHost, store)
+    if type(host) ~= "table" then
+        internal.violate("overlays.invalid_registration", "internal.overlays.installForHost: host is required")
+    end
+
+    local state = internal.moduleHost and internal.moduleHost.getState and internal.moduleHost.getState(host) or nil
+    local pluginGuid = state and state.pluginGuid or nil
+    if type(pluginGuid) ~= "string" or pluginGuid == "" then
+        internal.violate("overlays.invalid_registration", "internal.overlays.installForHost: host pluginGuid is required")
+    end
+
+    local stagingOwner = {}
+    local pendingOwnerId = pluginGuid .. ":pending"
+    local currentOwnerId = pluginGuid .. ":current"
+    local transaction = retained.beginTransaction(stagingOwner)
+    local afterHookReceipt = nil
+    local afterHookReceiptCommitted = false
+    local committed = false
+    local disposed = false
+
+    local ok, err = pcall(function()
+        retained.refresh(stagingOwner, pendingOwnerId, authorHost, store, function(overlays)
+            if register then
+                return register(overlays, authorHost, store)
+            end
+        end, { hidden = true })
+        afterHookReceipt = createAfterHookReceipt(host, retained.getAfterHookPaths(stagingOwner))
+    end)
+
+    if not ok then
+        transaction.rollback()
+        error(err, 0)
+    end
+
+    return {
+        commit = function()
+            if disposed or committed then
+                return true, nil
+            end
+            if afterHookReceipt then
+                local hookOk, hookErr = afterHookReceipt.commit()
+                if not hookOk then
+                    return false, hookErr
+                end
+                afterHookReceiptCommitted = true
+            end
+            local clearOk, clearErr = retained.clearTableRegistriesByOwnerId(currentOwnerId, host)
+            if not clearOk then
+                if afterHookReceiptCommitted then
+                    disposeReceipt(afterHookReceipt)
+                    afterHookReceiptCommitted = false
+                end
+                return false, clearErr
+            end
+            transaction.commit()
+            retained.promoteTableRegistry(stagingOwner, host, currentOwnerId, authorHost, store)
+            committed = true
+            return true, nil
+        end,
+        dispose = function()
+            if disposed then
+                return true, nil
+            end
+            if not committed then
+                transaction.rollback()
+                if afterHookReceiptCommitted then
+                    disposeReceipt(afterHookReceipt)
+                    afterHookReceiptCommitted = false
+                end
+                disposed = true
+                return true, nil
+            end
+
+            local disposeTransaction = retained.beginTransaction(host)
+            local disposeOk, disposeErr = pcall(function()
+                retained.refresh(host, currentOwnerId, nil, nil, function() end)
+            end)
+            local hookOk, hookErr = disposeReceipt(afterHookReceipt)
+            afterHookReceiptCommitted = false
+            if disposeOk then
+                disposeTransaction.commit()
+                disposed = true
+                if not hookOk then
+                    return false, hookErr
+                end
+                return true, nil
+            end
+
+            disposeTransaction.rollback()
+            disposed = true
+            return false, disposeErr
+        end,
+    }
 end
 
 -- Internal API: dispatch overlay projections after settings commit.
@@ -91,22 +199,14 @@ function internal.overlays.dispatchAfterHook(owner, path, args, results)
     return retained.dispatchAfterHook(owner, path, args, results)
 end
 
--- Public API: declare retained overlays for Lib/Framework systems that are not
--- owned by a module host.
-function public.overlays.defineOwned(owner, register)
-    if type(owner) ~= "string" or owner == "" then
-        internal.violate("overlays.invalid_registration", "lib.overlays.defineOwned: owner must be a non-empty string")
-    end
-    local transaction = internal.overlays.beginTransaction(owner)
-    local ok, err = pcall(function()
-        internal.overlays.refresh(owner, owner, nil, nil, register)
-    end)
-    if ok then
-        transaction.commit()
-        internal.overlays.dispatchCommit(owner, {})
-        return true
+-- Public API: declare narrow retained HUD lines for Lib/Framework systems that
+-- are not owned by a module host.
+function public.overlays.defineSystem(ownerId, register)
+    if type(ownerId) ~= "string" or ownerId == "" then
+        internal.violate("overlays.invalid_registration", "lib.overlays.defineSystem: ownerId must be a non-empty string")
     end
 
-    transaction.rollback()
-    error(err, 0)
+    retained.refresh(ownerId, ownerId, nil, nil, register, { system = true })
+    internal.overlays.dispatchCommit(ownerId, {})
+    return true
 end

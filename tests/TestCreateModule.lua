@@ -63,8 +63,8 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
     lu.assertEquals(authorRowValue, 2)
-    local runtime = AdamantModpackLib_Internal.moduleRuntime.get("test-create-module")
-    lu.assertEquals(type(runtime.definitionState._definitionStructuralFingerprint), "string")
+    local liveState = AdamantModpackLib_Internal.moduleHost.getState(liveHost)
+    lu.assertEquals(type(liveState.definition._structuralFingerprint), "string")
 end
 
 function TestCreateModule:testCreateModulePassesRuntimeHandlesToHookRefresh()
@@ -194,7 +194,7 @@ function TestCreateModule:testCreateModuleTreatsManualMutationAsUnknownOption()
 end
 
 function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceOnly()
-    lib.createModule({
+    local stableHost = lib.createModule({
         pluginGuid = "test-create-module-quick-content-stable",
         config = {},
         definition = {
@@ -205,6 +205,7 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
         drawTab = function() end,
         drawQuickContent = function() end,
     })
+    stableHost.tryActivate()
 
     lib.createModule({
         pluginGuid = "test-create-module-quick-content-stable",
@@ -218,11 +219,9 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
         drawQuickContent = function() end,
     })
 
-    local firstRuntime = AdamantModpackLib_Internal.moduleRuntime.get("test-create-module-quick-content-stable")
-    lu.assertNil(firstRuntime.definitionState.requiresFullReload)
     lu.assertEquals(#Warnings, 0)
 
-    lib.createModule({
+    local addedHost = lib.createModule({
         pluginGuid = "test-create-module-quick-content-added",
         config = {},
         definition = {
@@ -232,6 +231,7 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
         },
         drawTab = function() end,
     })
+    addedHost.tryActivate()
 
     lib.createModule({
         pluginGuid = "test-create-module-quick-content-added",
@@ -245,8 +245,6 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
         drawQuickContent = function() end,
     })
 
-    local secondRuntime = AdamantModpackLib_Internal.moduleRuntime.get("test-create-module-quick-content-added")
-    lu.assertTrue(secondRuntime.definitionState.requiresFullReload)
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
 end

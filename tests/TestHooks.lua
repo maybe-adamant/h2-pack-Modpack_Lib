@@ -125,16 +125,17 @@ end
 
 function TestHooks:testWrapRegistersOnceAndUpdatesHandler()
     local counts = installPathMock()
-    local owner = {}
     _G.AdamantHookTestWrap = function(value)
         return "base:" .. value
     end
 
-    lib.hooks.WrapOwned(owner, "AdamantHookTestWrap", function(base, value)
-        return "first:" .. base(value)
-    end)
-    lib.hooks.WrapOwned(owner, "AdamantHookTestWrap", function(base, value)
-        return "second:" .. base(value)
+    createHostWithHooks("hook-test-wrap-update", function()
+        lib.hooks.Wrap("AdamantHookTestWrap", function(base, value)
+            return "first:" .. base(value)
+        end)
+        lib.hooks.Wrap("AdamantHookTestWrap", function(base, value)
+            return "second:" .. base(value)
+        end)
     end)
 
     lu.assertEquals(counts.wrap, 1)
@@ -144,14 +145,15 @@ end
 
 function TestHooks:testWrapResolvesModUtilFromRomModsWhenGlobalIsMissing()
     local counts = installPathMock()
-    local owner = {}
     modutil = nil
     _G.AdamantHookTestWrapRomMods = function(value)
         return "base:" .. value
     end
 
-    lib.hooks.WrapOwned(owner, "AdamantHookTestWrapRomMods", function(base, value)
-        return "wrapped:" .. base(value)
+    createHostWithHooks("hook-test-wrap-rom-mods", function()
+        lib.hooks.Wrap("AdamantHookTestWrapRomMods", function(base, value)
+            return "wrapped:" .. base(value)
+        end)
     end)
 
     lu.assertEquals(counts.wrap, 1)
@@ -201,6 +203,70 @@ function TestHooks:testMissingRegisterHooksRefreshRemovesPreviousHooks()
     restorePathMock()
 end
 
+function TestHooks:testRetiredHookHostPrunesDeadDispatcherPluginEntries()
+    local counts = installPathMock()
+    local pluginGuid = "hook-test-prune-dispatcher"
+    local path = "AdamantHookTestPruneDispatcher"
+    _G[path] = function(value)
+        return "base:" .. value
+    end
+
+    createHostWithHooks(pluginGuid, function()
+        lib.hooks.Wrap(path, function(base, value)
+            return "first:" .. base(value)
+        end)
+    end)
+    local dispatcher = AdamantModpackLib_Internal.hooks.moduleDispatchers.wrap[path]
+
+    lu.assertNotNil(dispatcher)
+    lu.assertEquals(dispatcher.pluginOrder, { pluginGuid })
+    lu.assertNotNil(dispatcher.handlers[pluginGuid])
+    lu.assertEquals(_G[path]("x"), "first:base:x")
+
+    createHostWithHooks(pluginGuid, nil)
+
+    lu.assertEquals(_G[path]("x"), "base:x")
+    lu.assertEquals(dispatcher.pluginOrder, {})
+    lu.assertNil(dispatcher.pluginSeen[pluginGuid])
+    lu.assertNil(dispatcher.handlers[pluginGuid])
+    lu.assertNil(AdamantModpackLib_Internal.hooks.moduleSlots[pluginGuid])
+
+    createHostWithHooks(pluginGuid, function()
+        lib.hooks.Wrap(path, function(base, value)
+            return "second:" .. base(value)
+        end)
+    end)
+
+    lu.assertEquals(counts.wrap, 1)
+    lu.assertEquals(dispatcher.pluginOrder, { pluginGuid })
+    lu.assertEquals(_G[path]("x"), "second:base:x")
+    restorePathMock()
+end
+
+function TestHooks:testRetiredOverrideHostPrunesEmptyDispatcherPath()
+    installPathMock()
+    local pluginGuid = "hook-test-prune-override-dispatcher"
+    local path = "AdamantHookTestPruneOverrideDispatcher"
+    _G[path] = function()
+        return "base"
+    end
+
+    createHostWithHooks(pluginGuid, function()
+        lib.hooks.Override(path, function()
+            return "override"
+        end)
+    end)
+
+    lu.assertNotNil(AdamantModpackLib_Internal.hooks.moduleDispatchers.override[path])
+    lu.assertEquals(_G[path](), "override")
+
+    createHostWithHooks(pluginGuid, nil)
+
+    lu.assertEquals(_G[path](), "base")
+    lu.assertNil(AdamantModpackLib_Internal.hooks.moduleDispatchers.override[path])
+    restorePathMock()
+end
+
 function TestHooks:testRegisterHooksCanUseOwnerlessHookApi()
     installPathMock()
     local pluginGuid = "hook-test-ownerless-wrap"
@@ -228,18 +294,36 @@ function TestHooks:testOwnerlessHookApiRequiresActiveRegistrationContext()
     lu.assertFalse(ok)
 end
 
+function TestHooks:testOverrideRequiresFunctionReplacement()
+    installPathMock()
+    _G.AdamantHookTestOverrideFunctionRequired = function()
+        return "base"
+    end
+
+    local ok = pcall(function()
+        createHostWithHooks("hook-test-override-function-required", function()
+            lib.hooks.Override("AdamantHookTestOverrideFunctionRequired", "not-a-function")
+        end)
+    end)
+
+    lu.assertFalse(ok)
+    lu.assertEquals(_G.AdamantHookTestOverrideFunctionRequired(), "base")
+    restorePathMock()
+end
+
 function TestHooks:testOverrideFunctionRegistersOnceAndUpdatesReplacement()
     local counts = installPathMock()
-    local owner = {}
     _G.AdamantHookTestOverride = function()
         return "base"
     end
 
-    lib.hooks.OverrideOwned(owner, "AdamantHookTestOverride", function()
-        return "first"
-    end)
-    lib.hooks.OverrideOwned(owner, "AdamantHookTestOverride", function()
-        return "second"
+    createHostWithHooks("hook-test-override-update", function()
+        lib.hooks.Override("AdamantHookTestOverride", function()
+            return "first"
+        end)
+        lib.hooks.Override("AdamantHookTestOverride", function()
+            return "second"
+        end)
     end)
 
     lu.assertEquals(counts.override, 1)
@@ -271,18 +355,19 @@ end
 
 function TestHooks:testContextWrapRegistersOnceAndUpdatesContext()
     local counts = installPathMock()
-    local owner = {}
     local observed = {}
 
     _G.AdamantHookTestContext = function()
         table.insert(observed, "base")
     end
 
-    lib.hooks.Context.WrapOwned(owner, "AdamantHookTestContext", function()
-        table.insert(observed, "first")
-    end)
-    lib.hooks.Context.WrapOwned(owner, "AdamantHookTestContext", function()
-        table.insert(observed, "second")
+    createHostWithHooks("hook-test-context-update", function()
+        lib.hooks.Context.Wrap("AdamantHookTestContext", function()
+            table.insert(observed, "first")
+        end)
+        lib.hooks.Context.Wrap("AdamantHookTestContext", function()
+            table.insert(observed, "second")
+        end)
     end)
 
     _G.AdamantHookTestContext()
@@ -410,6 +495,47 @@ function TestHooks:testActivationFailureAfterHookRefreshRestoresPreviousLiveHook
 
     lu.assertFalse(ok)
     lu.assertEquals(_G.AdamantHookTestActivationRollback("x"), "first:base:x")
+    restorePathMock()
+end
+
+function TestHooks:testHookCommitFailureRemovesPartiallyInstalledCandidateSlots()
+    installPathMock()
+    local pluginGuid = "hook-test-partial-commit-rollback"
+    local wrapPath = "AdamantHookTestPartialCommitWrap"
+    local overridePath = "AdamantHookTestPartialCommitOverride"
+    _G[wrapPath] = function(value)
+        return "base:" .. value
+    end
+    _G[overridePath] = function()
+        return "base-override"
+    end
+
+    createHostWithHooks(pluginGuid, function()
+        lib.hooks.Wrap(wrapPath, function(base, value)
+            return "first:" .. base(value)
+        end)
+    end)
+
+    modutil.mod.Path.Override = function()
+        error("override install boom")
+    end
+    if rom and rom.mods then
+        rom.mods["SGG_Modding-ModUtil"] = modutil
+    end
+
+    local ok = pcall(function()
+        createHostWithHooks(pluginGuid, function()
+            lib.hooks.Wrap(wrapPath, function(base, value)
+                return "candidate:" .. base(value)
+            end)
+            lib.hooks.Override(overridePath, function()
+                return "candidate-override"
+            end)
+        end)
+    end)
+
+    lu.assertFalse(ok)
+    lu.assertEquals(_G[wrapPath]("x"), "first:base:x")
     restorePathMock()
 end
 

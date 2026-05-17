@@ -4,10 +4,11 @@ public.mutation = public.mutation or {}
 internal.mutation = internal.mutation or {}
 
 AdamantModpackLib_MutationState = AdamantModpackLib_MutationState or {
-    moduleRuntime = {},
+    pluginRuntime = {},
     planExecutors = setmetatable({}, { __mode = "k" }),
 }
 local mutationState = AdamantModpackLib_MutationState
+mutationState.pluginRuntime = mutationState.pluginRuntime or {}
 mutationState.planExecutors = mutationState.planExecutors or setmetatable({}, { __mode = "k" })
 
 local values = internal.values
@@ -279,7 +280,7 @@ local function GetRuntimeKey(pluginGuid)
     if type(pluginGuid) ~= "string" or pluginGuid == "" then
         internal.violate("mutation.invalid_runtime_key", "mutation lifecycle requires pluginGuid")
     end
-    return "plugin:" .. pluginGuid, mutationState.moduleRuntime
+    return "plugin:" .. pluginGuid, mutationState.pluginRuntime
 end
 
 local function GetRuntimeState(pluginGuid)
@@ -339,6 +340,24 @@ local function BuildMutationPlan(mutationBundle, authorHost, store)
     local plan = public.mutation.createPlan()
     builder(plan, authorHost, store)
     return plan
+end
+
+local function IsEnabledForSync(def, store)
+    local packId = def and def.modpack or nil
+    local coord = packId and internal.coordinators and internal.coordinators[packId] or nil
+    if coord and not coord.ModEnabled then
+        return false
+    end
+    if not store then
+        return false
+    end
+    return store.read("Enabled") == true
+end
+
+local function SetupRunData()
+    if rom and rom.game and type(rom.game.SetupRunData) == "function" then
+        rom.game.SetupRunData()
+    end
 end
 
 local function RevertActivePlan(pluginGuid)
@@ -439,6 +458,126 @@ function internal.mutation.applyForPlugin(pluginGuid, def, mutationBundle, autho
     return ApplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
 end
 
+function internal.mutation.syncForHost(host, mutationBundle, authorHost, store)
+    local hostState = internal.moduleHost and internal.moduleHost.getState and internal.moduleHost.getState(host) or nil
+    if not hostState then
+        internal.violate("mutation.invalid_runtime_key", "mutation sync requires a module host")
+    end
+
+    local pluginGuid = hostState.pluginGuid
+    local def = hostState.definition
+    local enabled = IsEnabledForSync(def, store)
+    local inferred, info = InferMutation(mutationBundle)
+    local affectsRunData = internal.mutation.affectsRunData(mutationBundle)
+    local defLabel = def and (def.name or def.id) or "module"
+    local candidatePlan = nil
+
+    if enabled then
+        if not inferred then
+            if affectsRunData then
+                error(tostring(defLabel) .. ": no supported mutation lifecycle found", 0)
+            end
+        elseif info.hasPatch then
+            candidatePlan = BuildMutationPlan(mutationBundle, authorHost, store)
+        end
+    end
+
+    local previousMutation = CaptureActiveMutation(pluginGuid)
+    local committed = false
+    local disposed = false
+    local revertedPrevious = false
+    local appliedCandidate = false
+    local setupRan = false
+
+    local function restorePrevious(primaryErr, recompute)
+        local rollbackErrors = {}
+
+        if appliedCandidate and candidatePlan then
+            local okRevert, errRevert = pcall(internal.mutation.revertPlan, candidatePlan)
+            if not okRevert then
+                rollbackErrors[#rollbackErrors + 1] = "candidate revert failed: " .. tostring(errRevert)
+            end
+            SetActiveMutationPlan(pluginGuid, nil)
+            appliedCandidate = false
+        end
+
+        if HasActiveMutationSnapshot(previousMutation) then
+            local okRestore, errRestore = RestoreActiveMutation(pluginGuid, previousMutation)
+            if not okRestore then
+                rollbackErrors[#rollbackErrors + 1] = "previous mutation restore failed: " .. tostring(errRestore)
+            end
+        end
+
+        if recompute then
+            local okSetup, errSetup = pcall(SetupRunData)
+            if not okSetup then
+                rollbackErrors[#rollbackErrors + 1] = "rollback recompute failed: " .. tostring(errSetup)
+            end
+        end
+
+        if #rollbackErrors > 0 then
+            if primaryErr ~= nil then
+                return false, tostring(primaryErr) .. " (" .. table.concat(rollbackErrors, "; ") .. ")"
+            end
+            return false, table.concat(rollbackErrors, "; ")
+        end
+        if primaryErr ~= nil then
+            return false, primaryErr
+        end
+        return true, nil
+    end
+
+    return {
+        commit = function()
+            if disposed or committed then
+                return true, nil
+            end
+
+            local okRevert, errRevert, didRevert = RevertActiveMutation(pluginGuid)
+            if not okRevert then
+                return false, errRevert
+            end
+            revertedPrevious = didRevert == true
+
+            if candidatePlan then
+                local okApply, errApply = pcall(internal.mutation.applyPlan, candidatePlan)
+                if not okApply then
+                    return restorePrevious(errApply, revertedPrevious)
+                end
+                SetActiveMutationPlan(pluginGuid, candidatePlan)
+                appliedCandidate = true
+            end
+
+            if revertedPrevious or appliedCandidate then
+                local okSetup, errSetup = pcall(SetupRunData)
+                if not okSetup then
+                    return restorePrevious(errSetup, true)
+                end
+                setupRan = true
+            end
+
+            committed = true
+            return true, nil
+        end,
+        dispose = function()
+            if disposed then
+                return true, nil
+            end
+            if committed then
+                local okRestore, errRestore = restorePrevious(nil, setupRan or revertedPrevious or appliedCandidate)
+                disposed = true
+                if not okRestore then
+                    return false, errRestore
+                end
+                return true, nil
+            end
+
+            disposed = true
+            return true, nil
+        end,
+    }
+end
+
 --- Reverts any active tracked mutation state without invoking fallback lifecycle hooks.
 ---@param pluginGuid string Stable plugin guid owning the active mutation slot.
 ---@return boolean ok True when active mutation state was absent or reverted successfully.
@@ -495,17 +634,7 @@ end
 ---@return boolean ok True when the mutation lifecycle reapplied successfully.
 ---@return string|nil err Error message when the reapply step fails.
 local function ReapplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
-    local okRevert, errRevert = RevertMutation(pluginGuid, def, mutationBundle, authorHost, store)
-    if not okRevert then
-        return false, errRevert
-    end
-
-    local okApply, errApply = ApplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
-    if not okApply then
-        return false, errApply
-    end
-
-    return true, nil
+    return ApplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
 end
 
 function internal.mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)

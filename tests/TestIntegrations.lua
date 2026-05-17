@@ -6,15 +6,12 @@ function TestIntegrations:setUp()
     lib.integrations.unregisterProvider("ProviderA")
     lib.integrations.unregisterProvider("ProviderB")
     lib.integrations.unregisterProvider("ProviderC")
-    lib.integrations.unregisterProvider("LifecycleProvider")
 end
 
 function TestIntegrations:tearDown()
     lib.integrations.unregisterProvider("ProviderA")
     lib.integrations.unregisterProvider("ProviderB")
     lib.integrations.unregisterProvider("ProviderC")
-    lib.integrations.unregisterProvider("RefreshProvider")
-    lib.integrations.unregisterProvider("LifecycleProvider")
 end
 
 function TestIntegrations:testRegisterAndGetIntegration()
@@ -166,67 +163,30 @@ function TestIntegrations:testUnregisterProviderRemovesProviderAcrossIntegration
     lu.assertEquals(providerId, "ProviderB")
 end
 
-function TestIntegrations:testRefreshRemovesOmittedProviderRegistrations()
-    lib.integrations.unregisterProvider("RefreshProvider")
+function TestIntegrations:testHostInstallStagesProvidersUntilCommit()
+    local id = "test.host.stage"
+    local providerId = "StagedProvider"
+    local previous = { value = "previous" }
+    local replacement = { value = "replacement" }
+    lib.integrations.register(id, providerId, previous)
 
-    AdamantModpackLib_Internal.integrations.refresh("RefreshProvider", function()
-        lib.integrations.register("test.refresh.one", "RefreshProvider", { value = 1 })
-        lib.integrations.register("test.refresh.two", "RefreshProvider", { value = 2 })
+    local observedDuringInstall = nil
+    local receipt = AdamantModpackLib_Internal.integrations.installForHost({}, function()
+        lib.integrations.register(id, providerId, replacement)
+        observedDuringInstall = lib.integrations.get(id)
     end)
 
-    lu.assertNotNil(lib.integrations.get("test.refresh.one"))
-    lu.assertNotNil(lib.integrations.get("test.refresh.two"))
+    lu.assertEquals(observedDuringInstall, previous)
+    lu.assertEquals(lib.integrations.get(id), previous)
 
-    AdamantModpackLib_Internal.integrations.refresh("RefreshProvider", function()
-        lib.integrations.register("test.refresh.two", "RefreshProvider", { value = 3 })
-    end)
+    local ok, err = receipt.commit()
+    lu.assertTrue(ok, tostring(err))
+    lu.assertEquals(lib.integrations.get(id), replacement)
 
-    lu.assertNil(lib.integrations.get("test.refresh.one"))
-    local found, providerId = lib.integrations.get("test.refresh.two")
-    lu.assertEquals(found.value, 3)
-    lu.assertEquals(providerId, "RefreshProvider")
-
-    lib.integrations.unregisterProvider("RefreshProvider")
-end
-
-function TestIntegrations:testRefreshOwnerCanDifferFromProviderId()
-    local refreshOwnerId = "plugin-guid.integration-owner"
-
-    AdamantModpackLib_Internal.integrations.refresh(refreshOwnerId, function()
-        lib.integrations.register("test.refresh.lifecycle-owner", "LifecycleProvider", { value = 1 })
-    end)
-
-    local found, providerId = lib.integrations.get("test.refresh.lifecycle-owner")
-    lu.assertEquals(found.value, 1)
-    lu.assertEquals(providerId, "LifecycleProvider")
-
-    AdamantModpackLib_Internal.integrations.refresh(refreshOwnerId, function() end)
-
-    lu.assertNil(lib.integrations.get("test.refresh.lifecycle-owner"))
-end
-
-function TestIntegrations:testFailedRefreshKeepsPreviousProviderRegistrations()
-    lib.integrations.unregisterProvider("RefreshProvider")
-
-    AdamantModpackLib_Internal.integrations.refresh("RefreshProvider", function()
-        lib.integrations.register("test.refresh.one", "RefreshProvider", { value = 1 })
-    end)
-
-    local transaction = AdamantModpackLib_Internal.integrations.beginTransaction()
-    lu.assertErrorMsgContains("refresh boom", function()
-        AdamantModpackLib_Internal.integrations.refresh("RefreshProvider", function()
-            lib.integrations.register("test.refresh.two", "RefreshProvider", { value = 2 })
-            error("refresh boom")
-        end)
-    end)
-    transaction.rollback()
-
-    local foundOne, providerOne = lib.integrations.get("test.refresh.one")
-    lu.assertEquals(foundOne.value, 1)
-    lu.assertEquals(providerOne, "RefreshProvider")
-    lu.assertNil(lib.integrations.get("test.refresh.two"))
-
-    lib.integrations.unregisterProvider("RefreshProvider")
+    ok, err = receipt.dispose()
+    lu.assertTrue(ok, tostring(err))
+    lu.assertEquals(lib.integrations.get(id), previous)
+    lib.integrations.unregisterProvider(providerId)
 end
 
 function TestIntegrations:testMissingIntegrationReturnsNilAndEmptyList()

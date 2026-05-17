@@ -57,6 +57,75 @@ What would remove it:
 - host methods routed through stable late-bound Lib dispatch
 - an explicit infrastructure reload protocol that forces module and Framework convergence
 
+## Host Activation Rollback Covers Managed Effects Only
+
+Lib host activation is designed to keep the old live host active until the replacement host has usable managed runtime effects.
+
+What this means in practice:
+
+- failed activation preserves the old live host when rollback succeeds
+- Lib-managed hooks, integrations, overlays, patch mutation state, and live-host publication participate in activation cleanup
+- omitted managed registrations are cleaned up during successful module reload
+- direct module writes to game globals, ROM APIs, ModUtil APIs, or other public environment state are outside Lib rollback
+- system overlays are trusted first-party infrastructure, not a general transactional owner surface
+
+Why this exists:
+
+- Lua modules cannot be physically sandboxed from game globals or platform APIs
+- ModUtil and ROM do not expose complete undo handles for every possible side effect
+- making every subsystem independently transactional would add more complexity than the supported module hot-reload path justifies
+- system overlays exist only for narrow Lib/Framework HUD lines and avoid exposing a broad owner-token escape hatch
+
+What would remove it:
+
+- a stricter sandboxed module execution environment
+- platform APIs that provide reliable undo handles for all runtime effects
+- or a project decision to trade substantially more internal complexity for recovery from obscure broken dev-reload states
+
+## Standalone UI Attachment Is Callsite-Bound
+
+Standalone module UI uses stable callbacks from `lib.standaloneUiBridge(pluginGuid)`, but the ROM GUI callback attachment still belongs in module code.
+
+What this means in practice:
+
+- `rom.gui.add_imgui(...)` and `rom.gui.add_to_menu_bar(...)` must run from the module's own callsite
+- Lib can swap the runtime behind the bridge after `host.tryActivate()`
+- Lib cannot fully fold ROM GUI callback attachment into host activation
+- standalone runtime cleanup is host-owned after activation, but the original ROM callback attachment is not an activation receipt
+
+Why this exists:
+
+- ROM associates GUI callbacks with the module callsite that performs the attachment
+- shared Lib code cannot attach GUI callbacks on behalf of an arbitrary feature module even when it has that module's `pluginGuid`
+
+What would remove it:
+
+- a ROM API that lets Lib attach GUI callbacks for an explicit plugin identity
+- or a public Lib API that moves all standalone UI declaration into module host construction and no longer requires module-owned ROM GUI registration
+
+## Mutation Recompute Is Per Operation And Best-Effort
+
+Patch-plan mutation edits raw game tables, then Lib asks the game to recompute derived run data with `SetupRunData()`.
+
+What this means in practice:
+
+- v1 has no mutation batch mode; each activation, profile load, enable/disable, or session/runtime transition owns its own recompute
+- `SetupRunData()` is treated as a trusted base-game recompute boundary, not an atomic commit primitive
+- if candidate mutation activation fails, Lib attempts to restore the prior raw patch state and keep the old host live
+- if the base-game recompute or rollback recompute fails, derived game state can be uncertain until restart or another clean game recompute
+
+Why this exists:
+
+- game data table edits and live derived run-data refresh are separate operations
+- `SetupRunData()` is base-game behavior, not Lib-owned transaction machinery
+- batching recomputes would add coordination complexity before the simpler per-operation model has demonstrated a real bottleneck
+
+What would remove it:
+
+- a base-game or ROM-provided atomic run-data transaction API
+- a demonstrated performance or correctness need for mutation batch mode
+- or a broader runtime coordinator that intentionally batches multiple module mutation transitions
+
 ## Private Module `internal` Usage Is Convention-Driven
 
 Lib provides clean state funnels for module authors:
@@ -106,7 +175,7 @@ What would remove it:
 
 ## Some Removed Hooks Can Leave Inert Wrappers
 
-Lib hook dispatch prevents normal hot reload from stacking active wrappers for stable owner/path/key registrations.
+Lib hook dispatch prevents normal hot reload from stacking active wrappers for stable pluginGuid/path/key registrations.
 
 One development-only caveat remains: if the same wrap or context-wrap site is removed, hot reloaded, re-added, and hot reloaded again within one live game process, an inert wrapper can remain until restart.
 

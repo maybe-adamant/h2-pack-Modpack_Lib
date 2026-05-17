@@ -10,9 +10,11 @@ All notable changes to this project will be documented in this file.
 - Removed old `configKey`, `lifetime`, and `runtime` storage declaration compatibility in favor of explicit `persist`, `stage`, and `hash` axes.
 - Lib now injects `Enabled` and `DebugMode` as built-in prepared storage aliases instead of requiring module-authored config defaults.
 - Module definitions now require both stable `id` and display `name`; `modpack` remains optional.
-- Module callbacks receive the author host consistently: `registerHooks(host, store)`, `registerIntegrations(host, store)`, `registerPatchMutation(plan, host, store)`, manual mutation `apply(host, store)` / `revert(host, store)`, `onSettingsCommitted(host, store, commit)`, `drawTab(imgui, session, host)`, and `drawQuickContent(imgui, session, host)`.
+- Module callbacks receive the author host consistently: `registerHooks(host, store)`, `registerIntegrations(host, store)`, `registerOverlays(overlays, host, store)`, `registerPatchMutation(plan, host, store)`, `onSettingsCommitted(host, store, commit)`, `drawTab(imgui, session, host)`, and `drawQuickContent(imgui, session, host)`.
 - Module authors now construct through `lib.createModule(...)` / `lib.tryCreateModule(...)` and activate through `host.tryActivate()`; lower-level definition/state/host construction is internal.
-- Host activation now refreshes hook and integration generations transactionally so omitted hook/integration registrations are removed on reload and late activation failures roll back refreshed hook state.
+- Host activation now stages and commits hooks, integrations, overlays, and mutation sync through host-owned receipts, so omitted registrations are removed on reload and activation failures roll back candidate effects.
+- `lib.hooks.Override(...)` now accepts function replacements only, matching the host-owned dispatcher model.
+- Retired separate internal lifecycle design notes; accepted lifecycle tradeoffs now live in `docs/KNOWN_LIMITATIONS.md`.
 - Persistent runtime-cache module state is now declared with `stage = false, hash = false`, read through `store.read(...)`, and written through `store.writeUnstaged(...)`.
 - Added first-class table storage roots with row-scoped aliases, staged table handles, read-only store table handles, packed child row access, and hash/profile serialization.
 - Table storage handles use colon method syntax, such as `tiers:read(rowIndex, alias)`.

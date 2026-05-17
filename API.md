@@ -406,7 +406,7 @@ Options:
 Reload-stable wrappers around ModUtil path hooks.
 
 Hosted modules normally call ownerless hook APIs inside `registerHooks(...)`.
-Lib scopes those calls to the module's Lib-owned runtime slot for its `pluginGuid`.
+Lib scopes those calls to the activating host for its `pluginGuid`.
 
 ### `lib.hooks.Wrap(path, handler)`
 
@@ -424,7 +424,9 @@ Registers or updates a stable `modutil.mod.Path.Override(...)`.
 Also supports:
 - `lib.hooks.Override(path, key, replacement)`
 
-Function replacements are dispatched through a stable wrapper so reloading updates behavior without stacking another override.
+`replacement` must be a function. Function replacements are dispatched through
+a stable wrapper so reloading updates behavior without stacking another
+override.
 
 ### `lib.hooks.Context.Wrap(path, context)`
 
@@ -433,11 +435,8 @@ Registers or updates a stable `modutil.mod.Path.Context.Wrap(...)` dispatcher.
 Also supports:
 - `lib.hooks.Context.Wrap(path, key, context)`
 
-Infrastructure and non-hosted code can use explicit-owner variants. Module
-authors should prefer the ownerless APIs inside `registerHooks(...)`.
-- `lib.hooks.WrapOwned(owner, path, handler)`
-- `lib.hooks.OverrideOwned(owner, path, replacement)`
-- `lib.hooks.Context.WrapOwned(owner, path, context)`
+These APIs are only valid inside `registerHooks(...)`. Lib-owned physical
+dispatchers are private infrastructure, not a public owner-token surface.
 
 ### Typical module pattern
 
@@ -475,7 +474,7 @@ When `host.tryActivate()` runs with `registerHooks`, activation runs the registr
 
 ## `lib.overlays`
 
-Owner-scoped retained HUD projections for shared overlay placement.
+Host-scoped module overlays and system-scoped retained HUD projections for shared overlay placement.
 
 Overlay visibility has two layers:
 - Lib applies a global game-HUD gate, currently based on `ShowingCombatUI`.
@@ -519,7 +518,7 @@ registerOverlays = function(overlays, host, store)
 end
 ```
 
-Retained element names are local to the module's `pluginGuid` runtime slot and do not collide across modules.
+Retained element names are local to the module's `pluginGuid` host lifecycle and do not collide across modules.
 
 ### `overlays.createLine(name, spec)`
 
@@ -588,12 +587,15 @@ The projection context exposes read-only helpers plus named retained updates:
 - `ctx.refreshRegion(region)`
 - `ctx.refreshAll()`
 
-### `lib.overlays.defineOwned(owner, register)`
+### `lib.overlays.defineSystem(ownerId, register)`
 
-Declares retained overlays for Lib/Framework systems that are not module-owned.
+Declares narrow retained HUD lines for Lib/Framework systems that are not
+module-owned. The system registrar supports `createLine(...)` and
+`onCommit(...)`; module-only projection events such as `onInterval(...)` and
+`afterHook(...)` are intentionally not exposed.
 
 ```lua
-lib.overlays.defineOwned("adamant-framework.pack.hud", function(overlays)
+lib.overlays.defineSystem("adamant-framework.pack.hud", function(overlays)
     overlays.createLine("hash", {
         region = "middleRightStack",
         minWidth = 120,
@@ -700,7 +702,7 @@ Registers a Framework rebuild callback for a coordinated pack.
 
 Requests a coordinated pack rebuild after a structural module change.
 
-Enabled/debug transitions, startup mutation sync, and session commit/resync are host responsibilities. Use the returned module host surface (`host.setEnabled`, `host.setDebugMode`, `host.applyOnLoad`, `host.flush`, `host.resync`) instead of calling internals directly.
+Enabled/debug transitions, activation-time mutation sync, and session commit/resync are host responsibilities. Use the returned module host surface (`host.setEnabled`, `host.setDebugMode`, `host.flush`, `host.resync`) instead of calling internals directly.
 
 ## Standalone Host
 
@@ -720,7 +722,7 @@ Returned surface:
 
 Behavior:
 - resolves the module's live host through the explicit `pluginGuid`
-- applies startup mutation state for non-coordinated modules
+- uses the activation-synced live host state; it does not run a separate mutation startup pass
 - suppresses the standalone window/menu when the module is coordinated
 - releases overlay suppression when the host ImGui layer is hidden globally, matching Framework-hosted UI behavior
 - renders built-in controls for:

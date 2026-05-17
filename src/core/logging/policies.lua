@@ -78,10 +78,6 @@ return {
         severity = "error",
         description = "Standalone hosting requires a plugin guid with a registered live module host.",
     },
-    ["host.coordinated_runtime_sync_failed"] = {
-        severity = "warn",
-        description = "A coordinated module failed its runtime on-load reconciliation.",
-    },
     ["host.enable_transition_failed"] = {
         severity = "warn",
         description = "A module enable/disable transition failed and the UI state may need resync.",
@@ -89,10 +85,6 @@ return {
     ["host.session_commit_failed"] = {
         severity = "warn",
         description = "A UI session commit failed and Lib attempted to restore the previous config state.",
-    },
-    ["host.standalone_startup_lifecycle_failed"] = {
-        severity = "warn",
-        description = "Standalone startup lifecycle failed while applying module behavior.",
     },
     ["host.structural_rebuild_unavailable"] = {
         severity = "error",
@@ -105,6 +97,14 @@ return {
     ["host.activate_failed"] = {
         severity = "warn",
         description = "Safe module activation failed; the caller may skip this module and continue loading siblings.",
+    },
+    ["host.activation_rollback_failed"] = {
+        severity = "warn",
+        description = "Candidate activation rollback had secondary cleanup failures.",
+    },
+    ["host.retire_failed"] = {
+        severity = "warn",
+        description = "Old host resource retirement had cleanup failures after a replacement host was published.",
     },
 
     ["hooks.invalid_registration"] = {

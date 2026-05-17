@@ -7,10 +7,11 @@ module-authored `owner` tokens.
 
 - `lib.createModule(...)` and `lib.tryCreateModule(...)` no longer accept
   `owner`.
-- `pluginGuid` is the single stable lifecycle identity for a module host.
-- Lib owns the internal per-plugin runtime slot used for structural hot-reload
-  tracking, hook refresh ownership, overlay ownership, integration refresh,
-  mutation runtime, and live-host lookup.
+- `pluginGuid` is the stable lookup identity for a module host.
+- The committed host is the managed lifecycle owner for hooks, overlays,
+  integrations, activation metadata, and structural hot-reload comparison.
+- Mutation runtime is still plugin-scoped because raw game-table edits are
+  process-global.
 - `definition.id` remains the module's domain/UI/profile/hash identity.
 - `modpack` remains coordinator grouping.
 
@@ -63,8 +64,9 @@ end
 ```
 
 Lib scopes those declarations to the module's `pluginGuid`. Explicit-owned APIs
-such as `lib.hooks.WrapOwned(...)` and `lib.overlays.defineOwned(...)` remain
-for Lib, Framework, and advanced system-owned surfaces.
+were retired for normal authoring. Lib and Framework infrastructure should use
+the narrow `lib.overlays.defineSystem(...)` HUD-line surface instead of general
+owner tokens.
 
 ## Integration Notes
 

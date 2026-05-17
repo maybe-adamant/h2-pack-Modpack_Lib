@@ -33,6 +33,19 @@ local function ValidateKnownOpts(opts)
     end
 end
 
+local function GetStructuralBaseline(pluginGuid)
+    local previousHost = internal.liveModuleHosts and internal.liveModuleHosts[pluginGuid] or nil
+    local previousState = internal.moduleHost.getState(previousHost)
+    local previousDefinition = previousState and previousState.definition or nil
+    local previousFingerprint = previousDefinition and previousDefinition._structuralFingerprint or nil
+    if previousFingerprint == nil then
+        return nil
+    end
+    return {
+        _definitionStructuralFingerprint = previousFingerprint,
+    }
+end
+
 --- Creates a module through the canonical prepare -> store -> host pipeline.
 --- Call `host.tryActivate()` after construction.
 ---@param opts ModuleCreateOpts
@@ -50,8 +63,7 @@ function public.createModule(opts)
         internal.violate("host.invalid_create_opts", "createModule: pluginGuid is required")
     end
 
-    local runtime = internal.moduleRuntime.get(opts.pluginGuid)
-    local definition = internal.moduleHost.prepareDefinition(runtime.definitionState, opts.definition, {
+    local definition = internal.moduleHost.prepareDefinition(GetStructuralBaseline(opts.pluginGuid), opts.definition, {
         hasQuickContent = type(opts.drawQuickContent) == "function",
     })
     local state = internal.moduleState.create(opts.config, definition)

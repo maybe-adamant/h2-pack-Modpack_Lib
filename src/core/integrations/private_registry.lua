@@ -2,16 +2,10 @@ local internal = AdamantModpackLib_Internal
 
 internal.integrations = internal.integrations or {
     registry = {},
-    providerRegistry = {},
-    transactions = {},
 }
 internal.integrations.registry = internal.integrations.registry or {}
-internal.integrations.providerRegistry = internal.integrations.providerRegistry or {}
-internal.integrations.transactions = internal.integrations.transactions or {}
 
 local registry = internal.integrations.registry
-local providerRegistry = internal.integrations.providerRegistry
-local transactions = internal.integrations.transactions
 
 local function GetRegistry()
     return registry
@@ -22,19 +16,29 @@ local function GetBucket(id, create)
     if not bucket and create then
         bucket = {
             providers = {},
+            owners = {},
             order = {},
         }
         registry[id] = bucket
     end
+    if bucket then
+        bucket.owners = bucket.owners or {}
+    end
     return bucket
 end
 
-local function RemoveProviderFromBucket(bucket, providerId)
+local function RemoveProviderFromBucket(bucket, providerId, expectedOwner)
     if not bucket or bucket.providers[providerId] == nil then
+        return false
+    end
+    if expectedOwner ~= nil and bucket.owners and bucket.owners[providerId] ~= expectedOwner then
         return false
     end
 
     bucket.providers[providerId] = nil
+    if bucket.owners then
+        bucket.owners[providerId] = nil
+    end
     for index, currentProviderId in ipairs(bucket.order) do
         if currentProviderId == providerId then
             table.remove(bucket.order, index)
@@ -88,79 +92,17 @@ local function InsertProviderOrder(bucket, providerId, index)
     end
 end
 
-local function BeginTransaction()
-    local transaction = {
-        seen = {},
-        changes = {},
-        closed = false,
-    }
-    transactions[#transactions + 1] = transaction
-    return transaction
+local function SetProvider(id, providerId, api, owner)
+    local bucket = GetBucket(id, true)
+    InsertProviderOrder(bucket, providerId)
+    bucket.providers[providerId] = api
+    bucket.owners[providerId] = owner
+    return api
 end
 
-local function CloseTransaction(transaction)
-    if transaction.closed then
-        return
-    end
-    for index = #transactions, 1, -1 do
-        if transactions[index] == transaction then
-            table.remove(transactions, index)
-            break
-        end
-    end
-    transaction.closed = true
-end
-
-local function RecordRegistrationChange(id, providerId, bucket)
-    local transaction = transactions[#transactions]
-    if not transaction then
-        return
-    end
-
-    local key = id .. "\0" .. providerId
-    if transaction.seen[key] then
-        return
-    end
-
-    transaction.seen[key] = true
-    transaction.changes[#transaction.changes + 1] = {
-        id = id,
-        providerId = providerId,
-        existed = bucket.providers[providerId] ~= nil,
-        api = bucket.providers[providerId],
-        orderIndex = GetProviderOrderIndex(bucket, providerId),
-    }
-end
-
-local function GetProviderRefresh(refreshOwnerId, create)
-    local refresh = providerRegistry[refreshOwnerId]
-    if not refresh and create then
-        refresh = {
-            generation = 0,
-            refreshing = false,
-            slots = {},
-        }
-        providerRegistry[refreshOwnerId] = refresh
-    end
-    return refresh
-end
-
-local function RecordProviderSlot(refreshProviderId, id, providerId)
-    local refresh = GetProviderRefresh(refreshProviderId, false)
-    if not refresh or not refresh.refreshing then
-        return
-    end
-
-    local key = id .. "\0" .. providerId
-    refresh.slots[key] = {
-        id = id,
-        providerId = providerId,
-        generation = refresh.generation,
-    }
-end
-
-local function ClearProviderRefresh(refreshOwnerId)
-    providerRegistry[refreshOwnerId] = nil
+local function GetProviderOwner(id, providerId)
+    local bucket = GetBucket(id, false)
+    return bucket and bucket.owners and bucket.owners[providerId] or nil
 end
 
 return {
@@ -171,10 +113,6 @@ return {
     getPreferredProvider = GetPreferredProvider,
     getProviderOrderIndex = GetProviderOrderIndex,
     insertProviderOrder = InsertProviderOrder,
-    beginTransaction = BeginTransaction,
-    closeTransaction = CloseTransaction,
-    recordRegistrationChange = RecordRegistrationChange,
-    getProviderRefresh = GetProviderRefresh,
-    recordProviderSlot = RecordProviderSlot,
-    clearProviderRefresh = ClearProviderRefresh,
+    setProvider = SetProvider,
+    getProviderOwner = GetProviderOwner,
 }

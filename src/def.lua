@@ -199,7 +199,6 @@ local lib = {}
 ---@field isEnabled fun(): boolean
 ---@field setEnabled fun(enabled: boolean): boolean, string?
 ---@field setDebugMode fun(enabled: boolean)
----@field applyOnLoad fun(): boolean, string?
 ---@field applyMutation fun(): boolean, string?
 ---@field revertMutation fun(): boolean, string?
 ---@field tryActivate fun(): boolean, string?
@@ -555,6 +554,10 @@ end
 ---    callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, event: AdamantModpackLib.OverlayHookEvent)
 ---)
 
+---@class AdamantModpackLib.SystemOverlayRegistrar
+---@field createLine fun(name: string, spec: AdamantModpackLib.RetainedLineSpec)
+---@field onCommit fun(callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, commit: AdamantModpackLib.CommitContext))
+
 ---@class AdamantModpackLib.OverlaysApi
 ---@field order table<string, integer> Shared overlay order bands.
 ---@type AdamantModpackLib.OverlaysApi
@@ -563,10 +566,10 @@ lib.overlays = {}
 ---@class AdamantModpackLib.UiSuppressionToken
 ---@field release fun()
 
----@param owner string Stable explicit owner id for system overlays.
----@param register fun(overlays: AdamantModpackLib.RetainedOverlayRegistrar)
+---@param ownerId string Stable explicit owner id for system overlays.
+---@param register fun(overlays: AdamantModpackLib.SystemOverlayRegistrar)
 ---@return boolean ok
-function lib.overlays.defineOwned(owner, register)
+function lib.overlays.defineSystem(ownerId, register)
 end
 
 ---@return boolean suppressed
@@ -642,24 +645,10 @@ lib.hooks = {}
 function lib.hooks.Wrap(path, keyOrHandler, maybeHandler)
 end
 
----@param owner table
 ---@param path string
----@param keyOrHandler string|fun(base: function, ...: any): any
----@param maybeHandler? fun(base: function, ...: any): any
-function lib.hooks.WrapOwned(owner, path, keyOrHandler, maybeHandler)
-end
-
----@param path string
----@param keyOrReplacement any
----@param maybeReplacement? any
+---@param keyOrReplacement string|fun(...: any): any
+---@param maybeReplacement? fun(...: any): any
 function lib.hooks.Override(path, keyOrReplacement, maybeReplacement)
-end
-
----@param owner table
----@param path string
----@param keyOrReplacement any
----@param maybeReplacement? any
-function lib.hooks.OverrideOwned(owner, path, keyOrReplacement, maybeReplacement)
 end
 
 ---@class AdamantModpackLib.HooksContextApi
@@ -670,13 +659,6 @@ lib.hooks.Context = {}
 ---@param keyOrContext string|fun(...: any): any
 ---@param maybeContext? fun(...: any): any
 function lib.hooks.Context.Wrap(path, keyOrContext, maybeContext)
-end
-
----@param owner table
----@param path string
----@param keyOrContext string|fun(...: any): any
----@param maybeContext? fun(...: any): any
-function lib.hooks.Context.WrapOwned(owner, path, keyOrContext, maybeContext)
 end
 
 ---@class AdamantModpackLib.ImguiHelpersApi

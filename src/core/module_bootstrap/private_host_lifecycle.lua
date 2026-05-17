@@ -2,8 +2,6 @@ local deps = ...
 local internal = deps.internal
 local mutation = deps.mutation
 local clone = deps.clone
-local isCoordinatorRegistered = deps.isCoordinatorRegistered
-local setupRunData = deps.setupRunData
 
 local function hasAction(actions, actionKey)
     return actions[actionKey] ~= nil
@@ -50,36 +48,22 @@ local function notifySettingsCommitted(def, settingsObserver, authorHost, store,
     return true, nil
 end
 
-local function isEnabled(store, packId)
+local function isPackEnabled(packId)
     local coord = packId and internal.coordinators[packId]
     if coord and not coord.ModEnabled then
+        return false
+    end
+    return true
+end
+
+local function isEnabled(store, packId)
+    if not isPackEnabled(packId) then
         return false
     end
     if not store then
         return false
     end
     return store.read("Enabled") == true
-end
-
-local function applyOnLoad(def, mutationBundle, authorHost, store, mutationKey)
-    if isEnabled(store, def and def.modpack) then
-        local ok, err = mutation.applyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
-        if not ok then
-            return false, err
-        end
-    else
-        local ok, err = mutation.revertActiveForPlugin(mutationKey)
-        if not ok then
-            return false, err
-        end
-    end
-
-    -- Standalone only; Framework.init handles this centrally for coordinated packs.
-    if mutation.affectsRunData(mutationBundle) and not isCoordinatorRegistered(def and def.modpack) then
-        setupRunData()
-    end
-
-    return true, nil
 end
 
 local function resyncSession(def, session)
@@ -94,7 +78,7 @@ local function resyncSession(def, session)
     return mismatches
 end
 
-local function commitSession(def, mutationBundle, settingsObserver, authorHost, store, session, mutationKey)
+local function commitSession(def, mutationBundle, settingsObserver, authorHost, store, session, pluginGuid)
     if not session.isDirty() then
         return true, nil
     end
@@ -110,13 +94,13 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
 
     local shouldReapply = mutation.affectsRunData(mutationBundle)
         and hadConfigChanges
-        and store.read("Enabled") == true
+        and isEnabled(store, def and def.modpack)
 
     if not shouldReapply then
         return notifySettingsCommitted(def, settingsObserver, authorHost, store, commitContext)
     end
 
-    local ok, err = mutation.reapplyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
+    local ok, err = mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
     if ok then
         return notifySettingsCommitted(def, settingsObserver, authorHost, store, commitContext)
     end
@@ -124,7 +108,7 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
     session._restoreConfigSnapshot(snapshot)
     session._reloadFromConfig()
 
-    local rollbackOk, rollbackErr = mutation.reapplyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
+    local rollbackOk, rollbackErr = mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
     if not rollbackOk then
         internal.violate("lifecycle.session_rollback_reapply_failed", "%s: session rollback reapply failed: %s",
             tostring(def.name or def.id or "module"),
@@ -135,17 +119,20 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
     return false, err
 end
 
-local function setEnabled(def, mutationBundle, authorHost, store, enabled, mutationKey)
+local function setEnabled(def, mutationBundle, authorHost, store, enabled, pluginGuid)
     local nextEnabled = enabled == true
-    local current = store.read("Enabled") == true
+    local currentEnabled = store.read("Enabled") == true
+    local packEnabled = isPackEnabled(def and def.modpack)
+    local currentEffective = currentEnabled and packEnabled
+    local nextEffective = nextEnabled and packEnabled
 
     local ok, err
-    if nextEnabled and current then
-        ok, err = mutation.reapplyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
-    elseif nextEnabled then
-        ok, err = mutation.applyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
-    elseif current then
-        ok, err = mutation.revertForPlugin(mutationKey, def, mutationBundle, authorHost, store)
+    if nextEffective and currentEffective then
+        ok, err = mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    elseif nextEffective then
+        ok, err = mutation.applyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    elseif currentEffective then
+        ok, err = mutation.revertForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
     else
         ok, err = true, nil
     end
@@ -164,7 +151,6 @@ end
 
 return {
     isEnabled = isEnabled,
-    applyOnLoad = applyOnLoad,
     resyncSession = resyncSession,
     commitSession = commitSession,
     setEnabled = setEnabled,

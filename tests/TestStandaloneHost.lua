@@ -9,7 +9,6 @@ local FALLBACK_ROW_KEY = "middleRightStack\0" .. FALLBACK_OWNER .. ":marker"
 local function makeHost(opts)
     opts = opts or {}
     local calls = {
-        applyOnLoad = 0,
         setEnabled = {},
         setDebugMode = {},
         resync = 0,
@@ -54,13 +53,6 @@ local function makeHost(opts)
             table.insert(calls.setDebugMode, value)
             debugMode = value == true
         end,
-        applyOnLoad = function()
-            calls.applyOnLoad = calls.applyOnLoad + 1
-            if opts.applyFails then
-                return false, "apply boom"
-            end
-            return true, nil
-        end,
         resync = function()
             calls.resync = calls.resync + 1
         end,
@@ -82,6 +74,30 @@ local function installHost(host, pluginGuid)
     return function()
         AdamantModpackLib_Internal.liveModuleHosts[pluginGuid] = previousHost
     end
+end
+
+local function createActivatedLibHost(pluginGuid, opts)
+    opts = opts or {}
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        modpack = opts.modpack or "standalone-pack",
+        id = opts.id or "StandaloneTest",
+        name = opts.name or "Standalone Test",
+        storage = {},
+    })
+    local store, session = CreateModuleState({
+        Enabled = opts.enabled ~= false,
+        DebugMode = opts.debugMode == true,
+    }, definition)
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
+        pluginGuid = pluginGuid,
+        definition = definition,
+        store = store,
+        session = session,
+        drawTab = function() end,
+    })
+    local ok, err = authorHost.tryActivate()
+    lu.assertTrue(ok, tostring(err))
+    return host, authorHost
 end
 
 local function getFallbackMarkerRow()
@@ -267,7 +283,7 @@ function TestStandaloneHost:testBridgeCallbacksNoOpBeforeRuntimeExists()
     lu.assertTrue(okClosed, errClosed)
 end
 
-function TestStandaloneHost:testAppliesOnLoadWhenModuleIsNotCoordinated()
+function TestStandaloneHost:testCreatesRuntimeWhenModuleIsNotCoordinated()
     local host = makeHost({ modpack = "standalone-pack" })
     local restoreHost = installHost(host)
     lib.coordinator.register("standalone-pack", nil)
@@ -278,7 +294,6 @@ function TestStandaloneHost:testAppliesOnLoadWhenModuleIsNotCoordinated()
     lu.assertEquals(type(runtime.renderWindow), "function")
     lu.assertEquals(type(runtime.addMenuBar), "function")
     lu.assertEquals(type(runtime.handleHostGuiClosed), "function")
-    lu.assertEquals(host.calls.applyOnLoad, 1)
 end
 
 function TestStandaloneHost:testBridgeDispatchesInstalledRuntime()
@@ -320,6 +335,53 @@ function TestStandaloneHost:testBridgeDispatchesReplacementRuntime()
     lu.assertEquals(secondHost.calls.drawTab, 1)
 end
 
+function TestStandaloneHost:testStandaloneRuntimeReplacementClosesPreviousRuntime()
+    local releaseCalls = 0
+    lib.overlays.suppressForUi = function()
+        return {
+            release = function()
+                releaseCalls = releaseCalls + 1
+            end,
+        }
+    end
+
+    local firstHost = makeHost({ modpack = "standalone-pack", name = "First Standalone" })
+    local restoreFirstHost = installHost(firstHost)
+    lib.coordinator.register("standalone-pack", nil)
+    rom.ImGui = makeImgui({ menuClicked = true })
+    local firstRuntime = lib.standaloneHost(PLUGIN_GUID)
+    firstRuntime.addMenuBar()
+
+    local secondHost = makeHost({ modpack = "standalone-pack", name = "Second Standalone" })
+    local restoreSecondHost = installHost(secondHost)
+    lib.standaloneHost(PLUGIN_GUID)
+
+    restoreSecondHost()
+    restoreFirstHost()
+    lu.assertEquals(releaseCalls, 1)
+end
+
+function TestStandaloneHost:testStandaloneRuntimeIsRetiredWithOwningHost()
+    local pluginGuid = "test-standalone-retired-with-host"
+    local previousLiveHost = AdamantModpackLib_Internal.liveModuleHosts[pluginGuid]
+    lib.coordinator.register("standalone-pack", nil)
+
+    local firstHost = createActivatedLibHost(pluginGuid, {
+        id = "StandaloneRuntimeRetire",
+        name = "Standalone Runtime Retire",
+    })
+    local firstRuntime = lib.standaloneHost(pluginGuid)
+    local secondHost = createActivatedLibHost(pluginGuid, {
+        id = "StandaloneRuntimeRetire",
+        name = "Standalone Runtime Retire",
+    })
+
+    AdamantModpackLib_Internal.liveModuleHosts[pluginGuid] = previousLiveHost
+    lu.assertNotEquals(firstHost, secondHost)
+    lu.assertNil(AdamantModpackLib_Internal.standaloneRuntimes[pluginGuid])
+    lu.assertNotEquals(AdamantModpackLib_Internal.standaloneRuntimes[pluginGuid], firstRuntime)
+end
+
 function TestStandaloneHost:testSkipsStandaloneLifecycleAndUiWhenCoordinated()
     local host = makeHost({ modpack = "standalone-pack" })
     local restoreHost = installHost(host)
@@ -332,7 +394,6 @@ function TestStandaloneHost:testSkipsStandaloneLifecycleAndUiWhenCoordinated()
     runtime.renderWindow()
 
     restoreHost()
-    lu.assertEquals(host.calls.applyOnLoad, 0)
     lu.assertEquals(calls.beginMenu, 0)
     lu.assertEquals(calls.begin, 0)
 end

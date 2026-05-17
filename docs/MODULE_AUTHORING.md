@@ -439,7 +439,6 @@ local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
-        modpack = PACK_ID,
         id = "ExampleModule",
         name = "Example Module",
         storage = data.buildStorage(),
@@ -459,7 +458,7 @@ end
 
 Notes:
 - `lib.standaloneHost(...)` suppresses its window/menu when the module is coordinated
-- `lib.standaloneHost(...)` applies startup lifecycle state for non-coordinated modules
+- `host.tryActivate()` syncs runtime mutation state for both coordinated and standalone modules
 - `lib.standaloneUiBridge(...)` keeps module-owned ROM GUI callsites stable while Lib owns the current runtime pointer
 - the standalone window includes built-in:
   - `Enabled`

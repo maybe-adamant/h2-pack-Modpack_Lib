@@ -32,7 +32,7 @@ function internal.fallbackHud.createMarker()
         return
     end
     internal.fallbackHud._initialized = true
-    public.overlays.defineOwned(FALLBACK_OWNER, function(overlays)
+    public.overlays.defineSystem(FALLBACK_OWNER, function(overlays)
         overlays.createLine("marker", {
             componentName = "ModpackMark_StandaloneLib",
             region = "middleRightStack",

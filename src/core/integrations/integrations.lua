@@ -4,69 +4,116 @@ local registry = import 'core/integrations/private_registry.lua'
 public.integrations = public.integrations or {}
 internal.integrations = internal.integrations or {}
 
-local ActiveProviderStack = {}
+local ActiveHostInstallStack = {}
 
-function internal.integrations.beginTransaction()
-    local transaction = registry.beginTransaction()
-
+local function makeNoopReceipt()
+    local closed = false
     return {
         commit = function()
-            registry.closeTransaction(transaction)
+            closed = true
+            return true, nil
         end,
-        rollback = function()
-            if transaction.closed then
-                return
+        dispose = function()
+            if closed then
+                closed = true
             end
-            for index = #transaction.changes, 1, -1 do
-                local change = transaction.changes[index]
-                local bucket = registry.getBucket(change.id, change.existed)
-                if change.existed then
-                    bucket.providers[change.providerId] = change.api
-                    registry.insertProviderOrder(bucket, change.providerId, change.orderIndex)
-                else
-                    registry.removeProviderFromBucket(bucket, change.providerId)
-                    registry.pruneBucket(change.id, bucket)
-                end
-            end
-            registry.closeTransaction(transaction)
+            return true, nil
         end,
     }
 end
 
----@param refreshOwnerId string Stable lifecycle owner for this refresh pass.
----@param register fun()
-function internal.integrations.refresh(refreshOwnerId, register)
-    if type(refreshOwnerId) ~= "string" or refreshOwnerId == "" then
-        internal.violate("integrations.invalid_args", "internal.integrations.refresh: owner id must be a non-empty string")
+local function recordStagedRegistration(install, id, providerId, api)
+    local key = id .. "\0" .. providerId
+    local entry = install.byKey[key]
+    if not entry then
+        entry = {
+            id = id,
+            providerId = providerId,
+            api = api,
+        }
+        install.byKey[key] = entry
+        install.entries[#install.entries + 1] = entry
+    else
+        entry.api = api
+    end
+    return api
+end
+
+function internal.integrations.installForHost(host, register, authorHost, store)
+    if register == nil then
+        return makeNoopReceipt()
+    end
+    if type(host) ~= "table" then
+        internal.violate("integrations.invalid_args", "internal.integrations.installForHost: host is required")
     end
     if type(register) ~= "function" then
-        internal.violate("integrations.invalid_args", "internal.integrations.refresh: register must be a function")
+        internal.violate("integrations.invalid_args", "internal.integrations.installForHost: register must be a function")
     end
 
-    local refresh = registry.getProviderRefresh(refreshOwnerId, true)
-    refresh.generation = refresh.generation + 1
-    refresh.refreshing = true
+    local install = {
+        host = host,
+        entries = {},
+        byKey = {},
+        previous = {},
+        committed = false,
+        disposed = false,
+    }
 
-    ActiveProviderStack[#ActiveProviderStack + 1] = refreshOwnerId
-    local ok, err = pcall(register)
-    ActiveProviderStack[#ActiveProviderStack] = nil
-    refresh.refreshing = false
+    ActiveHostInstallStack[#ActiveHostInstallStack + 1] = install
+    local ok, err = pcall(register, authorHost, store)
+    ActiveHostInstallStack[#ActiveHostInstallStack] = nil
 
-    if ok then
-        for key, slot in pairs(refresh.slots) do
-            if slot.generation ~= refresh.generation then
-                public.integrations.unregister(slot.id, slot.providerId)
-                refresh.slots[key] = nil
-            end
-        end
-    else
-        for key, slot in pairs(refresh.slots) do
-            if slot.generation == refresh.generation then
-                refresh.slots[key] = nil
-            end
-        end
+    if not ok then
         error(err, 0)
     end
+
+    return {
+        commit = function()
+            if install.disposed or install.committed then
+                return true, nil
+            end
+            for _, entry in ipairs(install.entries) do
+                local bucket = registry.getBucket(entry.id, false)
+                local key = entry.id .. "\0" .. entry.providerId
+                install.previous[key] = {
+                    id = entry.id,
+                    providerId = entry.providerId,
+                    existed = bucket and bucket.providers[entry.providerId] ~= nil or false,
+                    api = bucket and bucket.providers[entry.providerId] or nil,
+                    owner = bucket and bucket.owners and bucket.owners[entry.providerId] or nil,
+                    orderIndex = bucket and registry.getProviderOrderIndex(bucket, entry.providerId) or nil,
+                }
+                registry.setProvider(entry.id, entry.providerId, entry.api, host)
+            end
+            install.committed = true
+            return true, nil
+        end,
+        dispose = function()
+            if install.disposed then
+                return true, nil
+            end
+            if install.committed then
+                for index = #install.entries, 1, -1 do
+                    local entry = install.entries[index]
+                    local key = entry.id .. "\0" .. entry.providerId
+                    local previous = install.previous[key]
+                    local bucket = registry.getBucket(entry.id, previous and previous.existed or false)
+                    if bucket and registry.getProviderOwner(entry.id, entry.providerId) == host then
+                        if previous and previous.existed then
+                            bucket.providers[entry.providerId] = previous.api
+                            bucket.owners[entry.providerId] = previous.owner
+                            registry.insertProviderOrder(bucket, entry.providerId, previous.orderIndex)
+                        else
+                            registry.removeProviderFromBucket(bucket, entry.providerId, host)
+                            registry.pruneBucket(entry.id, bucket)
+                        end
+                    end
+                end
+            end
+            install.disposed = true
+            return true, nil
+        end,
+    }
 end
 
 --- Registers or replaces an optional cross-module integration provider.
@@ -86,12 +133,12 @@ function public.integrations.register(id, providerId, api)
         internal.violate("integrations.invalid_args", "lib.integrations.register: api must be a table")
     end
 
-    local bucket = registry.getBucket(id, true)
-    registry.recordRegistrationChange(id, providerId, bucket)
-    registry.recordProviderSlot(ActiveProviderStack[#ActiveProviderStack] or providerId, id, providerId)
-    registry.insertProviderOrder(bucket, providerId)
-    bucket.providers[providerId] = api
-    return api
+    local activeInstall = ActiveHostInstallStack[#ActiveHostInstallStack]
+    if activeInstall then
+        return recordStagedRegistration(activeInstall, id, providerId, api)
+    end
+
+    return registry.setProvider(id, providerId, api, providerId)
 end
 
 --- Unregisters one provider for one integration id.
@@ -130,7 +177,6 @@ function public.integrations.unregisterProvider(providerId)
             registry.pruneBucket(id, bucket)
         end
     end
-    registry.clearProviderRefresh(providerId)
     return count
 end
 
