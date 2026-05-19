@@ -36,7 +36,9 @@ Then pass it into module creation:
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = definition,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerOverlays = registerOverlays,
     drawTab = ui.drawTab,
 })

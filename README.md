@@ -24,11 +24,9 @@ local ui = import("mods/ui.lua").bind(data)
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        id = "ExampleModule",
-        name = "Example Module",
-        ...
-    },
+    id = "ExampleModule",
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
@@ -82,7 +80,7 @@ Reference and historical notes:
 - `lib.hooks`
 - `lib.overlays`
 - `lib.integrations`
-- `lib.gameObject`
+- `lib.gameCache`
 - `lib.imguiHelpers`
 - `lib.widgets`
 - `lib.nav`

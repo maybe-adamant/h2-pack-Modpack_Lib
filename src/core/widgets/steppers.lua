@@ -115,11 +115,13 @@ end
 ---@return boolean
 function public.widgets.stepper(imgui, session, alias, opts)
     opts = opts or {}
+    local field = helpers.ResolveStorageField(session, alias, "widgets.stepper")
+    local fieldAlias = field:alias()
     local cfg = MakeStepperConfig(opts)
-    cfg.id = cfg.id ~= "" and cfg.id or alias
+    cfg.id = cfg.id ~= "" and cfg.id or fieldAlias
     local boundValue = {
-        get = function() return session.read(alias) end,
-        set = function(value) session.write(alias, value) end,
+        get = function() return field:read() end,
+        set = function(value) field:write(value) end,
     }
     PrepareStepperDrawContext(cfg, boundValue)
 
@@ -142,8 +144,12 @@ end
 ---@return boolean
 function public.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts)
     opts = opts or {}
+    local minField = helpers.ResolveStorageField(session, minAlias, "widgets.steppedRange")
+    local maxField = helpers.ResolveStorageField(session, maxAlias, "widgets.steppedRange")
+    local minFieldAlias = minField:alias()
+    local maxFieldAlias = maxField:alias()
     local minStepper = MakeStepperConfig({
-        id = tostring(minAlias) .. "_min",
+        id = tostring(minFieldAlias) .. "_min",
         label = "",
         default = opts.default,
         min = opts.min,
@@ -153,7 +159,7 @@ function public.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts)
         buttonSpacing = opts.buttonSpacing,
     })
     local maxStepper = MakeStepperConfig({
-        id = tostring(maxAlias) .. "_max",
+        id = tostring(maxFieldAlias) .. "_max",
         label = "",
         default = opts.defaultMax or opts.default,
         min = opts.min,
@@ -163,12 +169,12 @@ function public.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts)
         buttonSpacing = opts.buttonSpacing,
     })
     local minBound = {
-        get = function() return session.read(minAlias) end,
-        set = function(value) session.write(minAlias, value) end,
+        get = function() return minField:read() end,
+        set = function(value) minField:write(value) end,
     }
     local maxBound = {
-        get = function() return session.read(maxAlias) end,
-        set = function(value) session.write(maxAlias, value) end,
+        get = function() return maxField:read() end,
+        set = function(value) maxField:write(value) end,
     }
 
     local minValue = minBound.get()

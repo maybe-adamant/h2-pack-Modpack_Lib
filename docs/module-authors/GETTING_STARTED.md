@@ -99,10 +99,11 @@ Use this file to declare module data. UI belongs in `ui.lua`; gameplay behavior 
 
 Owns immediate-mode UI:
 
-- `drawTab(imgui, session, host)`
-- optional `drawQuickContent(imgui, session, host)`
+- `drawTab(ctx)`
+- optional `drawQuickContent(ctx)`
 
-This code should read and write staged values through the author-facing `session` it receives from the host.
+This code should read and write staged values through `ctx.session` or the
+bound helpers on `ctx.widgets`.
 
 ### `src/logic.lua`
 
@@ -127,11 +128,9 @@ At minimum:
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = "ExampleModule",
-        name = "Example Module",
-    },
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
     drawTab = function() end,
 })
 host.tryActivate()
@@ -149,11 +148,9 @@ modules:
 local host, _, err = lib.tryCreateModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = "ExampleModule",
-        name = "Example Module",
-    },
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
     drawTab = function() end,
 })
 
@@ -192,12 +189,10 @@ local data = import("mods/data.lua")
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = "ExampleModule",
-        name = "Example Module",
-        storage = data.buildStorage(),
-    },
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
+    storage = data.buildStorage(),
     drawTab = function() end,
 })
 host.tryActivate()
@@ -224,12 +219,10 @@ hashes, declare `stage = false, hash = false` and use
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = "ExampleModule",
-        name = "Example Module",
-        storage = data.buildStorage(),
-    },
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
@@ -247,12 +240,12 @@ Example:
 ```lua
 local MODE_VALUES = { "Vanilla", "Chaos" }
 
-local function drawTab(ui, session, host)
-    lib.widgets.checkbox(ui, session, "FeatureEnabled", {
+local function drawTab(ctx)
+    ctx.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 
-    lib.widgets.dropdown(ui, session, "Mode", {
+    ctx.widgets.dropdown("Mode", {
         label = "Mode",
         values = MODE_VALUES,
         controlWidth = 180,
@@ -315,12 +308,10 @@ local ui = import("mods/ui.lua").bind(data)
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = MODULE_ID,
-        name = "Example Module",
-        storage = data.buildStorage(),
-    },
+    modpack = PACK_ID,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerPatchMutation = logic.buildPatchPlan,
     registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
@@ -448,7 +439,7 @@ Keep UI and game mutation separate. UI edits state; logic applies state.
 
 ### Putting UI outside draw functions
 
-Author UI through draw functions such as `drawTab(ui, session, host)`.
+Author UI through draw functions such as `drawTab(ctx)`.
 
 ## LuaLS Setup
 
@@ -476,6 +467,6 @@ That lets LuaLS infer the author `session` and `host` types through
 After this guide:
 
 1. Read [MODULE_AUTHORING.md](MODULE_AUTHORING.md) for the fuller authoring contract.
-2. Use [capabilities/README.md](capabilities/README.md) when you need a focused guide for managed state, widgets, hooks, mutations, overlays, integrations, or game-object state.
+2. Use [capabilities/README.md](capabilities/README.md) when you need a focused guide for managed state, widgets, hooks, mutations, overlays, integrations, or game cache.
 3. Use [API.md](../../API.md) when you need exact function names and behavior.
 4. Use the template source files as the concrete code reference.

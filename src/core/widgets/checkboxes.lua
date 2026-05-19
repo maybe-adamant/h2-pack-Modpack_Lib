@@ -22,15 +22,17 @@ local DEFAULT_PACKED_SLOT_COUNT = 32
 ---@return boolean
 function public.widgets.checkbox(imgui, session, alias, opts)
     opts = opts or {}
-    local label = tostring(opts.label or alias or "")
-    local current = session.read(alias) == true
+    local field = helpers.ResolveStorageField(session, alias, "widgets.checkbox")
+    local fieldAlias = field:alias()
+    local label = tostring(opts.label or fieldAlias or "")
+    local current = field:read() == true
     local color = helpers.NormalizeColor(opts.color)
     local nextValue, changed = helpers.DrawWithValueColor(imgui, color, function()
-        return imgui.Checkbox(label .. "##" .. tostring(alias), current)
+        return imgui.Checkbox(label .. "##" .. tostring(fieldAlias), current)
     end)
     helpers.ShowTooltip(imgui, opts.tooltip)
     if changed then
-        session.write(alias, nextValue)
+        field:write(nextValue)
         return true
     end
     return false
@@ -43,7 +45,9 @@ end
 ---@return boolean
 function public.widgets.packedCheckboxList(imgui, session, alias, opts)
     opts = opts or {}
-    local children = helpers.ResolvePackedChildren(session, alias)
+    local field = helpers.ResolveStorageField(session, alias, "widgets.packedCheckboxList")
+    local owner = helpers.GetFieldOwner(field)
+    local children = helpers.ResolvePackedChildren(field)
     local lowerFilter = type(opts.filterText) == "string" and opts.filterText:lower() or ""
     local hasFilter = lowerFilter ~= ""
     local filterMode = opts.filterMode
@@ -64,7 +68,7 @@ function public.widgets.packedCheckboxList(imgui, session, alias, opts)
         if drawn >= slotCount then
             break
         end
-        local current = session.read(child.alias) == true
+        local current = owner.read(child.alias) == true
         local matchesText = not hasFilter or tostring(child.label):lower():find(lowerFilter, 1, true) ~= nil
         local matchesMode = filterMode == "all"
             or (filterMode == "checked" and current)
@@ -80,7 +84,7 @@ function public.widgets.packedCheckboxList(imgui, session, alias, opts)
                 return imgui.Checkbox(tostring(child.label) .. "##" .. tostring(child.alias), current)
             end)
             if clicked then
-                session.write(child.alias, nextValue)
+                owner.write(child.alias, nextValue)
                 changed = true
             end
         end

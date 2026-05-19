@@ -155,7 +155,7 @@ flowchart TD
     AUTHOR --> CREATE["createModule / tryCreateModule"]
     AUTHOR --> SESSION["session in draw callbacks"]
     AUTHOR --> STORE["store in runtime callbacks"]
-    AUTHOR --> CAPABILITIES["hooks / mutations / overlays / integrations / widgets / gameObject"]
+    AUTHOR --> CAPABILITIES["hooks / mutations / overlays / integrations / widgets / gameCache"]
 
     CONTRIBUTOR --> INIT["core/init.lua composition"]
     CONTRIBUTOR --> SERVICES["subsystem services"]

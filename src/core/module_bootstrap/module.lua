@@ -7,19 +7,31 @@ local moduleState = deps.moduleState
 ---@class ModuleCreateOpts
 ---@field pluginGuid string
 ---@field config table
----@field definition ModuleDefinition
+---@field modpack string|nil
+---@field id string
+---@field name string
+---@field shortName string|nil
+---@field tooltip string|nil
+---@field storage StorageSchema|nil
+---@field hashGroupPlan HashGroupPlan|nil
 ---@field registerHooks fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerPatchMutation fun(plan: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
 ---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
----@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
----@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
+---@field drawTab fun(ctx: DrawContext)
+---@field drawQuickContent fun(ctx: DrawContext)|nil
 
 local KnownModuleOpts = {
     pluginGuid = true,
     config = true,
-    definition = true,
+    modpack = true,
+    id = true,
+    name = true,
+    shortName = true,
+    tooltip = true,
+    storage = true,
+    hashGroupPlan = true,
     registerHooks = true,
     registerPatchMutation = true,
     onSettingsCommitted = true,
@@ -31,10 +43,28 @@ local KnownModuleOpts = {
 
 local function ValidateKnownOpts(opts)
     for key in pairs(opts) do
+        if key == "definition" then
+            logging.violate(
+                "host.definition_option_removed",
+                "createModule: definition table is no longer supported; put definition fields at top level"
+            )
+        end
         if not KnownModuleOpts[key] then
             logging.violate("host.unknown_opt", "createModule: unknown option '%s'", tostring(key))
         end
     end
+end
+
+local function BuildDefinitionInput(opts)
+    return {
+        modpack = opts.modpack,
+        id = opts.id,
+        name = opts.name,
+        shortName = opts.shortName,
+        tooltip = opts.tooltip,
+        storage = opts.storage,
+        hashGroupPlan = opts.hashGroupPlan,
+    }
 end
 
 local function GetStructuralBaseline(pluginGuid)
@@ -67,7 +97,7 @@ function public.createModule(opts)
         logging.violate("host.invalid_create_opts", "createModule: pluginGuid is required")
     end
 
-    local definition = moduleHost.prepareDefinition(GetStructuralBaseline(opts.pluginGuid), opts.definition, {
+    local definition = moduleHost.prepareDefinition(GetStructuralBaseline(opts.pluginGuid), BuildDefinitionInput(opts), {
         hasQuickContent = type(opts.drawQuickContent) == "function",
     })
     local state = moduleState.create(opts.config, definition)

@@ -94,7 +94,7 @@ function TestWidgets:testPackedDropdownResolvesChildrenFromSessionSchema()
     lu.assertEquals(state.customPreviewText, "Second Choice")
 end
 
-function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
+function TestWidgets:testBoundPackedDropdownAcceptsTableRowStorageField()
     local definition = self.h.prepareDefinition({
         id = "PackedWidgetRowTest",
         name = "Packed Widget Row Test",
@@ -121,7 +121,7 @@ function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
     row.write("Second", true)
     local imgui, state = self.h.makeDropdownImgui()
 
-    self.h.widgets.packedDropdown(imgui, row, "Packed", {
+    self.h.widgets.bind(imgui, session).packedDropdown(row:field("Packed"), {
         label = "Packed",
         displayValues = {
             Second = "Second Choice",
@@ -129,6 +129,48 @@ function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
     })
 
     lu.assertEquals(state.customPreviewText, "Second Choice")
+end
+
+function TestWidgets:testBoundPackedChoiceAliasAcceptsTableRowStorageField()
+    local definition = self.h.prepareDefinition({
+        id = "PackedWidgetChoiceAliasFieldTest",
+        name = "Packed Widget Choice Alias Field Test",
+        storage = {
+            {
+                type = "table",
+                alias = "Rows",
+                defaultRows = 1,
+                row = {
+                    {
+                        type = "packedInt",
+                        alias = "Packed",
+                        bits = {
+                            { alias = "First", offset = 0, width = 1, type = "bool", default = false },
+                            { alias = "Second", offset = 1, width = 1, type = "bool", default = false },
+                        },
+                    },
+                },
+            },
+        },
+    })
+    local _, session = self.h.createModuleState({}, definition)
+    local row = session.table("Rows"):rowHandle(1)
+    row.write("Second", true)
+    local imgui = self.h.makeDropdownImgui()
+
+    local selected = self.h.widgets.bind(imgui, session).getPackedChoiceAlias(row:field("Packed"))
+
+    lu.assertEquals(selected, "Second")
+end
+
+function TestWidgets:testBoundWidgetsRejectUnbrandedTableTargets()
+    local session = self.h.createPackedSession()
+    local imgui = self.h.makeDropdownImgui()
+    local bound = self.h.widgets.bind(imgui, session)
+
+    lu.assertErrorMsgContains("expected root alias string or StorageField", function()
+        bound.dropdown({ alias = "Packed" }, {})
+    end)
 end
 
 function TestWidgets:testPackedDropdownSupportsExplicitControlId()

@@ -24,8 +24,8 @@ Use each state surface for one job:
 Draw code should stage changes through `session`. Gameplay, hooks, overlays, integrations, and mutations should read committed values through `store`.
 
 ```lua
-function ui.drawTab(imgui, session, host)
-    lib.widgets.checkbox(imgui, session, "FeatureEnabled", {
+function ui.drawTab(ctx)
+    ctx.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 end
@@ -40,7 +40,7 @@ function logic.registerHooks(host, store)
 end
 ```
 
-Host/framework plumbing owns commit, reload, hash/profile import, and config flush behavior. Module draw callbacks receive the author-facing session, not the private full session.
+Host/framework plumbing owns commit, reload, hash/profile import, and config flush behavior. Module draw callbacks receive a draw context with the author-facing session, not the private full session.
 
 ## Storage Roots
 
@@ -178,7 +178,9 @@ end
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = definition,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
     onSettingsCommitted = onSettingsCommitted,
     drawTab = ui.drawTab,
 })

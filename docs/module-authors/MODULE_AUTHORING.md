@@ -4,7 +4,7 @@ This guide describes the supported module contract in Lib:
 - namespaced public API
 - managed storage and explicit `session`
 - immediate-mode widgets
-- direct draw-function authoring through `drawTab(ui, session, host)`
+- direct draw-function authoring through `drawTab(ctx)`
 
 ## Lib Surface
 
@@ -23,7 +23,7 @@ Use runtime behavior APIs only when the module owns that kind of behavior:
 - `lib.hooks.*`
 - `lib.overlays.*`
 - `lib.integrations.*`
-- `lib.gameObject.*`
+- `lib.gameCache.*`
 - `lib.mutation.*`
 
 Pack, Framework, migration, and advanced storage plumbing may also use:
@@ -47,27 +47,27 @@ Use focused capability guides for feature-level authoring details:
 - [capabilities/MUTATIONS.md](capabilities/MUTATIONS.md)
 - [capabilities/OVERLAYS.md](capabilities/OVERLAYS.md)
 - [capabilities/INTEGRATIONS.md](capabilities/INTEGRATIONS.md)
-- [capabilities/GAME_OBJECT_STATE.md](capabilities/GAME_OBJECT_STATE.md)
+- [capabilities/GAME_CACHE.md](capabilities/GAME_CACHE.md)
 
 ## Basic Module Shape
 
 Typical coordinated module:
 
 ```lua
-local function drawTab(ui, session, host)
-    lib.widgets.checkbox(ui, session, "EnabledFlag", {
+local function drawTab(ctx)
+    ctx.widgets.checkbox("EnabledFlag", {
         label = "Enabled",
     })
 
-    lib.widgets.dropdown(ui, session, "Mode", {
+    ctx.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos" },
         controlWidth = 180,
     })
 end
 
-local function drawQuickContent(ui, session, host)
-    lib.widgets.dropdown(ui, session, "Mode", {
+local function drawQuickContent(ctx)
+    ctx.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos" },
         controlWidth = 140,
@@ -83,16 +83,14 @@ end
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = MODULE_ID,
-        name = "Example Module",
-        tooltip = "What this module does.",
-        storage = {
-            { type = "bool", alias = "EnabledFlag", default = false },
-            { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
-            { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
-        },
+    modpack = PACK_ID,
+    id = MODULE_ID,
+    name = "Example Module",
+    tooltip = "What this module does.",
+    storage = {
+        { type = "bool", alias = "EnabledFlag", default = false },
+        { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+        { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
     },
     registerHooks = registerHooks,
     drawTab = drawTab,
@@ -142,7 +140,7 @@ Callback argument order follows a stable convention:
 - state/context handle next, using `session` for staged UI state and `host` for runtime/module context
 - `store` last when persisted runtime values are needed
 
-Examples: `drawTab(imgui, session, host)`, `registerHooks(host, store)`, and
+Examples: `drawTab(ctx)`, `registerHooks(host, store)`, and
 `registerPatchMutation(plan, host, store)`.
 
 ## Definition Rules
@@ -221,7 +219,7 @@ Lib widgets cover common controls. Use raw ImGui for custom structure and layout
 
 Framework Quick Setup reads:
 - coordinator `renderQuickSetup(ctx)`
-- module `drawQuickContent(ui, session, host)`
+- module `drawQuickContent(ctx)`
 
 `drawQuickContent` is a Framework Quick Setup hook.
 
@@ -265,7 +263,7 @@ Framework behavior:
 - each coordinated module gets its own top-level tab
 - full-host `host.drawTab(imgui)` is the normal rendering contract
 - full-host `host.drawQuickContent(imgui)` participates only in Quick Setup
-- authored draw callbacks receive `drawTab(imgui, session, host)` and `drawQuickContent(imgui, session, host)`
+- authored draw callbacks receive `drawTab(ctx)` and `drawQuickContent(ctx)`
 
 ## Standalone Modules
 
@@ -281,11 +279,9 @@ local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        id = "ExampleModule",
-        name = "Example Module",
-        storage = data.buildStorage(),
-    },
+    id = "ExampleModule",
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
@@ -348,24 +344,22 @@ local function init()
     local host = lib.createModule({
         pluginGuid = PLUGIN_GUID,
         config = config,
-        definition = {
-            modpack = PACK_ID,
-            id = "ExampleModule",
-            name = "Example Module",
-            shortName = "Example",
-            tooltip = "Demonstrates the Lib module contract.",
-            storage = {
-                { type = "bool", alias = "FeatureEnabled", default = false },
-                { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
-                { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
-                {
-                    type = "packedInt",
-                    alias = "PackedFlags",
-                    default = 0,
-                    bits = {
-                        { alias = "PackedFlags_Attack", label = "Attack", type = "bool", offset = 0, width = 1, default = false },
-                        { alias = "PackedFlags_Special", label = "Special", type = "bool", offset = 1, width = 1, default = false },
-                    },
+        modpack = PACK_ID,
+        id = "ExampleModule",
+        name = "Example Module",
+        shortName = "Example",
+        tooltip = "Demonstrates the Lib module contract.",
+        storage = {
+            { type = "bool", alias = "FeatureEnabled", default = false },
+            { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+            { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
+            {
+                type = "packedInt",
+                alias = "PackedFlags",
+                default = 0,
+                bits = {
+                    { alias = "PackedFlags_Attack", label = "Attack", type = "bool", offset = 0, width = 1, default = false },
+                    { alias = "PackedFlags_Special", label = "Special", type = "bool", offset = 1, width = 1, default = false },
                 },
             },
         },
@@ -378,32 +372,32 @@ local function init()
     lib.standaloneHost(PLUGIN_GUID)
 end
 
-function drawTab(ui, session, host)
-    lib.widgets.checkbox(ui, session, "FeatureEnabled", {
+function drawTab(ctx)
+    ctx.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
         tooltip = "Turns the feature logic on for this module.",
     })
 
-    lib.widgets.dropdown(ui, session, "Mode", {
+    ctx.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos", "Custom" },
         controlWidth = 180,
     })
 
-    lib.widgets.inputText(ui, session, "FilterText", {
+    ctx.widgets.inputText("FilterText", {
         label = "Filter",
         controlWidth = 180,
     })
 
-    ui.Separator()
-    lib.widgets.text(ui, "Packed Flags")
-    lib.widgets.packedCheckboxList(ui, session, "PackedFlags", {
+    ctx.imgui.Separator()
+    ctx.widgets.text("Packed Flags")
+    ctx.widgets.packedCheckboxList("PackedFlags", {
         optionsPerLine = 2,
     })
 end
 
-function drawQuickContent(ui, session, host)
-    lib.widgets.dropdown(ui, session, "Mode", {
+function drawQuickContent(ctx)
+    ctx.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos", "Custom" },
         controlWidth = 140,

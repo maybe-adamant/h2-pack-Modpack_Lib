@@ -3,16 +3,16 @@
 Reference for writing or auditing module draw code without re-deriving render-path performance analysis from scratch.
 
 This guidance applies to module draw code:
-- `drawTab(ui, session, host)`
-- optional `drawQuickContent(ui, session, host)`
+- `drawTab(ctx)`
+- optional `drawQuickContent(ctx)`
 - `lib.widgets.*`
 - raw ImGui for structure
 
 ## Why Draw Paths Need Care
 
 Module UI is immediate-mode:
-- `drawTab(ui, session, host)`
-- optional `drawQuickContent(ui, session, host)`
+- `drawTab(ctx)`
+- optional `drawQuickContent(ctx)`
 
 These run every imgui frame.
 Any unnecessary allocation or repeated C-boundary call inside those paths shows up immediately.
@@ -22,7 +22,7 @@ Any unnecessary allocation or repeated C-boundary call inside those paths shows 
 This document assumes:
 - raw `config` stays local to `main.lua`
 - `lib.createModule(...)` owns the definition and state construction boundary
-- draw code reads staged values from `session.view`
+- draw code reads staged values from `ctx.session.view`
 - runtime/gameplay code reads persisted values through `store.read(...)`
 - debug toggles write persisted values through the host/framework flow
 - hash/profile import and config flush behavior belong to host/framework plumbing, not draw callbacks

@@ -33,14 +33,16 @@ local host = lib.tryCreateModule({
 After:
 
 ```lua
-local definition = import("mods/definition.lua")
+local data = import("mods/data.lua")
 local logic = import("mods/logic.lua")
 local ui = import("mods/ui.lua")
 
 local host = lib.tryCreateModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = definition,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
 })

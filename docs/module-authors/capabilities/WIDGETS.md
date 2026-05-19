@@ -2,13 +2,16 @@
 
 This document covers `lib.widgets.*` and `lib.nav.*` from a module draw-code point of view.
 
-Widgets operate on the author `session` passed into `drawTab(imgui, session, host)` and `drawQuickContent(imgui, session, host)`.
+Draw callbacks receive a `ctx` object. Widget authoring normally uses
+`ctx.widgets`, which binds the current `imgui` and root storage field scope for
+the render call.
 
 For storage schema, table handles, packed roots, and session/store rules, read [MANAGED_STATE.md](MANAGED_STATE.md).
 
 ## Widgets
 
-Widgets live under `lib.widgets`.
+Widgets live under `lib.widgets`. Module draw code usually calls the bound
+surface at `ctx.widgets`.
 
 Built-ins:
 - `separator`
@@ -32,7 +35,7 @@ These are direct immediate-mode helpers. Call them inside module draw functions 
 Typical call shape:
 
 ```lua
-lib.widgets.dropdown(ui, session, "Mode", {
+ctx.widgets.dropdown("Mode", {
     label = "Mode",
     values = { "Vanilla", "Chaos" },
     controlWidth = 180,
@@ -46,9 +49,9 @@ nothing.
 
 ## Common concepts
 
-### Bound widgets
+### Bound Widgets And Storage Fields
 
-Most widgets bind to one staged session alias:
+Most widgets target one storage field:
 - `checkbox`
 - `inputText`
 - `dropdown`
@@ -60,14 +63,48 @@ Most widgets bind to one staged session alias:
 - `packedCheckboxList`
 - `stepper`
 
-Packed widgets resolve packed child metadata through `session.getAliasSchema(alias)`.
-Draw callbacks receive this metadata accessor as part of their author-facing
-session handle.
+String targets are shorthand for root fields on `ctx.session`:
 
-One binds to two aliases:
-- `steppedRange(minAlias, maxAlias, ...)`
+```lua
+ctx.widgets.checkbox("Enabled", {
+    label = "Enabled",
+})
+```
 
-Author draw code can read staged values through `session.view.SomeAlias` for readability. Widget internals use `session.read(alias)` and write changes through `session.write(alias, value)`.
+The explicit root-field form is available when a helper needs to pass a target
+around:
+
+```lua
+local enabled = ctx.field("Enabled")
+ctx.widgets.checkbox(enabled, {
+    label = "Enabled",
+})
+```
+
+Table rows produce `StorageField` targets through the table API:
+
+```lua
+local row = ctx.session.table("Rows"):rowHandle(1)
+ctx.widgets.checkbox(row:field("Enabled"), {
+    label = "Enabled",
+})
+```
+
+Packed widgets resolve packed child metadata through the `StorageField` schema.
+
+One binds to two targets:
+- `steppedRange(minTarget, maxTarget, ...)`
+
+Widgets do not traverse table storage. Table/path APIs should resolve to a
+final `StorageField`, then widgets render that field.
+
+```lua
+local row = ctx.session.table("Rows"):rowHandle(1)
+ctx.widgets.packedDropdown(row:field("PackedChoices"), opts)
+```
+
+Author draw code can read staged values through `ctx.session.view.SomeAlias`
+for readability. Widget internals use storage fields to read and write values.
 
 ### Labels and tooltips
 
@@ -98,14 +135,14 @@ Colors are RGBA tables:
 
 ## Base widgets
 
-### `lib.widgets.separator(imgui)`
+### `ctx.widgets.separator()`
 
 Thin wrapper around `imgui.Separator()`.
 
 Use when:
 - you want a Lib-level helper for consistency
 
-### `lib.widgets.text(imgui, text, opts?)`
+### `ctx.widgets.text(text, opts?)`
 
 Options:
 - `color`
@@ -118,13 +155,13 @@ Use when:
 Example:
 
 ```lua
-lib.widgets.text(ui, "Underworld", {
+ctx.widgets.text("Underworld", {
     color = { 0.8, 0.7, 0.4, 1 },
     alignToFramePadding = true,
 })
 ```
 
-### `lib.widgets.button(imgui, session, label, opts?)`
+### `ctx.widgets.button(label, opts?)`
 
 Options:
 - `id`
@@ -138,7 +175,7 @@ Notes:
 - when `action` is provided, replaces that staged session action with `value`
 - `onClick` is optional convenience only; you can ignore it and use the boolean return directly
 
-### `lib.widgets.confirmButton(imgui, session, id, label, opts?)`
+### `ctx.widgets.confirmButton(id, label, opts?)`
 
 Renders a button that opens a confirmation popup.
 
@@ -157,7 +194,7 @@ Notes:
 
 ## Input widget
 
-### `lib.widgets.inputText(imgui, session, alias, opts?)`
+### `ctx.widgets.inputText(target, opts?)`
 
 Options:
 - `id`
@@ -169,16 +206,16 @@ Options:
 - `controlGap`
 
 Behavior:
-- reads current text from `session.read(alias)`
-- writes the edited string back through `session.write(alias, nextValue)`
+- reads current text from the storage field
+- writes the edited string back through the storage field
 
 Use when:
-- the bound alias is a string field
+- the bound target is a string field
 - you need plain text entry or a simple filter box
 
 ## Choice widgets
 
-### `lib.widgets.dropdown(imgui, session, alias, opts?)`
+### `ctx.widgets.dropdown(target, opts?)`
 
 Options:
 - `id`
@@ -193,7 +230,7 @@ Options:
 - `controlGap`
 
 Behavior:
-- binds one alias to one value from `values`
+- binds one storage field to one value from `values`
 - preview text comes from `displayValues[value]` when present, else `tostring(value)`
 - if the staged value is invalid, it falls back to:
   - a valid `default`
@@ -202,7 +239,7 @@ Behavior:
 Use when:
 - the widget owns a fixed explicit choice list
 
-### `lib.widgets.mappedDropdown(imgui, session, alias, opts?)`
+### `ctx.widgets.mappedDropdown(target, opts?)`
 
 Options:
 - `id`
@@ -220,13 +257,13 @@ Each returned option may include:
 - `label`
 - `value`
 - `color`
-- `onSelect(option, session)`
+- `onSelect(option, owner)`
 
 Behavior:
 - the option list is computed from live staged state
-- `getPreview`, `getPreviewColor`, and `getOptions` receive `session.view`
+- `getPreview`, `getPreviewColor`, and `getOptions` receive the target owner's view
 - if an option provides `onSelect`, that callback owns the write behavior
-- otherwise the widget writes `option.value` to `alias`
+- otherwise the widget writes `option.value` to the storage field
 
 Use when:
 - the choice list is dynamic
@@ -236,7 +273,7 @@ Use when:
 Example:
 
 ```lua
-lib.widgets.mappedDropdown(ui, session, "SelectedRoot", {
+ctx.widgets.mappedDropdown("SelectedRoot", {
     label = "Root",
     controlWidth = 220,
     getPreview = function(view)
@@ -258,7 +295,7 @@ lib.widgets.mappedDropdown(ui, session, "SelectedRoot", {
 })
 ```
 
-### `lib.widgets.packedDropdown(imgui, session, alias, opts?)`
+### `ctx.widgets.packedDropdown(target, opts?)`
 
 Single-choice dropdown over a packed root.
 
@@ -280,7 +317,7 @@ Options:
 - `singleDisabled`
 
 Behavior:
-- resolves packed children from session storage metadata
+- resolves packed children from the storage field schema
 - classifies current packed state as:
   - none
   - single
@@ -294,7 +331,7 @@ Use when:
 Example:
 
 ```lua
-lib.widgets.packedDropdown(ui, session, "PackedForcedBoon", {
+ctx.widgets.packedDropdown("PackedForcedBoon", {
     label = "Force 1",
     noneLabel = "None",
     selectionMode = "singleEnabled",
@@ -307,7 +344,7 @@ lib.widgets.packedDropdown(ui, session, "PackedForcedBoon", {
 })
 ```
 
-### `lib.widgets.radio(imgui, session, alias, opts?)`
+### `ctx.widgets.radio(target, opts?)`
 
 Options:
 - `label`
@@ -321,7 +358,7 @@ Options:
 Use when:
 - the choice list is small and visible all at once is better than a combo
 
-### `lib.widgets.mappedRadio(imgui, session, alias, opts?)`
+### `ctx.widgets.mappedRadio(target, opts?)`
 
 Options:
 - `label`
@@ -334,16 +371,16 @@ Each returned option may include:
 - `value`
 - `color`
 - `selected`
-- `onSelect(option, session)`
+- `onSelect(option, owner)`
 
 Use when:
 - the visible options are dynamic
 - you need custom selection behavior
 
 Note:
-- `getOptions` receives `session.view`
+- `getOptions` receives the target owner's view
 
-### `lib.widgets.packedRadio(imgui, session, alias, opts?)`
+### `ctx.widgets.packedRadio(target, opts?)`
 
 Packed single-choice radio surface.
 
@@ -361,7 +398,7 @@ Use when:
 
 ## Numeric widgets
 
-### `lib.widgets.stepper(imgui, session, alias, opts?)`
+### `ctx.widgets.stepper(target, opts?)`
 
 Stepper with `-` and `+` buttons around a rendered value.
 
@@ -385,7 +422,7 @@ Use when:
 - the value is small and ordinal
 - button stepping is more readable than typing
 
-### `lib.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts?)`
+### `ctx.widgets.steppedRange(minTarget, maxTarget, opts?)`
 
 Two coupled steppers rendered as:
 - min stepper
@@ -413,7 +450,7 @@ Use when:
 
 ## Boolean widgets
 
-### `lib.widgets.checkbox(imgui, session, alias, opts?)`
+### `ctx.widgets.checkbox(target, opts?)`
 
 Options:
 - `label`
@@ -421,12 +458,12 @@ Options:
 - `color`
 
 Behavior:
-- binds one boolean alias
+- binds one boolean storage field
 
 Use when:
 - the field is a plain toggle
 
-### `lib.widgets.packedCheckboxList(imgui, session, alias, opts?)`
+### `ctx.widgets.packedCheckboxList(target, opts?)`
 
 Checkbox list over packed child aliases.
 
@@ -444,7 +481,7 @@ Options:
 - `unchecked`
 
 Behavior:
-- resolves packed children from session storage metadata
+- resolves packed children from the storage field schema
 - text filter is case-insensitive substring match on option labels
 - items are laid out inline according to `optionsPerLine`
 - rendering stops after `slotCount` matches
@@ -456,8 +493,8 @@ Use when:
 Example:
 
 ```lua
-lib.widgets.packedCheckboxList(ui, session, "PackedBannedAphrodite", {
-    filterText = session.view.BanFilterText,
+ctx.widgets.packedCheckboxList("PackedBannedAphrodite", {
+    filterText = ctx.session.view.BanFilterText,
     optionsPerLine = 2,
     valueColors = {
         PackedBannedAphrodite_Attack = { 1, 0.8, 0.8, 1 },
@@ -493,7 +530,7 @@ Surface:
 Example:
 
 ```lua
-activeKey = lib.nav.verticalTabs(ui, {
+activeKey = lib.nav.verticalTabs(ctx.imgui, {
     id = "ExampleTabs",
     navWidth = 220,
     activeKey = activeKey,
@@ -506,4 +543,8 @@ activeKey = lib.nav.verticalTabs(ui, {
 
 ## Scope
 
-Widgets are direct immediate-mode helpers. Bound controls return a boolean changed or clicked flag; display-only helpers such as `separator` and `text` draw and return nothing. Composition is ordinary Lua control flow: authors call the helpers they want, in the order they want, inside their own `drawTab` function.
+Widgets are direct immediate-mode helpers. Bound controls return a boolean
+changed or clicked flag; display-only helpers such as `separator` and `text`
+draw and return nothing. Composition is ordinary Lua control flow: authors call
+the helpers they want, in the order they want, inside their own `drawTab(ctx)`
+function.

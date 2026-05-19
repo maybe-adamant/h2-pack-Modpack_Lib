@@ -47,6 +47,7 @@ local sessionModule = import('core/module_state/private_session.lua', nil, {
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
 ---@field table fun(alias: string): StorageTableSession|nil
+---@field field fun(alias: string): StorageField
 ---@field getAliasSchema fun(alias: string): StorageNode|PackedBitNode|nil
 ---@field write fun(alias: string, value: any)
 ---@field reset fun(alias: string)

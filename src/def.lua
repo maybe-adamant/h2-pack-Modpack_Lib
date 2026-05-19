@@ -74,11 +74,24 @@ local lib = {}
 
 ---@class AdamantModpackLib.StorageTableRowReadOnly
 ---@field read fun(alias: string): any
+---@field field fun(self: AdamantModpackLib.StorageTableRowReadOnly, alias: string): AdamantModpackLib.StorageField
 ---@field getAliasSchema fun(alias: string): AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode|nil
 
 ---@class AdamantModpackLib.StorageTableRowSession: AdamantModpackLib.StorageTableRowReadOnly
 ---@field write fun(alias: string, value: any): boolean
 ---@field reset fun(alias: string): boolean
+
+---@class AdamantModpackLib.StorageField
+---@field read fun(self: AdamantModpackLib.StorageField): any
+---@field write fun(self: AdamantModpackLib.StorageField, value: any): boolean?
+---@field reset fun(self: AdamantModpackLib.StorageField): boolean?
+---@field schema fun(self: AdamantModpackLib.StorageField): AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode
+---@field alias fun(self: AdamantModpackLib.StorageField): string
+---@field owner fun(self: AdamantModpackLib.StorageField): table
+---@field view fun(self: AdamantModpackLib.StorageField): table<string, any>
+
+---@alias AdamantModpackLib.WidgetTarget string|AdamantModpackLib.StorageField
+---@alias AdamantModpackLib.PackedChoiceOpts AdamantModpackLib.PackedDropdownOpts|AdamantModpackLib.PackedRadioOpts
 
 ---@class AdamantModpackLib.ManagedStore
 ---@field read fun(alias: string): any
@@ -89,6 +102,7 @@ local lib = {}
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
 ---@field table fun(alias: string): AdamantModpackLib.StorageTableSession?
+---@field field fun(alias: string): AdamantModpackLib.StorageField
 ---@field getAliasSchema fun(alias: string): AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode|nil Read-only schema metadata.
 ---@field write fun(alias: string, value: any)
 ---@field reset fun(alias: string)
@@ -110,6 +124,7 @@ local lib = {}
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
 ---@field table fun(alias: string): AdamantModpackLib.StorageTableSession?
+---@field field fun(alias: string): AdamantModpackLib.StorageField
 ---@field write fun(alias: string, value: any)
 ---@field reset fun(alias: string)
 ---@field stageAction fun(actionKey: string, value: any)
@@ -160,7 +175,13 @@ local lib = {}
 ---@class AdamantModpackLib.ModuleCreateOpts
 ---@field pluginGuid string Plugin guid captured at module file load time.
 ---@field config table Module config table.
----@field definition AdamantModpackLib.ModuleDefinition Raw module definition.
+---@field modpack? string Module pack id used by Framework grouping.
+---@field id string Stable module id.
+---@field name string Display name.
+---@field shortName? string Short display name.
+---@field tooltip? string UI tooltip.
+---@field storage? AdamantModpackLib.StorageSchema Raw storage schema.
+---@field hashGroupPlan? AdamantModpackLib.HashGroupPlan Raw hash/profile group plan.
 ---@field registerHooks? AdamantModpackLib.RegisterHooks
 ---@field registerPatchMutation? fun(
 ---    plan: AdamantModpackLib.MutationPlan,
@@ -179,8 +200,15 @@ local lib = {}
 ---    host: AdamantModpackLib.AuthorHost,
 ---    store: AdamantModpackLib.ManagedStore
 ---)
----@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
----@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
+---@field drawTab fun(ctx: AdamantModpackLib.DrawContext)
+---@field drawQuickContent? fun(ctx: AdamantModpackLib.DrawContext)
+
+---@class AdamantModpackLib.DrawContext
+---@field imgui table
+---@field session AdamantModpackLib.AuthorSession
+---@field host AdamantModpackLib.AuthorHost
+---@field field fun(alias: string): AdamantModpackLib.StorageField
+---@field widgets AdamantModpackLib.BoundWidgetsApi
 
 ---@class AdamantModpackLib.ModuleHost
 ---@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
@@ -243,7 +271,7 @@ local lib = {}
 ---@field providerId string Public provider identity returned to integration consumers.
 ---@field api table
 
----@class AdamantModpackLib.GameObjectApi
+---@class AdamantModpackLib.GameCacheApi
 ---@field get fun(object: table, packId: string, moduleId: string, key: string, factory?: fun(): table): table
 ---@field peek fun(object: table, packId: string, moduleId: string, key: string): table?
 ---@field clear fun(object: table, packId: string, moduleId: string, key: string): boolean
@@ -465,8 +493,8 @@ end
 function lib.integrations.list(id)
 end
 
----@type AdamantModpackLib.GameObjectApi
-lib.gameObject = {}
+---@type AdamantModpackLib.GameCacheApi
+lib.gameCache = {}
 
 ---@param object table
 ---@param packId string
@@ -474,7 +502,7 @@ lib.gameObject = {}
 ---@param key string
 ---@param factory? fun(): table
 ---@return table state
-function lib.gameObject.get(object, packId, moduleId, key, factory)
+function lib.gameCache.get(object, packId, moduleId, key, factory)
 end
 
 ---@param object table
@@ -482,7 +510,7 @@ end
 ---@param moduleId string
 ---@param key string
 ---@return table? state
-function lib.gameObject.peek(object, packId, moduleId, key)
+function lib.gameCache.peek(object, packId, moduleId, key)
 end
 
 ---@param object table
@@ -490,7 +518,7 @@ end
 ---@param moduleId string
 ---@param key string
 ---@return boolean cleared
-function lib.gameObject.clear(object, packId, moduleId, key)
+function lib.gameCache.clear(object, packId, moduleId, key)
 end
 
 ---@class AdamantModpackLib.RetainedOverlayColumn
@@ -691,6 +719,34 @@ end
 ---@class AdamantModpackLib.WidgetsApi
 ---@type AdamantModpackLib.WidgetsApi
 lib.widgets = {}
+
+---@class AdamantModpackLib.BoundWidgetsApi
+---@field separator fun()
+---@field text fun(text: any, opts?: AdamantModpackLib.TextOpts)
+---@field button fun(label: any, opts?: AdamantModpackLib.ButtonOpts): boolean
+---@field confirmButton fun(id: string|number, label: any, opts?: AdamantModpackLib.ConfirmButtonOpts): boolean
+---@field inputText fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.InputTextOpts): boolean
+---@field dropdown fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.DropdownOpts): boolean
+---@field mappedDropdown fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.MappedDropdownOpts): boolean
+---@field packedDropdown fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.PackedDropdownOpts): boolean
+---@field getPackedChoiceAlias fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.PackedChoiceOpts): string?
+---@field radio fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.RadioOpts): boolean
+---@field mappedRadio fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.MappedRadioOpts): boolean
+---@field packedRadio fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.PackedRadioOpts): boolean
+---@field stepper fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.StepperOpts): boolean
+---@field steppedRange fun(
+---    minTarget: AdamantModpackLib.WidgetTarget,
+---    maxTarget: AdamantModpackLib.WidgetTarget,
+---    opts?: AdamantModpackLib.SteppedRangeOpts
+---): boolean
+---@field checkbox fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.CheckboxOpts): boolean
+---@field packedCheckboxList fun(target: AdamantModpackLib.WidgetTarget, opts?: AdamantModpackLib.PackedCheckboxListOpts): boolean
+
+---@param imgui table
+---@param session AdamantModpackLib.Session
+---@return AdamantModpackLib.BoundWidgetsApi
+function lib.widgets.bind(imgui, session)
+end
 
 ---@param imgui table
 function lib.widgets.separator(imgui)

@@ -1,9 +1,9 @@
 local deps = ...
 
 local logging = deps.logging
-local gameObjectPublic = {}
+local gameCachePublic = {}
 
-local ROOT_KEY = "_AdamantModpackLibGameObject"
+local ROOT_KEY = "_AdamantModpackLibGameCache"
 
 local function tableIsEmpty(value)
     return next(value) == nil
@@ -11,16 +11,16 @@ end
 
 local function getModuleBucket(object, packId, moduleId, key, create)
     if type(object) ~= "table" then
-        logging.violate("game_object.invalid_args", "lib.gameObject object must be a table")
+        logging.violate("game_cache.invalid_args", "lib.gameCache object must be a table")
     end
     if type(packId) ~= "string" or packId == "" then
-        logging.violate("game_object.invalid_args", "lib.gameObject packId must be a non-empty string")
+        logging.violate("game_cache.invalid_args", "lib.gameCache packId must be a non-empty string")
     end
     if type(moduleId) ~= "string" or moduleId == "" then
-        logging.violate("game_object.invalid_args", "lib.gameObject moduleId must be a non-empty string")
+        logging.violate("game_cache.invalid_args", "lib.gameCache moduleId must be a non-empty string")
     end
     if type(key) ~= "string" or key == "" then
-        logging.violate("game_object.invalid_args", "lib.gameObject key must be a non-empty string")
+        logging.violate("game_cache.invalid_args", "lib.gameCache key must be a non-empty string")
     end
 
     local root = rawget(object, ROOT_KEY)
@@ -30,7 +30,7 @@ local function getModuleBucket(object, packId, moduleId, key, create)
     end
     if type(root) ~= "table" then
         if create then
-            logging.violate("game_object.invalid_bucket", "lib.gameObject root bucket is not a table")
+            logging.violate("game_cache.invalid_bucket", "lib.gameCache root bucket is not a table")
         end
         return nil
     end
@@ -42,7 +42,7 @@ local function getModuleBucket(object, packId, moduleId, key, create)
     end
     if type(packBucket) ~= "table" then
         if create then
-            logging.violate("game_object.invalid_bucket", "lib.gameObject pack bucket is not a table")
+            logging.violate("game_cache.invalid_bucket", "lib.gameCache pack bucket is not a table")
         end
         return nil
     end
@@ -54,7 +54,7 @@ local function getModuleBucket(object, packId, moduleId, key, create)
     end
     if type(moduleBucket) ~= "table" then
         if create then
-            logging.violate("game_object.invalid_bucket", "lib.gameObject module bucket is not a table")
+            logging.violate("game_cache.invalid_bucket", "lib.gameCache module bucket is not a table")
         end
         return nil
     end
@@ -62,20 +62,20 @@ local function getModuleBucket(object, packId, moduleId, key, create)
     return moduleBucket, packBucket, root
 end
 
---- Gets or creates a module-owned state table scoped to a live game object.
----@param object table Live game object table such as `CurrentRun`, room data, or loot data.
+--- Gets or creates a module-owned runtime cache table scoped to a live game table.
+---@param object table Live game table such as `CurrentRun`, room data, or loot data.
 ---@param packId string Pack namespace.
 ---@param moduleId string Module namespace inside the pack.
----@param key string State bucket key inside the module namespace.
+---@param key string Cache bucket key inside the module namespace.
 ---@param factory fun(): table|nil Optional initializer. Defaults to `{}`.
----@return table state Namespaced object state table.
-function gameObjectPublic.get(object, packId, moduleId, key, factory)
+---@return table state Namespaced cache table.
+function gameCachePublic.get(object, packId, moduleId, key, factory)
     local moduleBucket = getModuleBucket(object, packId, moduleId, key, true)
     local state = moduleBucket[key]
     if state == nil then
         if factory ~= nil then
             if type(factory) ~= "function" then
-                logging.violate("game_object.invalid_factory", "lib.gameObject.get factory must be a function")
+                logging.violate("game_cache.invalid_factory", "lib.gameCache.get factory must be a function")
             end
             state = factory()
         end
@@ -83,23 +83,23 @@ function gameObjectPublic.get(object, packId, moduleId, key, factory)
             state = {}
         end
         if type(state) ~= "table" then
-            logging.violate("game_object.invalid_factory", "lib.gameObject.get factory must return a table")
+            logging.violate("game_cache.invalid_factory", "lib.gameCache.get factory must return a table")
         end
         moduleBucket[key] = state
     end
     if type(state) ~= "table" then
-        logging.violate("game_object.invalid_bucket", "lib.gameObject state bucket is not a table")
+        logging.violate("game_cache.invalid_bucket", "lib.gameCache cache bucket is not a table")
     end
     return state
 end
 
---- Returns an existing module-owned state table without creating it.
----@param object table Live game object table.
+--- Returns an existing module-owned runtime cache table without creating it.
+---@param object table Live game table.
 ---@param packId string Pack namespace.
 ---@param moduleId string Module namespace inside the pack.
----@param key string State bucket key inside the module namespace.
----@return table|nil state Existing state table, when present.
-function gameObjectPublic.peek(object, packId, moduleId, key)
+---@param key string Cache bucket key inside the module namespace.
+---@return table|nil state Existing cache table, when present.
+function gameCachePublic.peek(object, packId, moduleId, key)
     local moduleBucket = getModuleBucket(object, packId, moduleId, key, false)
     local state = moduleBucket and moduleBucket[key] or nil
     if type(state) == "table" then
@@ -108,13 +108,13 @@ function gameObjectPublic.peek(object, packId, moduleId, key)
     return nil
 end
 
---- Clears one module-owned state table from a live game object.
----@param object table Live game object table.
+--- Clears one module-owned runtime cache table from a live game table.
+---@param object table Live game table.
 ---@param packId string Pack namespace.
 ---@param moduleId string Module namespace inside the pack.
----@param key string State bucket key inside the module namespace.
+---@param key string Cache bucket key inside the module namespace.
 ---@return boolean cleared True when a bucket existed and was removed.
-function gameObjectPublic.clear(object, packId, moduleId, key)
+function gameCachePublic.clear(object, packId, moduleId, key)
     local moduleBucket, packBucket, root = getModuleBucket(object, packId, moduleId, key, false)
     if not moduleBucket or moduleBucket[key] == nil then
         return false
@@ -132,4 +132,4 @@ function gameObjectPublic.clear(object, packId, moduleId, key)
     return true
 end
 
-public.gameObject = gameObjectPublic
+public.gameCache = gameCachePublic

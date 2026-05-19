@@ -15,38 +15,44 @@ end
 function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     local callbackHost = nil
     local drawHost = nil
+    local drawImgui = nil
+    local drawWidgets = nil
     local authorSchemaNode = nil
     local authorRowValue = nil
+    local authorRootField = nil
+    local authorRowField = nil
     local config = {}
 
     local host, store = self.h.public.createModule({
         pluginGuid = "test-create-module",
         config = config,
-        definition = {
-            modpack = "create-module-pack",
-            id = "CreateModule",
-            name = "Create Module",
-            storage = {
-                { type = "bool", alias = "Flag", default = false },
-                {
-                    type = "table",
-                    alias = "Rows",
-                    defaultRows = 1,
-                    row = {
-                        { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
-                    },
+        modpack = "create-module-pack",
+        id = "CreateModule",
+        name = "Create Module",
+        storage = {
+            { type = "bool", alias = "Flag", default = false },
+            {
+                type = "table",
+                alias = "Rows",
+                defaultRows = 1,
+                row = {
+                    { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
                 },
             },
         },
         registerIntegrations = function(authorHost)
             callbackHost = authorHost
         end,
-        drawTab = function(_, authorSession, authorHost)
-            drawHost = authorHost
-            authorSchemaNode = authorSession.getAliasSchema("Flag")
-            local row = authorSession.table("Rows"):rowHandle(1)
+        drawTab = function(ctx)
+            drawImgui = ctx.imgui
+            drawHost = ctx.host
+            drawWidgets = ctx.widgets
+            authorSchemaNode = ctx.session.getAliasSchema("Flag")
+            authorRootField = ctx.field("Flag")
+            local row = ctx.session.table("Rows"):rowHandle(1)
+            authorRowField = row:field("Limit")
             authorRowValue = row.read("Limit")
-            authorSession.write("Flag", true)
+            ctx.session.write("Flag", true)
         end,
     })
 
@@ -57,6 +63,9 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
 
     lu.assertEquals(host, callbackHost)
     lu.assertEquals(host, drawHost)
+    lu.assertNotNil(drawImgui)
+    lu.assertEquals(type(drawWidgets.checkbox), "function")
+    lu.assertNil(drawWidgets.forSession)
     lu.assertEquals(type(host.isEnabled), "function")
     lu.assertEquals(store.read("Flag"), false)
     liveHost.flush()
@@ -65,6 +74,10 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
     lu.assertEquals(authorRowValue, 2)
+    lu.assertEquals(authorRootField:alias(), "Flag")
+    lu.assertEquals(authorRootField:schema().alias, "Flag")
+    lu.assertEquals(authorRowField:alias(), "Limit")
+    lu.assertEquals(authorRowField:read(), 2)
     local liveState = self.h.moduleHost.getState(liveHost)
     lu.assertEquals(type(liveState.definition._structuralFingerprint), "string")
 end
@@ -76,13 +89,11 @@ function TestModuleHost_CreateModule:testCreateModulePassesRuntimeHandlesToHookR
     local host, store = self.h.public.createModule({
         pluginGuid = "test-create-module-publish-store",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "PublishStore",
-            name = "Publish Store",
-            storage = {
-                { type = "bool", alias = "Flag", default = true },
-            },
+        modpack = "create-module-pack",
+        id = "PublishStore",
+        name = "Publish Store",
+        storage = {
+            { type = "bool", alias = "Flag", default = true },
         },
         registerHooks = function(authorHost, activeStore)
             hookSawStore = activeStore and activeStore.read("Flag") == true
@@ -103,11 +114,9 @@ function TestModuleHost_CreateModule:testCreateModuleReturnsOnlyAuthorHostSurfac
     local host = self.h.public.createModule({
         pluginGuid = "test-create-module-author-surface",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "AuthorSurface",
-            name = "Author Surface",
-        },
+        modpack = "create-module-pack",
+        id = "AuthorSurface",
+        name = "Author Surface",
         drawTab = function() end,
     })
 
@@ -128,9 +137,7 @@ function TestModuleHost_CreateModule:testTryCreateModuleReturnsErrorAndLogsWarni
     local host, store, err = self.h.public.tryCreateModule({
         pluginGuid = "test-try-create-module-invalid",
         config = {},
-        definition = {
-            id = "TryCreateInvalid",
-        },
+        id = "TryCreateInvalid",
         drawTab = function() end,
     })
 
@@ -147,11 +154,9 @@ function TestModuleHost_CreateModule:testCreateModuleActivationIsSingleUse()
     local host = self.h.public.createModule({
         pluginGuid = "test-create-module-single-activate",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "SingleActivate",
-            name = "Single Activate",
-        },
+        modpack = "create-module-pack",
+        id = "SingleActivate",
+        name = "Single Activate",
         drawTab = function() end,
     })
 
@@ -168,9 +173,21 @@ function TestModuleHost_CreateModule:testCreateModuleRejectsOwnerOption()
             owner = {},
             pluginGuid = "test-create-module-hooks-no-owner",
             config = {},
+            id = "HooksNoOwner",
+            name = "Hooks No Owner",
+            drawTab = function() end,
+        })
+    end)
+end
+
+function TestModuleHost_CreateModule:testCreateModuleRejectsLegacyDefinitionOption()
+    lu.assertErrorMsgContains("definition table is no longer supported", function()
+        self.h.public.createModule({
+            pluginGuid = "test-create-module-legacy-definition",
+            config = {},
             definition = {
-                id = "HooksNoOwner",
-                name = "Hooks No Owner",
+                id = "LegacyDefinition",
+                name = "Legacy Definition",
             },
             drawTab = function() end,
         })
@@ -182,10 +199,8 @@ function TestModuleHost_CreateModule:testCreateModuleTreatsManualMutationAsUnkno
         self.h.public.createModule({
             pluginGuid = "test-create-module-manual-mutation-unknown",
             config = {},
-            definition = {
-                id = "ManualMutationUnknown",
-                name = "Manual Mutation Unknown",
-            },
+            id = "ManualMutationUnknown",
+            name = "Manual Mutation Unknown",
             registerManualMutation = {
                 apply = function() end,
                 revert = function() end,
@@ -199,11 +214,9 @@ function TestModuleHost_CreateModule:testCreateModuleFingerprintTracksQuickConte
     local stableHost = self.h.public.createModule({
         pluginGuid = "test-create-module-quick-content-stable",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "QuickContentStable",
-            name = "Quick Content Stable",
-        },
+        modpack = "create-module-pack",
+        id = "QuickContentStable",
+        name = "Quick Content Stable",
         drawTab = function() end,
         drawQuickContent = function() end,
     })
@@ -212,11 +225,9 @@ function TestModuleHost_CreateModule:testCreateModuleFingerprintTracksQuickConte
     self.h.public.createModule({
         pluginGuid = "test-create-module-quick-content-stable",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "QuickContentStable",
-            name = "Quick Content Stable",
-        },
+        modpack = "create-module-pack",
+        id = "QuickContentStable",
+        name = "Quick Content Stable",
         drawTab = function() end,
         drawQuickContent = function() end,
     })
@@ -226,11 +237,9 @@ function TestModuleHost_CreateModule:testCreateModuleFingerprintTracksQuickConte
     local addedHost = self.h.public.createModule({
         pluginGuid = "test-create-module-quick-content-added",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "QuickContentAdded",
-            name = "Quick Content Added",
-        },
+        modpack = "create-module-pack",
+        id = "QuickContentAdded",
+        name = "Quick Content Added",
         drawTab = function() end,
     })
     addedHost.tryActivate()
@@ -238,11 +247,9 @@ function TestModuleHost_CreateModule:testCreateModuleFingerprintTracksQuickConte
     self.h.public.createModule({
         pluginGuid = "test-create-module-quick-content-added",
         config = {},
-        definition = {
-            modpack = "create-module-pack",
-            id = "QuickContentAdded",
-            name = "Quick Content Added",
-        },
+        modpack = "create-module-pack",
+        id = "QuickContentAdded",
+        name = "Quick Content Added",
         drawTab = function() end,
         drawQuickContent = function() end,
     })

@@ -29,7 +29,7 @@ local moduleState = import('core/module_state/module_state.lua', nil, {
     values = values,
 })
 
-import('core/game_object/game_object.lua', nil, {
+import('core/game_cache/game_cache.lua', nil, {
     logging = logging,
 })
 
@@ -77,6 +77,10 @@ local mutation = import('core/mutations/mutations.lua', nil, {
     coordinator = coordinator,
     runtime = runtime,
 })
+import('core/widgets/init.lua', nil, {
+    logging = logging,
+    storage = storage,
+})
 local moduleHost = import('core/module_bootstrap/host.lua', nil, {
     logging = logging,
     values = values,
@@ -88,6 +92,8 @@ local moduleHost = import('core/module_bootstrap/host.lua', nil, {
     overlays = overlays,
     mutation = mutation,
     coordinator = coordinator,
+    storage = storage,
+    widgets = public.widgets,
 })
 import('core/standalone_host/standalone_host.lua', nil, {
     gameDeps = gameDeps,
@@ -103,10 +109,6 @@ import('core/module_bootstrap/module.lua', nil, {
     logging = logging,
     moduleHost = moduleHost,
     moduleState = moduleState,
-})
-import('core/widgets/init.lua', nil, {
-    logging = logging,
-    storage = storage,
 })
 
 return {

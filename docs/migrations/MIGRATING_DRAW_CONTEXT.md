@@ -32,7 +32,10 @@ factory:
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = definition,
+    modpack = PACK_ID,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = storage,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
@@ -143,6 +146,64 @@ cleaner:
 - `drawQuickContent` remains an optional draw callback.
 - `hasQuickContent` remains internal structural surface data, not author-owned
   module data.
+
+## Widget Storage Fields
+
+The draw-context widget surface uses storage fields, not session-like table
+handles.
+
+Normal root widgets should stay concise:
+
+```lua
+ctx.widgets.checkbox("FeatureEnabled", opts)
+ctx.widgets.dropdown("Mode", opts)
+ctx.widgets.packedCheckboxList("GodPool", opts)
+```
+
+The string target is shorthand for a root storage field on the draw context's
+author session. The full root form is available when a helper wants to pass a
+resolved target around:
+
+```lua
+local mode = ctx.field("Mode")
+ctx.widgets.dropdown(mode, opts)
+```
+
+Table-backed widgets use a `StorageField` produced by the table API:
+
+```lua
+local row = ctx.session.table("ConfigurableBanPools"):rowHandle(index)
+local bans = row:field("BanPool")
+
+ctx.widgets.packedCheckboxList(bans, opts)
+ctx.widgets.packedDropdown(bans, opts)
+local selected = ctx.widgets.getPackedChoiceAlias(bans, opts)
+```
+
+`StorageField` is the resolved leaf value target for widgets. It is not a path,
+not a scoped alias string, and not a row handle pretending to be a session.
+Storage and table APIs are responsible for traversal and validation; widgets
+are leaf renderers that read schema/value data from the final field target.
+
+Bound widgets accept only these target forms:
+
+- `string`: root field alias, resolved through `ctx.field(alias)`.
+- `StorageField`: explicit resolved storage field.
+
+They do not accept arbitrary table-shaped targets, parse scoped path strings,
+or expose a public `ctx.widgets.forSession(...)` rebinding API. Future path
+support can live in storage APIs and resolve to `StorageField` before widgets
+see it.
+
+Implementation audit checklist:
+
+- Add `ctx.field(alias)` for explicit root storage fields.
+- Add `rowHandle:field(alias)` for table row storage fields.
+- Route bound widget targets through one `StorageField` normalization path.
+- Remove `ctx.widgets.forSession(...)` from the public bound widget surface.
+- Replace loose `(handle, alias)` widget call sites with named domain helpers
+  that return `StorageField` values.
+- Keep normal root widget calls using string aliases as the ergonomic shorthand.
 
 ## Migration Steps
 

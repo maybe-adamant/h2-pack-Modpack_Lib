@@ -13,7 +13,7 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.hooks.*`
 - `lib.overlays.*`
 - `lib.integrations.*`
-- `lib.gameObject.*`
+- `lib.gameCache.*`
 - `lib.mutation.*`
 - `lib.coordinator.*`
 - `lib.widgets.*`
@@ -107,11 +107,12 @@ Rules:
 - consumers should prefer `invoke(...)` so Lib resolves active provider behavior at call time
 - when multiple providers exist, `get(id)` returns the most recently registered provider
 
-## `lib.gameObject`
+## `lib.gameCache`
 
-Namespaced state buckets attached to live game object tables such as `CurrentRun`, room data, or loot data.
+Namespaced runtime cache buckets attached to live game tables such as `CurrentRun`, room data, or loot data.
 
-Use this for object-owned runtime state whose lifetime should follow that game table. It is not persisted, staged, hashed, profiled, or reset by Lib.
+Use this for module-owned runtime cache whose lifetime should follow that game
+table. It is not persisted, staged, hashed, profiled, or reset by Lib.
 
 The normal author path is `lib.createModule(...)`, which prepares the definition,
 creates the store/session pair, and returns the author-facing host plus the state
@@ -120,7 +121,7 @@ handles to keep. `host.tryActivate()` publishes the live host and runs side effe
 Advanced use:
 
 ```lua
-local state = lib.gameObject.get(CurrentRun, PACK_ID, MODULE_ID, "run", function()
+local state = lib.gameCache.get(CurrentRun, PACK_ID, MODULE_ID, "run", function()
     return {
         ForcedNPCPending = {},
         NPCEncounterSeen = {},
@@ -129,16 +130,16 @@ end)
 ```
 
 Surface:
-- `lib.gameObject.get(object, packId, moduleId, key, factory?)`
-- `lib.gameObject.peek(object, packId, moduleId, key)`
-- `lib.gameObject.clear(object, packId, moduleId, key)`
+- `lib.gameCache.get(object, packId, moduleId, key, factory?)`
+- `lib.gameCache.peek(object, packId, moduleId, key)`
+- `lib.gameCache.clear(object, packId, moduleId, key)`
 
 Rules:
 - `object` must be a table
 - `packId`, `moduleId`, and `key` must be non-empty strings
 - `factory` runs only when the bucket is missing
 - `factory` must return a table when provided
-- state is namespaced under one Lib-owned root on the object
+- cache is namespaced under one Lib-owned root on the object
 
 ## Store And Session
 
@@ -157,12 +158,10 @@ local ui = import("mods/ui.lua").bind(data)
 local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = "ExampleModule",
-        name = "Example Module",
-        storage = data.buildStorage(),
-    },
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerPatchMutation = logic.buildPatchPlan,
     registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
@@ -178,7 +177,9 @@ Returns:
   Runtime read surface for gameplay/hooks.
 
 `createModule(...)` intentionally does not return the prepared definition or
-raw session. Draw callbacks receive the restricted author session. If `registerHooks` is provided, Lib calls it as:
+raw session. Draw callbacks receive a render-scoped context with `imgui`,
+author `session`, author `host`, and bound `widgets`. If `registerHooks` is
+provided, Lib calls it as:
 
 ```lua
 registerHooks(host, store)
@@ -303,6 +304,7 @@ local enabled = tiers:read(1, "Enabled")
 local row = tiers:rowHandle(1)
 row.write("ChoiceMode", 2)
 local selected = row.read("ChoiceMode")
+local field = row:field("ChoiceMode")
 ```
 
 Table handles:
@@ -310,7 +312,7 @@ Table handles:
 - `session.table(alias)` returns a staged writable table handle
 - table handles are object methods; call them with colon syntax such as `tiers:read(rowIndex, alias)`
 - row aliases can address scalar row roots, packed row roots, or packed child aliases
-- `rowHandle(rowIndex)` returns a positional row cursor with `read(alias)` and `getAliasSchema(alias)`
+- `rowHandle(rowIndex)` returns a positional row cursor with `read(alias)`, `field(alias)`, and `getAliasSchema(alias)`
 - writable session row handles also expose `write(alias, value)` and `reset(alias)`
 - read-only store row handles do not expose write methods
 - table storage participates in hash/profile serialization when `hash` is true
@@ -344,6 +346,7 @@ Useful surface:
 - `session.view`
 - `session.read(alias)`
 - `session.table(alias)`
+- `session.field(alias)`
 - `session.getAliasSchema(alias)`
 - `session.write(alias, value)`
 - `session.stageAction(actionKey, value)`
@@ -364,6 +367,7 @@ When a module is rendered through a Lib host, draw callbacks receive a restricte
 - `view`
 - `read(alias)`
 - `table(alias)`
+- `field(alias)`
 - `write(alias, value)`
 - `stageAction(actionKey, value)`
 - `readAction(actionKey)`
@@ -377,6 +381,10 @@ When a module is rendered through a Lib host, draw callbacks receive a restricte
 and widget plumbing. Treat the returned nodes as read-only metadata owned by Lib
 storage preparation. Widgets use this metadata for composite storage such as
 packed roots.
+
+`session.field(alias)` and `row:field(alias)` return `StorageField` targets for
+widgets and UI helpers. A storage field is a resolved leaf value target; storage
+and table APIs own traversal, while widgets render the final field.
 
 Behavior:
 - persisted aliases stage in `session` and only hit config on flush/commit
@@ -458,12 +466,10 @@ local ui = import("mods/ui.lua").bind(data)
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = {
-        modpack = PACK_ID,
-        id = MODULE_ID,
-        name = "Example Module",
-        storage = data.buildStorage(),
-    },
+    modpack = PACK_ID,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerHooks = registerHooks,
     drawTab = ui.drawTab,
 })
@@ -771,6 +777,7 @@ Lib internals. Normal module code should keep the author host returned by
 Immediate-mode widget helpers.
 
 Built-ins:
+- `lib.widgets.bind(imgui, session)`
 - `lib.widgets.separator(imgui)`
 - `lib.widgets.text(imgui, text, opts?)`
 - `lib.widgets.button(imgui, session, label, opts?)`
@@ -788,7 +795,35 @@ Built-ins:
 - `lib.widgets.checkbox(imgui, session, alias, opts?)`
 - `lib.widgets.packedCheckboxList(imgui, session, alias, opts?)`
 
-These are direct immediate-mode helpers.
+These are direct immediate-mode helpers. Module draw callbacks normally use
+the bound surface on `ctx.widgets`, which removes repeated `imgui` and
+`session` arguments. Bound value widgets accept either a root alias string or a
+`StorageField`:
+
+```lua
+function ui.drawTab(ctx)
+    ctx.widgets.checkbox("FeatureEnabled", {
+        label = "Enable Feature",
+    })
+
+    ctx.imgui.SameLine()
+    ctx.widgets.dropdown("Mode", {
+        label = "Mode",
+        values = { "Default", "Custom" },
+    })
+end
+```
+
+Use `ctx.field(alias)` for an explicit root storage field, and
+`row:field(alias)` for table-backed fields:
+
+```lua
+local mode = ctx.field("Mode")
+ctx.widgets.dropdown(mode, opts)
+
+local row = ctx.session.table("Rows"):rowHandle(1)
+ctx.widgets.packedDropdown(row:field("PackedChoices"), opts)
+```
 
 `getPackedChoiceAlias(...)` returns the selected child alias for packed dropdown/radio use cases, or `nil` when the selected choice is none or multiple. It uses the same `selectionMode` option as `packedDropdown(...)` and `packedRadio(...)`.
 

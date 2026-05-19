@@ -113,6 +113,14 @@ function widgetHelpers.MakeSelectableId(label, uniqueId)
     return tostring(label or "") .. "##" .. tostring(uniqueId or "")
 end
 
+function widgetHelpers.ResolveStorageField(owner, target, methodName)
+    return storageService.field.resolve(owner, target, methodName)
+end
+
+function widgetHelpers.GetFieldOwner(field)
+    return field:owner()
+end
+
 local function GetPackedChoiceMode(node)
     local mode = node.selectionMode
     if mode == nil or mode == "" then
@@ -145,15 +153,16 @@ local function GetPackedChoiceWriteValue(mode, isActive)
     return isActive == true
 end
 
-function widgetHelpers.ClassifyPackedChoice(node, session, children)
+function widgetHelpers.ClassifyPackedChoice(node, field, children)
     local mode = GetPackedChoiceMode(node)
+    local owner = widgetHelpers.GetFieldOwner(field)
     local activeCount = 0
     local totalCount = 0
     local lastActiveChild = nil
 
     for _, child in ipairs(children or {}) do
         totalCount = totalCount + 1
-        local value = session.read(child.alias)
+        local value = owner.read(child.alias)
         if value == nil then
             value = PACKED_CHOICE_NONE_VALUE
         end
@@ -180,48 +189,49 @@ function widgetHelpers.ClassifyPackedChoice(node, session, children)
     }
 end
 
-function widgetHelpers.ApplyPackedChoiceSelection(session, children, selectedAlias, selection)
+function widgetHelpers.ApplyPackedChoiceSelection(field, children, selectedAlias, selection)
+    local owner = widgetHelpers.GetFieldOwner(field)
     local changed = false
     for _, child in ipairs(children or {}) do
         local shouldBeActive = child.alias == selectedAlias
         local nextValue = GetPackedChoiceWriteValue(selection.mode, shouldBeActive)
-        local currentValue = session.read(child.alias)
+        local currentValue = owner.read(child.alias)
         if currentValue == nil then
             currentValue = selection.noneValue
         end
         if currentValue ~= nextValue then
-            session.write(child.alias, nextValue)
+            owner.write(child.alias, nextValue)
             changed = true
         end
     end
     return changed
 end
 
-function widgetHelpers.ClearPackedChoiceSelection(session, children, selection)
+function widgetHelpers.ClearPackedChoiceSelection(field, children, selection)
+    local owner = widgetHelpers.GetFieldOwner(field)
     local changed = false
     for _, child in ipairs(children or {}) do
-        local currentValue = session.read(child.alias)
+        local currentValue = owner.read(child.alias)
         if currentValue == nil then
             currentValue = selection.noneValue
         end
         if currentValue ~= selection.noneValue then
-            session.write(child.alias, selection.noneValue)
+            owner.write(child.alias, selection.noneValue)
             changed = true
         end
     end
     return changed
 end
 
-function widgetHelpers.ResolvePackedChildren(session, alias)
-    if type(session) ~= "table" or type(session.getAliasSchema) ~= "function" then
+function widgetHelpers.ResolvePackedChildren(field)
+    if not storageService.field.is(field) then
         logging.violate(
             "widgets.invalid_packed_session",
-            "packed widgets require a session with getAliasSchema(alias)"
+            "packed widgets require a StorageField target"
         )
     end
 
-    local node = session.getAliasSchema(alias)
-    return storageService.packed.getPackedAliases(node)
+    return storageService.packed.getPackedAliases(field:schema())
 end
 
 return widgetHelpers

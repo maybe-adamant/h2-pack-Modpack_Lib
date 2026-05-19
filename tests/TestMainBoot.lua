@@ -203,7 +203,7 @@ function TestMainBoot.testMainLoadsPublicSurface()
     lu.assertEquals(type(h.public.standaloneUiBridge), "function")
 
     lu.assertEquals(type(h.public.coordinator), "table")
-    lu.assertEquals(type(h.public.gameObject), "table")
+    lu.assertEquals(type(h.public.gameCache), "table")
     lu.assertEquals(type(h.public.hashing), "table")
     lu.assertEquals(type(h.public.hooks), "table")
     lu.assertEquals(type(h.public.integrations), "table")

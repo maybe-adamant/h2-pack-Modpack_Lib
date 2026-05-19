@@ -37,17 +37,17 @@ return {
         description = "Built-in storage aliases are owned by Lib and cannot be declared by modules.",
     },
 
-    ["game_object.invalid_args"] = {
+    ["game_cache.invalid_args"] = {
         severity = "error",
-        description = "Game-object state access requires object, pack id, module id, and key arguments.",
+        description = "Game cache access requires object, pack id, module id, and key arguments.",
     },
-    ["game_object.invalid_bucket"] = {
+    ["game_cache.invalid_bucket"] = {
         severity = "error",
-        description = "Game-object state buckets must remain tables owned by Lib.",
+        description = "Game cache buckets must remain tables owned by Lib.",
     },
-    ["game_object.invalid_factory"] = {
+    ["game_cache.invalid_factory"] = {
         severity = "error",
-        description = "Game-object state factories must be functions that return tables.",
+        description = "Game cache factories must be functions that return tables.",
     },
 
     ["host.invalid_create_opts"] = {
@@ -73,6 +73,10 @@ return {
     ["host.unknown_opt"] = {
         severity = "error",
         description = "Module host creation only accepts known construction options.",
+    },
+    ["host.definition_option_removed"] = {
+        severity = "error",
+        description = "Module authors must pass definition fields directly to createModule.",
     },
     ["host.invalid_standalone_binding"] = {
         severity = "error",
@@ -164,6 +168,14 @@ return {
         severity = "error",
         description = "Packed widgets require a session exposing prepared storage schema metadata.",
     },
+    ["widgets.invalid_field_target"] = {
+        severity = "error",
+        description = "Bound widgets require a root alias string or Lib-created StorageField target.",
+    },
+    ["widgets.mismatched_field_owners"] = {
+        severity = "error",
+        description = "Stepped range widgets require both fields to share one storage owner.",
+    },
 
     ["session.unknown_reset_alias"] = {
         severity = "error",
@@ -204,6 +216,23 @@ return {
     ["session.invalid_action_key"] = {
         severity = "error",
         description = "Session staged actions require a non-empty string action key.",
+    },
+
+    ["storage.invalid_field_alias"] = {
+        severity = "error",
+        description = "Storage fields require a non-empty storage alias.",
+    },
+    ["storage.invalid_field_owner"] = {
+        severity = "error",
+        description = "Storage fields require a storage owner exposing read and schema access.",
+    },
+    ["storage.unknown_field_alias"] = {
+        severity = "error",
+        description = "Storage fields can only target prepared storage aliases.",
+    },
+    ["storage.readonly_field"] = {
+        severity = "error",
+        description = "Writable widget fields require a writable storage owner.",
     },
 
     ["store.invalid_create_args"] = {

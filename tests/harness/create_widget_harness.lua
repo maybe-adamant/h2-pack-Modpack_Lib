@@ -9,6 +9,9 @@ local function createValueSession(value)
         write = function(_, nextValue)
             value = nextValue
         end,
+        getAliasSchema = function(alias)
+            return { alias = alias, type = "int" }
+        end,
         stageAction = function(actionKey, actionValue)
             actions[actionKey] = actionValue
         end,
@@ -22,6 +25,9 @@ local function createMapSession(values)
     return {
         read = function(alias)
             return values[alias]
+        end,
+        getAliasSchema = function(alias)
+            return { alias = alias, type = "string" }
         end,
     }
 end

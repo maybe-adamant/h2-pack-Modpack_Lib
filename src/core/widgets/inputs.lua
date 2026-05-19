@@ -14,7 +14,9 @@ local helpers = ...
 ---@return boolean
 function public.widgets.inputText(imgui, session, alias, opts)
     opts = opts or {}
-    local current = tostring(session.read(alias) or "")
+    local field = helpers.ResolveStorageField(session, alias, "widgets.inputText")
+    local fieldAlias = field:alias()
+    local current = tostring(field:read() or "")
     local maxLen = math.max(math.floor(tonumber(opts.maxLen) or 256), 1)
     local label = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 120
@@ -30,13 +32,13 @@ function public.widgets.inputText(imgui, session, alias, opts)
     if controlWidth > 0 then
         imgui.PushItemWidth(controlWidth)
     end
-    local nextValue, changed = imgui.InputText("##" .. tostring(alias), current, maxLen)
+    local nextValue, changed = imgui.InputText("##" .. tostring(fieldAlias), current, maxLen)
     if controlWidth > 0 then
         imgui.PopItemWidth()
     end
     helpers.ShowTooltip(imgui, opts.tooltip)
     if changed then
-        session.write(alias, nextValue)
+        field:write(nextValue)
         return true
     end
     return false

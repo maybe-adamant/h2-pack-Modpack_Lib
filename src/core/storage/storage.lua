@@ -19,6 +19,10 @@ local packed = import('core/storage/private_packed.lua', nil, {
 })
 storage.packed = packed
 
+storage.field = import('core/storage/storage_field.lua', nil, {
+    logging = logging,
+})
+
 local tableStorage = import('core/storage/private_table.lua', nil, {
     logging = logging,
     storage = storage,

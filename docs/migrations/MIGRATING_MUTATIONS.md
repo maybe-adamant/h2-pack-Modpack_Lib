@@ -51,13 +51,15 @@ local host = lib.createModule({
 After:
 
 ```lua
-local definition = import("mods/definition.lua")
+local data = import("mods/data.lua")
 local ui = import("mods/ui.lua")
 
 local host = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = definition,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
     registerPatchMutation = function(plan, host, store)
         plan:set(SomeGameTable, "SomeKey", true)
     end,

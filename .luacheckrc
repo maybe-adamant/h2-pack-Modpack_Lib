@@ -14,7 +14,7 @@ globals = {
     "ScreenData",
     "TestCoordinator",
     "TestGameDeps",
-    "TestGameObject",
+    "TestGameCache",
     "TestHashing",
     "TestHooks",
     "TestIntegrations",

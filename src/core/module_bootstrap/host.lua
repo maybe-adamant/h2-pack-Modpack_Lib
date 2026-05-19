@@ -10,6 +10,8 @@ local mutation = deps.mutation
 local coordinator = deps.coordinator
 local definition = deps.definition
 local hostState = deps.hostState
+local storage = deps.storage
+local widgets = deps.widgets
 local moduleHost = {
     prepareDefinition = definition.prepareDefinition,
 }
@@ -65,8 +67,15 @@ end
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
 ---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
----@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
----@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
+---@field drawTab fun(ctx: DrawContext)
+---@field drawQuickContent fun(ctx: DrawContext)|nil
+
+---@class DrawContext
+---@field imgui table
+---@field session AuthorSession
+---@field host AuthorHost
+---@field field fun(alias: string): StorageField
+---@field widgets BoundWidgets
 
 ---@class ModuleHost
 ---@field getIdentity fun(): table
@@ -154,6 +163,18 @@ local function CreateAuthorHost(host)
         logIf = function(fmt, ...)
             return host.logIf(fmt, ...)
         end,
+    }
+end
+
+local function CreateDrawContext(imgui, authorSession, authorHost)
+    return {
+        imgui = imgui,
+        session = authorSession,
+        host = authorHost,
+        field = function(alias)
+            return storage.field.create(authorSession, alias, "ctx.field")
+        end,
+        widgets = widgets.bind(imgui, authorSession),
     }
 end
 
@@ -369,13 +390,13 @@ function moduleHost.create(opts)
 
     function host.drawTab(imgui)
         requireActivated("drawTab")
-        return drawTab(imgui, authorSession, authorHost)
+        return drawTab(CreateDrawContext(imgui, authorSession, authorHost))
     end
 
     if type(drawQuickContent) == "function" then
         function host.drawQuickContent(imgui)
             requireActivated("drawQuickContent")
-            return drawQuickContent(imgui, authorSession, authorHost)
+            return drawQuickContent(CreateDrawContext(imgui, authorSession, authorHost))
         end
     end
 

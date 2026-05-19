@@ -71,7 +71,7 @@ end
 function TestLogging.testViolationPolicyMatchesSourceCallSites()
     local files = {
         "src/core/module_bootstrap/definition.lua",
-        "src/core/game_object/game_object.lua",
+        "src/core/game_cache/game_cache.lua",
         "src/core/hooks/hooks.lua",
         "src/core/hooks/private_dispatchers.lua",
         "src/core/hooks/private_registry.lua",
@@ -93,10 +93,12 @@ function TestLogging.testViolationPolicyMatchesSourceCallSites()
         "src/core/helpers/values.lua",
         "src/core/module_state/private_session.lua",
         "src/core/storage/storage.lua",
+        "src/core/storage/storage_field.lua",
         "src/core/storage/private_packed.lua",
         "src/core/storage/private_table.lua",
         "src/core/storage/private_types.lua",
         "src/core/module_state/private_store.lua",
+        "src/core/widgets/init.lua",
         "src/core/widgets/widget_helpers.lua",
     }
 
@@ -113,7 +115,7 @@ end
 function TestLogging.testViolationPolicyHasNoOrphanIds()
     local files = {
         "src/core/module_bootstrap/definition.lua",
-        "src/core/game_object/game_object.lua",
+        "src/core/game_cache/game_cache.lua",
         "src/core/hooks/hooks.lua",
         "src/core/hooks/private_dispatchers.lua",
         "src/core/hooks/private_registry.lua",
@@ -135,10 +137,12 @@ function TestLogging.testViolationPolicyHasNoOrphanIds()
         "src/core/helpers/values.lua",
         "src/core/module_state/private_session.lua",
         "src/core/storage/storage.lua",
+        "src/core/storage/storage_field.lua",
         "src/core/storage/private_packed.lua",
         "src/core/storage/private_table.lua",
         "src/core/storage/private_types.lua",
         "src/core/module_state/private_store.lua",
+        "src/core/widgets/init.lua",
         "src/core/widgets/widget_helpers.lua",
     }
     local referenced = {}

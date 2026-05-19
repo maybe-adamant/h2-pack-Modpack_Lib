@@ -81,7 +81,8 @@ end
 ---@return boolean
 function public.widgets.radio(imgui, session, alias, opts)
     opts = opts or {}
-    local current = helpers.NormalizeChoiceValue(opts, session.read(alias))
+    local field = helpers.ResolveStorageField(session, alias, "widgets.radio")
+    local current = helpers.NormalizeChoiceValue(opts, field:read())
     local valueColors = type(opts.valueColors) == "table" and opts.valueColors or nil
     local optionEntries = {}
 
@@ -92,7 +93,7 @@ function public.widgets.radio(imgui, session, alias, opts)
             selected = current == value,
             onSelect = function()
                 if current ~= value then
-                    session.write(alias, value)
+                    field:write(value)
                     current = value
                     return true
                 end
@@ -103,7 +104,7 @@ function public.widgets.radio(imgui, session, alias, opts)
 
     return DrawRadioOptions(
         imgui,
-        alias,
+        field:alias(),
         tostring(opts.label or ""),
         optionEntries,
         opts.optionsPerLine,
@@ -118,10 +119,12 @@ end
 ---@return boolean
 function public.widgets.mappedRadio(imgui, session, alias, opts)
     opts = opts or {}
-    local current = session.read(alias)
+    local field = helpers.ResolveStorageField(session, alias, "widgets.mappedRadio")
+    local owner = helpers.GetFieldOwner(field)
+    local current = field:read()
     local optionEntries = {}
 
-    for _, option in ipairs(type(opts.getOptions) == "function" and (opts.getOptions(session.view) or {}) or {}) do
+    for _, option in ipairs(type(opts.getOptions) == "function" and (opts.getOptions(field:view()) or {}) or {}) do
         local label = type(option) == "table" and tostring(option.label or option.value or "") or tostring(option)
         local color = type(option) == "table" and option.color or nil
         local selected = type(option) == "table" and option.selected == true or current == option
@@ -131,11 +134,11 @@ function public.widgets.mappedRadio(imgui, session, alias, opts)
             selected = selected,
             onSelect = function()
                 if type(option) == "table" and type(option.onSelect) == "function" then
-                    return option.onSelect(option, session) == true
+                    return option.onSelect(option, owner) == true
                 end
                 local nextValue = type(option) == "table" and option.value or option
                 if nextValue ~= current then
-                    session.write(alias, nextValue)
+                    field:write(nextValue)
                     current = nextValue
                     return true
                 end
@@ -146,7 +149,7 @@ function public.widgets.mappedRadio(imgui, session, alias, opts)
 
     return DrawRadioOptions(
         imgui,
-        alias,
+        field:alias(),
         tostring(opts.label or ""),
         optionEntries,
         opts.optionsPerLine,
@@ -161,15 +164,16 @@ end
 ---@return boolean
 function public.widgets.packedRadio(imgui, session, alias, opts)
     opts = opts or {}
-    local children = helpers.ResolvePackedChildren(session, alias)
+    local field = helpers.ResolveStorageField(session, alias, "widgets.packedRadio")
+    local children = helpers.ResolvePackedChildren(field)
     local valueColors = type(opts.valueColors) == "table" and opts.valueColors or nil
-    local selection = helpers.ClassifyPackedChoice(opts, session, children)
+    local selection = helpers.ClassifyPackedChoice(opts, field, children)
     local optionEntries = {
         {
             label = tostring(opts.noneLabel or "None"),
             selected = selection.state == "none",
             onSelect = function()
-                return helpers.ClearPackedChoiceSelection(session, children, selection) == true
+                return helpers.ClearPackedChoiceSelection(field, children, selection) == true
             end,
         },
     }
@@ -180,14 +184,14 @@ function public.widgets.packedRadio(imgui, session, alias, opts)
             color = valueColors and valueColors[child.alias] or nil,
             selected = selection.selectedChild and selection.selectedChild.alias == child.alias or false,
             onSelect = function()
-                return helpers.ApplyPackedChoiceSelection(session, children, child.alias, selection) == true
+                return helpers.ApplyPackedChoiceSelection(field, children, child.alias, selection) == true
             end,
         }
     end
 
     return DrawRadioOptions(
         imgui,
-        alias,
+        field:alias(),
         tostring(opts.label or ""),
         optionEntries,
         opts.optionsPerLine,

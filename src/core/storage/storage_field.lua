@@ -1,0 +1,116 @@
+local deps = ...
+
+local logging = deps.logging
+
+local FIELD_KIND = "AdamantStorageField"
+local StorageFieldMethods = {}
+
+local function NormalizeAlias(alias, methodName)
+    if type(alias) ~= "string" or alias == "" then
+        logging.violate("storage.invalid_field_alias",
+            "%s: expected non-empty storage field alias",
+            tostring(methodName or "StorageField")
+        )
+    end
+    return alias
+end
+
+local function ValidateOwner(owner, methodName)
+    if type(owner) ~= "table" or type(owner.read) ~= "function" or type(owner.getAliasSchema) ~= "function" then
+        logging.violate("storage.invalid_field_owner",
+            "%s: expected storage field owner with read(alias) and getAliasSchema(alias)",
+            tostring(methodName or "StorageField")
+        )
+    end
+end
+
+function StorageFieldMethods:read()
+    return self._owner.read(self._alias)
+end
+
+function StorageFieldMethods:write(value)
+    if type(self._owner.write) ~= "function" then
+        logging.violate("storage.readonly_field",
+            "%s: storage field '%s' is read-only",
+            tostring(self._source or "StorageField.write"),
+            tostring(self._alias)
+        )
+        return false
+    end
+    return self._owner.write(self._alias, value)
+end
+
+function StorageFieldMethods:reset()
+    if type(self._owner.reset) ~= "function" then
+        logging.violate("storage.readonly_field",
+            "%s: storage field '%s' cannot be reset",
+            tostring(self._source or "StorageField.reset"),
+            tostring(self._alias)
+        )
+        return false
+    end
+    return self._owner.reset(self._alias)
+end
+
+function StorageFieldMethods:schema()
+    return self._schema
+end
+
+function StorageFieldMethods:alias()
+    return self._alias
+end
+
+function StorageFieldMethods:owner()
+    return self._owner
+end
+
+function StorageFieldMethods:view()
+    return self._owner.view or {}
+end
+
+local storageField = {}
+
+function storageField.is(value)
+    return type(value) == "table" and rawget(value, "_kind") == FIELD_KIND
+end
+
+function storageField.create(owner, alias, methodName)
+    methodName = methodName or "StorageField"
+    ValidateOwner(owner, methodName)
+    alias = NormalizeAlias(alias, methodName)
+
+    local schema = owner.getAliasSchema(alias)
+    if not schema then
+        logging.violate("storage.unknown_field_alias",
+            "%s: unknown storage field alias '%s'",
+            tostring(methodName),
+            tostring(alias)
+        )
+    end
+
+    return setmetatable({
+        _kind = FIELD_KIND,
+        _owner = owner,
+        _alias = alias,
+        _schema = schema,
+        _source = methodName,
+    }, {
+        __index = StorageFieldMethods,
+    })
+end
+
+function storageField.resolve(defaultOwner, target, methodName)
+    if type(target) == "string" then
+        return storageField.create(defaultOwner, target, methodName)
+    end
+    if storageField.is(target) then
+        return target
+    end
+
+    logging.violate("widgets.invalid_field_target",
+        "%s: expected root alias string or StorageField",
+        tostring(methodName or "widgets")
+    )
+end
+
+return storageField

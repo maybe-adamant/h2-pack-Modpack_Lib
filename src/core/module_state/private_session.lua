@@ -10,6 +10,7 @@ local DecodePackedChild = storageInternal.packed.DecodePackedChild
 ---@class AuthorSession
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
+---@field field fun(alias: string): StorageField
 ---@field write fun(alias: string, value: any)
 ---@field stageAction fun(actionKey: string, value: any)
 ---@field readAction fun(actionKey: string): any
@@ -289,13 +290,17 @@ local function createSession(modConfig, configBackend, storage)
     copyConfigToStaging()
     clearDirty()
 
-    return {
+    local session
+    session = {
         view = readonlyProxy,
         read = function(alias)
             return readStagingValue(alias)
         end,
         table = function(alias)
             return getTableHandle(alias)
+        end,
+        field = function(alias)
+            return storageInternal.field.create(session, alias, "session.field")
         end,
         getAliasSchema = function(alias)
             return aliasNodes[alias]
@@ -369,6 +374,8 @@ local function createSession(modConfig, configBackend, storage)
             return mismatches
         end,
     }
+
+    return session
 end
 
 --- Narrows a full staged session to the module author UI surface.
@@ -381,6 +388,7 @@ local function createAuthorSession(session, opts)
         view = session.view,
         read = session.read,
         table = session.table,
+        field = session.field,
         write = session.write,
         stageAction = session.stageAction,
         readAction = session.readAction,

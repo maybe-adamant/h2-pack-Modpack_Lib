@@ -400,6 +400,12 @@ local function CreateTableHandle(node, opts)
             end,
         }
 
+        rowHandle.field = function(selfOrAlias, maybeAlias)
+            local alias = selfOrAlias == rowHandle and maybeAlias or selfOrAlias
+            validateRowAlias(node, alias, "rowHandle.field")
+            return storageInternal.field.create(rowHandle, alias, "rowHandle.field")
+        end
+
         if opts.writeRoot ~= nil then
             rowHandle.write = function(alias, value)
                 validateRowAlias(node, alias, "rowHandle.write")

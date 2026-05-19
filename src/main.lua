@@ -32,7 +32,7 @@ local externals = {
 ---@field getLiveModuleHost fun(pluginGuid: string|nil): ModuleHost|nil
 ---@field coordinator table
 ---@field mutation table
----@field gameObject table
+---@field gameCache table
 ---@field hashing table
 ---@field imguiHelpers table
 ---@field overlays table

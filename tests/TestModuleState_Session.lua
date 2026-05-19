@@ -230,6 +230,27 @@ function TestModuleState_Session:testTableRowHandleReadsAndWritesThroughParentTa
     lu.assertNil(storeRow.reset)
 end
 
+function TestModuleState_Session:testSessionAndRowsCreateStorageFields()
+    local _, session = createModuleState(self.harness, { Enabled = true, MaxGods = 5 }, makeScalarDefinition(self.harness))
+    local rootField = session.field("MaxGods")
+
+    lu.assertEquals(rootField:alias(), "MaxGods")
+    lu.assertEquals(rootField:schema().alias, "MaxGods")
+    lu.assertEquals(rootField:read(), 5)
+    rootField:write(7)
+    lu.assertEquals(session.read("MaxGods"), 7)
+
+    local _, tableSession = createModuleState(self.harness, {}, makeTableDefinition(self.harness))
+    local row = tableSession.table("Tiers"):rowHandle(1)
+    local rowField = row:field("Limit")
+
+    lu.assertEquals(rowField:alias(), "Limit")
+    lu.assertEquals(rowField:schema().alias, "Limit")
+    lu.assertEquals(rowField:read(), 2)
+    rowField:write(4)
+    lu.assertEquals(row.read("Limit"), 4)
+end
+
 function TestModuleState_Session:testTableRowHandleIsPositionalAndMissingRowsAreNil()
     local _, session = createModuleState(self.harness, {}, makeTableDefinition(self.harness))
     local tiers = session.table("Tiers")

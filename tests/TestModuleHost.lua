@@ -220,8 +220,8 @@ function TestModuleHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelp
         definition = definition,
         store = store,
         session = session,
-        drawTab = function(_, authorSession)
-            capturedAuthorSession = authorSession
+        drawTab = function(ctx)
+            capturedAuthorSession = ctx.session
         end,
     })
     local host = self.h.public.getLiveModuleHost("test-reset-host")
@@ -263,11 +263,11 @@ function TestModuleHost:testCreateModuleHostPassesAuthorHostToCallbacks()
         definition = definition,
         store = store,
         session = session,
-        drawTab = function(_, _, authorHost)
-            drawHost = authorHost
+        drawTab = function(ctx)
+            drawHost = ctx.host
         end,
-        drawQuickContent = function(_, _, authorHost)
-            quickHost = authorHost
+        drawQuickContent = function(ctx)
+            quickHost = ctx.host
         end,
     }, {
         registerIntegrations = function(authorHost)

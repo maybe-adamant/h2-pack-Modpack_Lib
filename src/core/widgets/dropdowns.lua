@@ -111,8 +111,10 @@ end
 ---@return boolean
 function public.widgets.dropdown(imgui, session, alias, opts)
     opts = opts or {}
-    local controlId = opts.id or alias
-    local current = helpers.NormalizeChoiceValue(opts, session.read(alias))
+    local field = helpers.ResolveStorageField(session, alias, "widgets.dropdown")
+    local fieldAlias = field:alias()
+    local controlId = opts.id or fieldAlias
+    local current = helpers.NormalizeChoiceValue(opts, field:read())
     local optionEntries = {}
     local valueColors = type(opts.valueColors) == "table" and opts.valueColors or nil
     for index, value in ipairs(opts.values or {}) do
@@ -152,7 +154,7 @@ function public.widgets.dropdown(imgui, session, alias, opts)
                 return imgui.Selectable(helpers.MakeSelectableId(option.label, option.uniqueId), option.value == current)
             end)
             if clicked and option.value ~= current then
-                session.write(alias, option.value)
+                field:write(option.value)
                 current = option.value
                 changed = true
             end
@@ -169,13 +171,17 @@ end
 ---@return boolean
 function public.widgets.mappedDropdown(imgui, session, alias, opts)
     opts = opts or {}
-    local controlId = opts.id or alias
+    local field = helpers.ResolveStorageField(session, alias, "widgets.mappedDropdown")
+    local fieldAlias = field:alias()
+    local owner = helpers.GetFieldOwner(field)
+    local view = field:view()
+    local controlId = opts.id or fieldAlias
     local preview = type(opts.getPreview) == "function"
-        and tostring(opts.getPreview(session.view) or "")
-        or tostring(session.read(alias) or "")
-    local previewColor = type(opts.getPreviewColor) == "function" and opts.getPreviewColor(session.view) or nil
+        and tostring(opts.getPreview(view) or "")
+        or tostring(field:read() or "")
+    local previewColor = type(opts.getPreviewColor) == "function" and opts.getPreviewColor(view) or nil
     local options = type(opts.getOptions) == "function"
-        and (opts.getOptions(session.view) or {})
+        and (opts.getOptions(view) or {})
         or {}
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
@@ -200,9 +206,9 @@ function public.widgets.mappedDropdown(imgui, session, alias, opts)
             end)
             if clicked then
                 if type(option) == "table" and type(option.onSelect) == "function" then
-                    changed = option.onSelect(option, session) == true or changed
+                    changed = option.onSelect(option, owner) == true or changed
                 else
-                    session.write(alias, type(option) == "table" and option.value or option)
+                    field:write(type(option) == "table" and option.value or option)
                     changed = true
                 end
             end
@@ -219,10 +225,11 @@ end
 ---@return boolean
 function public.widgets.packedDropdown(imgui, session, alias, opts)
     opts = opts or {}
-    local controlId = opts.id or alias
-    local children = helpers.ResolvePackedChildren(session, alias)
+    local field = helpers.ResolveStorageField(session, alias, "widgets.packedDropdown")
+    local controlId = opts.id or field:alias()
+    local children = helpers.ResolvePackedChildren(field)
     local valueColors = type(opts.valueColors) == "table" and opts.valueColors or nil
-    local selection = helpers.ClassifyPackedChoice(opts, session, children)
+    local selection = helpers.ClassifyPackedChoice(opts, field, children)
     local preview = tostring(opts.noneLabel or "None")
     local previewColor = nil
     if selection.state == "single" and selection.selectedChild then
@@ -248,7 +255,7 @@ function public.widgets.packedDropdown(imgui, session, alias, opts)
             helpers.MakeSelectableId(tostring(opts.noneLabel or "None"), "none"),
             currentSelection.state == "none"
         ) then
-            changed = helpers.ClearPackedChoiceSelection(session, children, currentSelection) or changed
+            changed = helpers.ClearPackedChoiceSelection(field, children, currentSelection) or changed
             currentSelection = {
                 state = "none",
                 selectedChild = nil,
@@ -265,7 +272,7 @@ function public.widgets.packedDropdown(imgui, session, alias, opts)
                 return imgui.Selectable(helpers.MakeSelectableId(childLabel, child.alias), isSelected)
             end)
             if clicked then
-                changed = helpers.ApplyPackedChoiceSelection(session, children, child.alias, currentSelection) or changed
+                changed = helpers.ApplyPackedChoiceSelection(field, children, child.alias, currentSelection) or changed
                 currentSelection = {
                     state = "single",
                     selectedChild = child,
@@ -285,7 +292,8 @@ end
 ---@return string|nil selectedAlias
 function public.widgets.getPackedChoiceAlias(session, alias, opts)
     opts = opts or {}
-    local children = helpers.ResolvePackedChildren(session, alias)
-    local selection = helpers.ClassifyPackedChoice(opts, session, children)
+    local field = helpers.ResolveStorageField(session, alias, "widgets.getPackedChoiceAlias")
+    local children = helpers.ResolvePackedChildren(field)
+    local selection = helpers.ClassifyPackedChoice(opts, field, children)
     return selection.selectedChild and selection.selectedChild.alias or nil
 end

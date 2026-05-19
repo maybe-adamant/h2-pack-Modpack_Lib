@@ -10,7 +10,9 @@ All notable changes to this project will be documented in this file.
 - Removed old `configKey`, `lifetime`, and `runtime` storage declaration compatibility in favor of explicit `persist`, `stage`, and `hash` axes.
 - Lib now injects `Enabled` and `DebugMode` as built-in prepared storage aliases instead of requiring module-authored config defaults.
 - Module definitions now require both stable `id` and display `name`; `modpack` remains optional.
-- Module callbacks receive the author host consistently: `registerHooks(host, store)`, `registerIntegrations(host, store)`, `registerOverlays(overlays, host, store)`, `registerPatchMutation(plan, host, store)`, `onSettingsCommitted(host, store, commit)`, `drawTab(imgui, session, host)`, and `drawQuickContent(imgui, session, host)`.
+- Module callbacks receive the author host consistently: `registerHooks(host, store)`, `registerIntegrations(host, store)`, `registerOverlays(overlays, host, store)`, `registerPatchMutation(plan, host, store)`, and `onSettingsCommitted(host, store, commit)`. Draw callbacks now receive `drawTab(ctx)` and `drawQuickContent(ctx)`, where `ctx` contains `imgui`, author `session`, author `host`, and bound `widgets`.
+- `lib.createModule(...)` / `lib.tryCreateModule(...)` now accept module definition fields directly; the old nested `definition = { ... }` option has been removed.
+- Bound draw widgets now target root alias strings or `StorageField` values; table row widgets use `row:field(alias)` instead of rebinding widgets with `ctx.widgets.forSession(...)`.
 - Module authors now construct through `lib.createModule(...)` / `lib.tryCreateModule(...)` and activate through `host.tryActivate()`; lower-level definition/state/host construction is internal.
 - Host activation now stages and commits hooks, integrations, overlays, and mutation sync through host-owned receipts, so omitted registrations are removed on reload and activation failures roll back candidate effects.
 - `lib.hooks.Override(...)` now accepts function replacements only, matching the host-owned dispatcher model.
@@ -32,7 +34,7 @@ All notable changes to this project will be documented in this file.
 - Added `lib.imguiHelpers.*` enum/value helpers for low-level ImGui binding use.
 - Added `lib.overlays.*` retained HUD overlay helpers with managed `middleRightStack` layout, stacked text, stacked rows, and framework/module/debug order bands.
 - Added token-based `lib.overlays.suppressForUi()` overlay suppression for foreground ImGui configuration windows.
-- Added `lib.gameObject.*` helpers for namespaced runtime state attached to live game object tables.
+- Added `lib.gameCache.*` helpers for namespaced runtime cache attached to live game tables.
 - Added runtime-only persisted storage aliases through `runtime = true` plus `store.getRuntimeState()`.
 - Added `definition.onSettingsCommitted(host, store, commit)` as a post-commit observer for rebuilding derived runtime/UI structures after staged config commits and staged session actions.
 - Added docs for hot-reload architecture and known limitations under `docs/`.
