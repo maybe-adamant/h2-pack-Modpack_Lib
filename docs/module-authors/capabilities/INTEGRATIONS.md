@@ -30,7 +30,7 @@ host.integrations.register("run-director.god-availability", {
     },
 })
 
-host.tryActivate()
+host.activate()
 ```
 
 `providerId` is the public provider identity returned to consumers. It does not need to match `pluginGuid`.
@@ -63,7 +63,7 @@ They are owned by the module lifecycle owner and are retired when that owner is
 replaced.
 
 Provider declarations close when activation begins. Register the complete
-current provider set before calling `host.tryActivate()`.
+current provider set before calling `host.activate()`.
 
 ## Naming
 

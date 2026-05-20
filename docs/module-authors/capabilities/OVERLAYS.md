@@ -36,7 +36,7 @@ host.overlays.onCommit(function(ctx)
     ctx.refresh("summary.igt")
 end)
 
-host.tryActivate()
+host.activate()
 ```
 
 `host.overlays` is bound to the module host, so overlay declarations do not need

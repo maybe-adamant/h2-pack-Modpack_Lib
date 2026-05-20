@@ -28,7 +28,7 @@ This document assumes:
 - hash/profile import and config flush behavior belong to host/framework plumbing, not draw callbacks
 - framework/host own `session` commit timing
 - fallback UI registers ROM callbacks through `host.fallbackUi.attachGuiOnce(...)`
-  and installs the active runtime during `host.tryActivate()`
+  and installs the active runtime during `host.activate()`
 
 ## Per-Frame Checklist
 

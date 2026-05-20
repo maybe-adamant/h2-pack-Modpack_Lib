@@ -4,7 +4,6 @@ This is the public Lib surface.
 
 Preferred usage uses top-level module authoring helpers plus namespaces for specialized APIs:
 - `lib.createModule(...)`
-- `lib.tryCreateModule(...)`
 - `lib.createFrameworkRuntime(...)`
 - `host.fallbackUi.*`
 - `host.hooks.*`
@@ -30,7 +29,7 @@ Modules declare:
 
 Modules normally create and publish their behavior host through:
 - `lib.createModule(...)`
-- `host.tryActivate()`
+- `host.activate()`
 
 Module/host creation requires:
 - `drawTab`
@@ -72,6 +71,7 @@ local host, store = lib.createModule({
     storage = data.buildStorage(),
     drawTab = ui.drawTab,
 })
+if not host then return end
 
 host.integrations.register("run-director.god-availability", {
     providerId = MODULE_ID,
@@ -85,7 +85,7 @@ host.integrations.register("run-director.god-availability", {
     },
 })
 
-host.tryActivate()
+host.activate()
 ```
 
 `providerId` is the public provider identity returned to integration consumers.
@@ -153,7 +153,7 @@ Rules:
 
 ### `lib.createModule(opts)`
 
-Canonical module-construction helper.
+Canonical safe module-construction helper.
 `pluginGuid` is the stable runtime identity. Lib owns the internal per-plugin
 runtime state used for structural hot-reload tracking, hook refresh ownership,
 overlay ownership, integration refresh, game cache, mutation runtime, and
@@ -174,46 +174,43 @@ local host, store = lib.createModule({
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+if not host then return end
+
 host.mutation.patch(logic.buildPatchPlan)
 logic.registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 Returns:
-- `host`
-  Author-facing host with `tryActivate()`, `isEnabled()`, metadata getters, and module-scoped logging helpers.
-- `store`
+- `host, store, nil` when construction succeeds
+  - `host`
+  Author-facing host with `activate()`, `isEnabled()`, metadata getters, and module-scoped logging helpers.
+  - `store`
   Runtime read surface for gameplay/hooks.
+- `nil, nil, err` when construction fails
 
 `createModule(...)` intentionally does not return the prepared definition or
 raw session. Draw callbacks receive a render-scoped context with `imgui`,
 author `session`, author `host`, and bound `widgets`.
 
-Declare hooks on `host.hooks.*` before `host.tryActivate()`. Runtime helper
+Declare hooks on `host.hooks.*` before `host.activate()`. Runtime helper
 files should receive the needed `store` or narrowed read/access closures from
 the module's hook-declaration code; draw/UI paths should continue using the
 session passed to draw callbacks.
-
-### `lib.tryCreateModule(opts)`
-
-Safe wrapper around `lib.createModule(...)`.
-
-Returns:
-- `host, store, nil` when construction succeeds
-- `nil, nil, err` when construction fails
 
 The failure path logs `host.create_failed` and does not activate or publish a
 host. Use this at pack orchestration boundaries when one invalid module should
 be skipped without stopping sibling modules.
 
 ```lua
-local host, store, err = lib.tryCreateModule(opts)
+local host, store, err = lib.createModule(opts)
 if host then
-    local ok, activateErr = host.tryActivate()
+    local ok, activateErr = host.activate()
 end
 ```
 
-`tryCreateModule(...)` only wraps construction. Activation remains explicit.
+`createModule(...)` only wraps construction. Activation remains explicit through
+`host.activate()`.
 
 The runtime store surface provides:
 - `store.read(alias)`
@@ -452,7 +449,7 @@ Registers or updates a stable `modutil.mod.Path.Context.Wrap(...)` dispatcher.
 Also supports:
 - `host.hooks.contextWrap(path, key, context)`
 
-These APIs are only valid before `host.tryActivate()`. Lib-owned ModUtil
+These APIs are only valid before `host.activate()`. Lib-owned ModUtil
 dispatchers are private infrastructure, not a public owner-token surface.
 
 ### Typical module pattern
@@ -481,11 +478,13 @@ local host, store = lib.createModule({
     storage = data.buildStorage(),
     drawTab = ui.drawTab,
 })
+if not host then return end
+
 registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
-When `host.tryActivate()` runs, activation installs the declarations currently
+When `host.activate()` runs, activation installs the declarations currently
 recorded on `host.hooks` and deactivates hooks omitted by a later host for the
 same module owner id.
 
@@ -526,6 +525,7 @@ local host, store = lib.createModule({
     storage = data.buildStorage(),
     drawTab = ui.drawTab,
 })
+if not host then return end
 
 host.overlays.createLine("summary.igt", {
     region = "middleRightStack",
@@ -542,7 +542,7 @@ host.overlays.onCommit(function(ctx)
     ctx.refresh("summary.igt")
 end)
 
-host.tryActivate()
+host.activate()
 ```
 
 Retained element names are local to the module owner id derived from
@@ -733,7 +733,7 @@ not being coordinated by Framework.
 ### `host.fallbackUi.attachGuiOnce(register)`
 
 Registers stable no-op-safe fallback UI callbacks once for the module's plugin
-guid. Call this before `host.tryActivate()`.
+guid. Call this before `host.activate()`.
 
 The callback still owns the actual ROM registration, so it runs from the module
 context:
@@ -747,7 +747,7 @@ end)
 
 Behavior:
 - `attachGuiOnce(...)` prevents callback stacking across hot reloads
-- `host.tryActivate()` installs or swaps the active fallback UI runtime
+- `host.activate()` installs or swaps the active fallback UI runtime
 - callbacks no-op until a runtime is active
 - fallback UI suppresses its window/menu when the module's pack is coordinated
 - the fallback window includes built-in:

@@ -9,6 +9,7 @@ local function createModuleHostHarness(harnessOpts)
         runtime = base.runtime,
         rom = base.rom,
         moduleHost = base.moduleHost,
+        moduleBundle = base.moduleBundle,
         moduleState = base.moduleState,
         hostLifecycle = base.hostLifecycle,
         moduleRuntimeRegistry = base.moduleRuntimeRegistry,
@@ -44,6 +45,10 @@ local function createModuleHostHarness(harnessOpts)
         return state.store, state.session
     end
 
+    function h:createModuleOrThrow(opts)
+        return self.moduleBundle.createModuleOrThrow(opts)
+    end
+
     function h:createHost(pluginGuid, hostOpts)
         hostOpts = hostOpts or {}
         local host, authorHost = self.moduleHost.create({
@@ -63,7 +68,7 @@ local function createModuleHostHarness(harnessOpts)
 
     function h:createActivatedHost(pluginGuid, hostOpts)
         local host, authorHost = self:createHost(pluginGuid, hostOpts)
-        local ok, err = authorHost.tryActivate()
+        local ok, err = authorHost.activate()
         return host, authorHost, ok, err
     end
 

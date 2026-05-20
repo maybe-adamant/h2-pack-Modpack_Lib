@@ -32,7 +32,7 @@ local function createActivatedHost(h, pluginGuid, opts)
     if type(opts.configureHost) == "function" then
         opts.configureHost(authorHost, opts.store)
     end
-    authorHost.tryActivate()
+    authorHost.activate()
     return host, authorHost
 end
 
@@ -302,7 +302,7 @@ function TestModuleHost:testCreateModuleHostPassesAuthorHostToCallbacks()
     lu.assertEquals(type(callbackHost.fallbackUi), "table")
     lu.assertEquals(type(callbackHost.gameCache), "table")
     lu.assertEquals(type(callbackHost.hooks), "table")
-    lu.assertEquals(type(callbackHost.tryActivate), "function")
+    lu.assertEquals(type(callbackHost.activate), "function")
     lu.assertNil(callbackHost.read)
     lu.assertNil(callbackHost.setEnabled)
 
@@ -340,8 +340,9 @@ function TestModuleHost:testFullHostOwnsAuthorHostCapabilities()
     lu.assertEquals(type(host.getMeta), "function")
     lu.assertEquals(type(host.log), "function")
     lu.assertEquals(type(host.logIf), "function")
-    lu.assertEquals(type(host.tryActivate), "function")
-    lu.assertEquals(authorHost.tryActivate, host.tryActivate)
+    lu.assertEquals(type(host.activate), "function")
+    lu.assertEquals(authorHost.activate, host.activate)
+    lu.assertNil(host.tryActivate)
 end
 
 function TestModuleHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFrameworkRebuildIsPending()
@@ -470,7 +471,7 @@ function TestModuleHost:testActivationFailureRestoresLiveHostAndIntegrations()
         },
     })
 
-    local ok, err = secondAuthorHost.tryActivate()
+    local ok, err = secondAuthorHost.activate()
     local value = firstAuthorHost.integrations.invoke(integrationId, "read", nil)
 
     lu.assertFalse(ok)
@@ -521,7 +522,7 @@ function TestModuleHost:testActivationFailureDropsNewStagedIntegrationProvider()
         },
     })
 
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "new integration boom")
@@ -581,7 +582,7 @@ function TestModuleHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
         error("replacement boom")
     end)
 
-    local ok, err = secondAuthorHost.tryActivate()
+    local ok, err = secondAuthorHost.activate()
     local liveHost = self.h.moduleHost.getLiveHost(pluginGuid)
     local targetValue = target.Value
 
@@ -595,10 +596,10 @@ function TestModuleHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
     lu.assertStrContains(self.h.warnings[1], "replacement boom")
 end
 
-function TestModuleHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBrokenHost()
+function TestModuleHost:testactivateModuleReturnsErrorAndDoesNotPublishBrokenHost()
     local pluginGuid = "test-try-activate-failure"
     local definition = self.h.moduleHost.prepareDefinition({}, {
-        id = "TryActivateFailure",
+        id = "activateFailure",
         name = "Try Activate Failure",
         storage = {},
     })
@@ -617,7 +618,7 @@ function TestModuleHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBroken
         error("try activate boom")
     end)
 
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "try activate boom")
@@ -630,10 +631,10 @@ function TestModuleHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBroken
     end)
 end
 
-function TestModuleHost:testTryActivateModuleSucceedsThroughFullHost()
+function TestModuleHost:testactivateModuleSucceedsThroughFullHost()
     local pluginGuid = "test-try-activate-success"
     local definition = self.h.moduleHost.prepareDefinition({}, {
-        id = "TryActivateSuccess",
+        id = "activateSuccess",
         name = "Try Activate Success",
         storage = {},
     })
@@ -649,7 +650,7 @@ function TestModuleHost:testTryActivateModuleSucceedsThroughFullHost()
         drawTab = function() end,
     })
 
-    local ok, err = host.tryActivate()
+    local ok, err = host.activate()
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -727,10 +728,10 @@ function TestModuleHost:testActivationRejectsReentrantActivateCalls()
         drawTab = function() end,
     })
     authorHost.mutation.patch(function()
-        authorHost.tryActivate()
+        authorHost.activate()
     end)
 
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
 
     lu.assertTrue(ok)
     lu.assertNil(err)

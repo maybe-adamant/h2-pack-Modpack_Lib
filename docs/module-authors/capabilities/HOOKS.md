@@ -33,7 +33,7 @@ local host, store = lib.createModule({
 })
 
 registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 `host.hooks` is bound to the module host, so hook declarations do not need an
@@ -58,7 +58,7 @@ same path.
 Hook declarations are open after `lib.createModule(...)` returns and close when
 activation starts. Calling `host.hooks.*` after activation is an author error.
 
-`host.tryActivate()` installs the declared hooks. Lib owns:
+`host.activate()` installs the declared hooks. Lib owns:
 
 - installing the stable ModUtil dispatcher
 - refreshing behavior on module reload
@@ -93,7 +93,7 @@ reason about.
 
 ## Common Mistakes
 
-- Do not call `host.hooks.*` after `host.tryActivate()`.
+- Do not call `host.hooks.*` after `host.activate()`.
 - Do not use random keys for keyed hooks; keys are part of hook identity.
 - Do not capture staged UI session state in runtime hooks.
 - Do not use hooks for declarative table edits that fit mutation plans.

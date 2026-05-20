@@ -74,8 +74,9 @@ local function GetStructuralBaseline(pluginGuid)
 end
 
 --- Creates a module through the canonical prepare -> store -> host pipeline.
---- Call `host.tryActivate()` after construction.
-local function createModule(opts)
+--- Throws on construction failure. Public module construction uses the safe
+--- wrapper below so module load can skip cleanly on invalid definitions.
+local function createModuleOrThrow(opts)
     if type(opts) ~= "table" then
         logging.violate("host.invalid_create_opts", "createModule: opts must be a table")
     end
@@ -104,7 +105,6 @@ local function createModule(opts)
     })
     return authorHost, store
 end
-modulePublic.createModule = createModule
 
 --- Safely creates a module through the canonical prepare -> store -> host pipeline.
 --- Returns nils plus the construction error instead of throwing.
@@ -112,8 +112,8 @@ modulePublic.createModule = createModule
 ---@return AuthorHost|nil host
 ---@return ManagedStore|nil store
 ---@return string|nil err
-local function tryCreateModule(opts)
-    local ok, host, store = pcall(createModule, opts)
+local function createModule(opts)
+    local ok, host, store = pcall(createModuleOrThrow, opts)
     if ok then
         return host, store, nil
     end
@@ -122,8 +122,9 @@ local function tryCreateModule(opts)
     logging.violate("host.create_failed", "createModule failed; skipping module: %s", err)
     return nil, nil, err
 end
-modulePublic.tryCreateModule = tryCreateModule
+modulePublic.createModule = createModule
 
 return {
     public = modulePublic,
+    createModuleOrThrow = createModuleOrThrow,
 }

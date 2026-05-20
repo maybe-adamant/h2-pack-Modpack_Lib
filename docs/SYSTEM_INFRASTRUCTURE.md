@@ -98,7 +98,7 @@ flowchart TD
 
 ## Module Lifecycle
 
-Module authors normally touch only `lib.createModule(...)`, callbacks, and `host.tryActivate()`.
+Module authors normally touch only `lib.createModule(...)`, callbacks, and `host.activate()`.
 
 ```mermaid
 sequenceDiagram
@@ -115,7 +115,7 @@ sequenceDiagram
     Lib->>Host: create ModuleHost + AuthorHost
     Lib-->>Module: authorHost, store
 
-    Module->>Host: host.tryActivate()
+    Module->>Host: host.activate()
     Host->>Effects: install registrations
     Effects-->>Host: receipts
     Host->>Framework: publish live host
@@ -152,7 +152,7 @@ flowchart TD
     AUTHOR["Module author"]
     CONTRIBUTOR["Lib contributor"]
 
-    AUTHOR --> CREATE["createModule / tryCreateModule"]
+    AUTHOR --> CREATE["createModule"]
     AUTHOR --> SESSION["session in draw callbacks"]
     AUTHOR --> STORE["store in runtime callbacks"]
     AUTHOR --> CAPABILITIES["hooks / mutations / overlays / integrations / widgets / gameCache"]

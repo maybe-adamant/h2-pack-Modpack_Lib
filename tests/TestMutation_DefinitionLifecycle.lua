@@ -89,7 +89,7 @@ function TestMutation_DefinitionLifecycle:activateMutationHost(pluginGuid, defin
     if patchCallback ~= nil then
         authorHost.mutation.patch(patchCallback)
     end
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     return ok, err, store
 end
 

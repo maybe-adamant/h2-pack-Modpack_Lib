@@ -167,7 +167,6 @@ local moduleBundle = import('core/module_bootstrap/module.lua', nil, {
     moduleState = moduleState,
 })
 public.createModule = moduleBundle.public.createModule
-public.tryCreateModule = moduleBundle.public.tryCreateModule
 
 return {
     coordinator = coordinator,

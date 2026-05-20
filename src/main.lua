@@ -23,8 +23,7 @@ local externals = {
 }
 
 ---@class AdamantModpackLib
----@field createModule fun(opts: ModuleCreateOpts): AuthorHost, ManagedStore
----@field tryCreateModule fun(opts: ModuleCreateOpts): AuthorHost|nil, ManagedStore|nil, string|nil
+---@field createModule fun(opts: ModuleCreateOpts): AuthorHost|nil, ManagedStore|nil, string|nil
 ---@field createFrameworkRuntime fun(frameworkPluginGuid: string): AdamantModpackLib.FrameworkRuntime
 ---@field imguiHelpers table
 ---@field widgets table

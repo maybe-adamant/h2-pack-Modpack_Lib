@@ -30,14 +30,16 @@ local host, store = lib.createModule({
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+if not host then return end
+
 logic.registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 `pluginGuid` is the stable runtime identity; Lib owns the internal hot-reload
 state for hooks, overlays, integrations, game cache, mutation runtime, and
 structural reload tracking. Declare runtime hooks on `host.hooks.*` before activation.
-`host.tryActivate()` registers the live host for coordinated discovery and installs requested fallback UI.
+`host.activate()` registers the live host for coordinated discovery and installs requested fallback UI.
 Every module definition must declare a stable `id` and display `name`; `modpack`
 is optional and marks modules that participate in Framework coordination.
 
@@ -84,12 +86,12 @@ Reference and historical notes:
 
 Common top-level helpers:
 - `lib.createModule(...)`
-- `lib.tryCreateModule(...)`
 - `lib.createFrameworkRuntime(...)`
 
-Most authors start with `lib.createModule(...)`.
-Pack orchestrators that should skip invalid modules instead of stopping sibling
-modules can use `lib.tryCreateModule(...)` plus `host.tryActivate()`.
+Most authors start with `lib.createModule(...)`. It returns `nil, nil, err`
+instead of throwing when construction fails, so invalid modules can be logged
+and skipped without stopping sibling modules. Activation remains explicit
+through `host.activate()`.
 See [docs/module-authors/GETTING_STARTED.md](docs/module-authors/GETTING_STARTED.md) for the recommended project shape.
 
 ## Validation

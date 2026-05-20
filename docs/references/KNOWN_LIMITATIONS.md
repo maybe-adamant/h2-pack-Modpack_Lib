@@ -11,7 +11,7 @@ When a coordinated module changes its structural contract during hot reload, Lib
 The module rebuild path is:
 
 - `lib.createModule(...)`
-- `host.tryActivate()`
+- `host.activate()`
 - requested fallback UI when running outside Framework coordination
 
 The Framework rebuild is correct, but it is not coalesced across a multi-module reload wave.
@@ -89,7 +89,7 @@ Fallback module UI uses stable callbacks from `host.fallbackUi.attachGuiOnce(...
 What this means in practice:
 
 - `rom.gui.add_imgui(...)` and `rom.gui.add_to_menu_bar(...)` must run from the module's own callsite
-- Lib can swap the runtime behind the bridge after `host.tryActivate()`
+- Lib can swap the runtime behind the bridge after `host.activate()`
 - Lib cannot fully fold ROM GUI callback attachment into host activation
 - fallback UI runtime cleanup is host-owned after activation, but the original ROM callback attachment is not an activation receipt
 

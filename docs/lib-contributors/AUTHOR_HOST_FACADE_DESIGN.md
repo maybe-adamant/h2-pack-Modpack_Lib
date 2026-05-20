@@ -97,7 +97,7 @@ host.integrations.register("run-director.some-provider", {
     },
 })
 
-host.tryActivate()
+host.activate()
 ```
 
 Draw code receives the same author host:
@@ -146,8 +146,7 @@ authors.
 
 Expected public Lib responsibilities:
 
-- host construction, such as `lib.createModule(...)` and
-  `lib.tryCreateModule(...)`
+- host construction through `lib.createModule(...)`
 - hosting/bootstrap helpers
 - neutral utilities
 - advanced escape hatches
@@ -624,7 +623,7 @@ Hot reload should keep the existing replacement model:
 
 1. module file reload creates a fresh author host
 2. module code declares the complete current capability set
-3. `host.tryActivate()` creates a candidate lifecycle activation
+3. `host.activate()` creates a candidate lifecycle activation
 4. Lib installs the new capability set or rolls back
 5. omitted declarations are retired
 

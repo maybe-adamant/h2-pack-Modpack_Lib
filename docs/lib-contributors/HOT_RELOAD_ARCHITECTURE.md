@@ -40,7 +40,7 @@ Safe to rebuild on every module `init`:
 - `definition`
 - `store`
 - `session`
-- live module host created by `lib.createModule(...)` and activated by `host.tryActivate()`
+- live module host created by `lib.createModule(...)` and activated by `host.activate()`
 - UI draw closures
 - lookup tables derived from current imports
 
@@ -141,11 +141,11 @@ The important part is the split:
 
 ## Coordinated Module Host Refresh
 
-`lib.createModule(...)` plus `host.tryActivate()` is the normal behavior refresh boundary for a coordinated module.
+`lib.createModule(...)` plus `host.activate()` is the normal behavior refresh boundary for a coordinated module.
 
 During module creation and activation:
 - the module host closes over the current `definition`, `store`, and `session`
-- `host.tryActivate()` publishes the live host
+- `host.activate()` publishes the live host
 - Lib refreshes hook registrations under the module owner id derived from `pluginGuid`; absent hook registrations for that owner are deactivated
 - Lib refreshes integration registrations under the module owner id derived from `pluginGuid`; absent integration providers for that owner are removed
 - if the coordinator for `definition.modpack` is already registered, Lib immediately syncs live mutation state
@@ -196,7 +196,7 @@ Supported public hook entrypoints:
 The model is:
 - register hook sites on the returned author host before activation
 - pass `pluginGuid` into `lib.createModule(...)`
-- call `host.tryActivate()` after construction
+- call `host.activate()` after construction
 - Lib runs the full registration pass during module activation
 
 Behavior:
@@ -316,7 +316,7 @@ coordinated path, use a full reload.
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
 - register runtime hooks through `host.hooks.*` before activation
 - pass `pluginGuid` to `lib.createModule(...)`
-- call `host.tryActivate()` after construction
+- call `host.activate()` after construction
 - keep stable GUI callbacks outside `init`
 - late-read current framework or module state from those stable callbacks when a stale closure would matter
 - do not use raw ModUtil path wraps for repo-owned hot-reload-sensitive hook sites

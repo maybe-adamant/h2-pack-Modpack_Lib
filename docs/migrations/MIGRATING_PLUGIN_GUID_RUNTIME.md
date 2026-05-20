@@ -5,7 +5,7 @@ module-authored `owner` tokens.
 
 ## What Changed
 
-- `lib.createModule(...)` and `lib.tryCreateModule(...)` no longer accept
+- `lib.createModule(...)` no longer accepts
   `owner`.
 - `pluginGuid` is the stable lookup identity for a module host.
 - The committed host is the managed lifecycle owner for hooks, overlays,
@@ -24,7 +24,7 @@ module-authored `owner` tokens.
 Before:
 
 ```lua
-local host = lib.tryCreateModule({
+local host = lib.createModule({
     owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
@@ -41,7 +41,7 @@ local data = import("mods/data.lua")
 local logic = import("mods/logic.lua")
 local ui = import("mods/ui.lua")
 
-local host, store = lib.tryCreateModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     id = MODULE_ID,

@@ -89,7 +89,7 @@ end
 ---@field setDebugMode fun(enabled: boolean)
 ---@field applyMutation fun(): boolean, string|nil
 ---@field revertMutation fun(): boolean, string|nil
----@field tryActivate fun(): boolean, string|nil
+---@field activate fun(): boolean, string|nil
 ---@field drawTab fun(imgui: table)
 ---@field drawQuickContent fun(imgui: table)|nil
 
@@ -220,7 +220,7 @@ function moduleHost.create(opts)
     local function requireActivated(methodName)
         local state = hostState.get(host)
         if not state or state.activated ~= true then
-            logging.violate("host.not_activated", "host.%s requires host.tryActivate() before it can run", methodName)
+            logging.violate("host.not_activated", "host.%s requires host.activate() before it can run", methodName)
         end
     end
 
@@ -342,8 +342,8 @@ function moduleHost.create(opts)
         return mutation.revertForHost(host)
     end
 
-    function host.tryActivate()
-        return moduleHost.tryActivate(host)
+    function host.activate()
+        return moduleHost.activate(host)
     end
 
     authorHost = authorHostService.create(host)
@@ -434,10 +434,10 @@ end
 --- Activates a constructed module host by registering external side effects.
 ---@param host ModuleHost
 ---@return AuthorHost host Module author host view.
-function moduleHost.activate(host)
+function moduleHost.activateOrThrow(host)
     local state = hostState.get(host)
     if not state then
-        logging.violate("host.invalid_activate_opts", "moduleHost.activate: host is required")
+        logging.violate("host.invalid_activate_opts", "moduleHost.activateOrThrow: host is required")
     end
 
     local pluginGuid = host.getHostId()
@@ -446,10 +446,10 @@ function moduleHost.activate(host)
     local def = state.definition
 
     if state.activated == true then
-        logging.violate("host.already_activated", "moduleHost.activate: host is already activated")
+        logging.violate("host.already_activated", "moduleHost.activateOrThrow: host is already activated")
     end
     if state.activating == true then
-        logging.violate("host.activation_in_progress", "moduleHost.activate: host activation is already in progress")
+        logging.violate("host.activation_in_progress", "moduleHost.activateOrThrow: host activation is already in progress")
     end
     local meta = host.getMeta()
     local moduleId = host.getModuleId()
@@ -544,14 +544,14 @@ end
 ---@param host ModuleHost
 ---@return boolean ok
 ---@return string|nil err
-function moduleHost.tryActivate(host)
-    local ok, err = pcall(moduleHost.activate, host)
+function moduleHost.activate(host)
+    local ok, err = pcall(moduleHost.activateOrThrow, host)
     if ok then
         return true, nil
     end
 
     err = tostring(err)
-    logging.violate("host.activate_failed", "host.tryActivate failed; skipping module: %s", err)
+    logging.violate("host.activate_failed", "host.activate failed; skipping module: %s", err)
     return false, err
 end
 

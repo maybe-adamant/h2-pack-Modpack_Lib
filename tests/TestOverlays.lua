@@ -13,7 +13,7 @@ end
 
 function TestOverlays:activateHostWithOverlays(pluginGuid, declareOverlays, opts)
     local host, authorHost, store, session = self.h.createHostWithOverlays(pluginGuid, declareOverlays, opts)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
     return host, authorHost, store, session
 end

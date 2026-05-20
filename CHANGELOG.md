@@ -24,9 +24,9 @@ All notable changes to this project will be documented in this file.
 - The global `lib.coordinator.*` namespace has been removed; Framework consumes coordinator registration through `lib.createFrameworkRuntime(...).coordinator`.
 - The global `lib.resetStorageToDefaults(...)` helper has been removed; use `host.resetToDefaults(...)` or draw-scoped `ctx.session.resetToDefaults(...)`.
 - Game cache is now exposed to module authors through `host.gameCache.currentRun.*`; the old global `lib.gameCache.*` surface has been removed.
-- `lib.createModule(...)` / `lib.tryCreateModule(...)` now accept module definition fields directly; the old nested `definition = { ... }` option has been removed.
+- `lib.createModule(...)` now accepts module definition fields directly; the old nested `definition = { ... }` option has been removed.
 - Bound draw widgets now target root alias strings or `StorageField` values; table row widgets use `row:field(alias)` instead of rebinding widgets with `ctx.widgets.forSession(...)`.
-- Module authors now construct through `lib.createModule(...)` / `lib.tryCreateModule(...)` and activate through `host.tryActivate()`; lower-level definition/state/host construction is internal.
+- Module authors now construct through `lib.createModule(...)` and activate through `host.activate()`; lower-level definition/state/host construction is internal.
 - Author hosts now expose `host.gameCache.currentRun.*` as a bound game-cache helper.
 - Game cache, integrations, hooks, and similar capability modules now return named service/author/public bundles where applicable so backend services, host facades, and remaining `lib.*` exports stay separated.
 - Host activation now stages and commits hooks, integrations, overlays, and mutation sync through host-owned receipts, so omitted registrations are removed on reload and activation failures roll back candidate effects.

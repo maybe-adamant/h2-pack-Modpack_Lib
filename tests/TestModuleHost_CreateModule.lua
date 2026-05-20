@@ -53,7 +53,7 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     })
 
     lu.assertNil(self.h:liveHost("test-create-module"))
-    host.tryActivate()
+    host.activate()
     local liveHost = self.h:liveHost("test-create-module")
     liveHost.drawTab({})
 
@@ -125,7 +125,8 @@ function TestModuleHost_CreateModule:testCreateModuleReturnsOnlyAuthorHostSurfac
         lu.assertEquals(key, "currentRun")
     end
     lu.assertEquals(gameCacheSurfaceCount, 1)
-    lu.assertEquals(type(host.tryActivate), "function")
+    lu.assertEquals(type(host.activate), "function")
+    lu.assertNil(host.tryActivate)
     lu.assertNil(host.read)
     lu.assertNil(host.writeAndFlush)
     lu.assertNil(host.commitIfDirty)
@@ -153,7 +154,7 @@ function TestModuleHost_CreateModule:testHostMutationPatchDeclaresActivationMuta
         plan:set(target, "Value", "patched")
     end)
 
-    local ok, err = host.tryActivate()
+    local ok, err = host.activate()
 
     lu.assertTrue(ok, tostring(err))
     lu.assertEquals(target.Value, "patched")
@@ -169,15 +170,15 @@ function TestModuleHost_CreateModule:testHostMutationPatchRejectsAfterActivation
         name = "Host Mutation After Activation",
         drawTab = function() end,
     })
-    host.tryActivate()
+    host.activate()
 
     lu.assertErrorMsgContains("after host activation", function()
         host.mutation.patch(function() end)
     end)
 end
 
-function TestModuleHost_CreateModule:testTryCreateModuleReturnsErrorAndLogsWarning()
-    local host, store, err = self.h.public.tryCreateModule({
+function TestModuleHost_CreateModule:testCreateModuleReturnsErrorAndLogsWarning()
+    local host, store, err = self.h.public.createModule({
         pluginGuid = "test-try-create-module-invalid",
         config = {},
         id = "TryCreateInvalid",
@@ -203,8 +204,8 @@ function TestModuleHost_CreateModule:testCreateModuleActivationIsSingleUse()
         drawTab = function() end,
     })
 
-    host.tryActivate()
-    local ok, err = host.tryActivate()
+    host.activate()
+    local ok, err = host.activate()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "already activated")
@@ -212,7 +213,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleRejectsOwnerOption()
     lu.assertErrorMsgContains("unknown option 'owner'", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             owner = {},
             pluginGuid = "test-create-module-hooks-no-owner",
             config = {},
@@ -225,7 +226,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleRejectsLegacyDefinitionOption()
     lu.assertErrorMsgContains("definition table is no longer supported", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             pluginGuid = "test-create-module-legacy-definition",
             config = {},
             definition = {
@@ -239,7 +240,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleTreatsManualMutationAsUnknownOption()
     lu.assertErrorMsgContains("unknown option 'registerManualMutation'", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             pluginGuid = "test-create-module-manual-mutation-unknown",
             config = {},
             id = "ManualMutationUnknown",
@@ -255,7 +256,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterPatchMutationAsUnknownOption()
     lu.assertErrorMsgContains("unknown option 'registerPatchMutation'", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             pluginGuid = "test-create-module-patch-mutation-unknown",
             config = {},
             id = "PatchMutationUnknown",
@@ -268,7 +269,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterIntegrationsAsUnknownOption()
     lu.assertErrorMsgContains("unknown option 'registerIntegrations'", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             pluginGuid = "test-create-module-register-integrations-unknown",
             config = {},
             id = "RegisterIntegrationsUnknown",
@@ -281,7 +282,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterHooksAsUnknownOption()
     lu.assertErrorMsgContains("unknown option 'registerHooks'", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             pluginGuid = "test-create-module-register-hooks-unknown",
             config = {},
             id = "RegisterHooksUnknown",
@@ -294,7 +295,7 @@ end
 
 function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterOverlaysAsUnknownOption()
     lu.assertErrorMsgContains("unknown option 'registerOverlays'", function()
-        self.h.public.createModule({
+        self.h:createModuleOrThrow({
             pluginGuid = "test-create-module-register-overlays-unknown",
             config = {},
             id = "RegisterOverlaysUnknown",
@@ -315,7 +316,7 @@ function TestModuleHost_CreateModule:testCreateModuleFingerprintTracksQuickConte
         drawTab = function() end,
         drawQuickContent = function() end,
     })
-    stableHost.tryActivate()
+    stableHost.activate()
 
     self.h.public.createModule({
         pluginGuid = "test-create-module-quick-content-stable",
@@ -337,7 +338,7 @@ function TestModuleHost_CreateModule:testCreateModuleFingerprintTracksQuickConte
         name = "Quick Content Added",
         drawTab = function() end,
     })
-    addedHost.tryActivate()
+    addedHost.activate()
 
     self.h.public.createModule({
         pluginGuid = "test-create-module-quick-content-added",

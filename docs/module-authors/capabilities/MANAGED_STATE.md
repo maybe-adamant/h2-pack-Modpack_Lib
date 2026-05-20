@@ -184,7 +184,7 @@ local host = lib.createModule({
     onSettingsCommitted = onSettingsCommitted,
     drawTab = ui.drawTab,
 })
-host.tryActivate()
+host.activate()
 ```
 
 `commit` exposes:

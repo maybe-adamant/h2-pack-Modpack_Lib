@@ -26,7 +26,7 @@ local function activateProvider(test, pluginGuid, id, providerId, api)
         providerId = providerId,
         api = api,
     })
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
     return authorHost
 end
@@ -105,7 +105,7 @@ function TestIntegrations:testAuthorHostRegisterReplacesSameProviderBeforeActiva
         },
     })
 
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local result, providerId = invoke(self, "test.example", "value", "fallback")
@@ -145,7 +145,7 @@ end
 
 function TestIntegrations:testAuthorHostRegisterRejectsAfterActivation()
     local _, authorHost = createIntegrationHost(self.harness, "integration-facade-activated")
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     lu.assertErrorMsgContains("cannot register after activation begins", function()

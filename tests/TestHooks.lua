@@ -127,7 +127,7 @@ function TestHooks:createHostWithHooks(pluginGuid, registerHooks, activationOpts
     if registerHooks ~= nil then
         registerHooks(authorHost, store)
     end
-    return self.moduleHost.activate(host)
+    return self.moduleHost.activateOrThrow(host)
 end
 
 function TestHooks:testWrapRegistersOnceAndUpdatesHandler()
@@ -354,7 +354,7 @@ function TestHooks:testHostHookDeclarationsRejectAfterActivation()
         session = createSession(),
         drawTab = function() end,
     })
-    self.moduleHost.activate(host)
+    self.moduleHost.activateOrThrow(host)
 
     lu.assertErrorMsgContains("cannot be called after host activation", function()
         authorHost.hooks.wrap("AdamantHookTestNoContext", function(base)
@@ -632,7 +632,7 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
         buildCalls = buildCalls + 1
         plan:set(target, "Value", "patched")
     end)
-    self.moduleHost.activate(host)
+    self.moduleHost.activateOrThrow(host)
 
     lu.assertEquals(buildCalls, 1)
     lu.assertEquals(target.Value, "patched")
@@ -664,7 +664,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         firstBuildCalls = firstBuildCalls + 1
         plan:set(target, "Value", "first")
     end)
-    self.moduleHost.activate(firstHost)
+    self.moduleHost.activateOrThrow(firstHost)
 
     local secondDefinition = self.moduleHost.prepareDefinition({}, {
         modpack = packId,
@@ -683,7 +683,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         secondBuildCalls = secondBuildCalls + 1
         plan:set(target, "Value", "second")
     end)
-    self.moduleHost.activate(secondHost)
+    self.moduleHost.activateOrThrow(secondHost)
 
     lu.assertEquals(firstBuildCalls, 1)
     lu.assertEquals(secondBuildCalls, 1)

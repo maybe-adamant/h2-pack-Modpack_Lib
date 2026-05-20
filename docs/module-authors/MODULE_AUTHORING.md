@@ -25,7 +25,6 @@ Use runtime behavior APIs only when the module owns that kind of behavior:
 - `host.mutation.*`
 
 Pack, Framework, migration, and advanced storage plumbing may also use:
-- `lib.tryCreateModule(...)`
 - `lib.createFrameworkRuntime(...)`
 
 Use the namespaced API directly. Normal module code should keep the author host
@@ -89,8 +88,10 @@ local host, store = lib.createModule({
     drawTab = drawTab,
     drawQuickContent = drawQuickContent,
 })
+if not host then return end
+
 registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 This example assumes coordinated/framework hosting.
@@ -102,16 +103,15 @@ For `createModule(...)`, `pluginGuid` is the single stable lifecycle identity.
 Lib owns the internal per-plugin runtime state for structural hot-reload
 tracking, hook refresh ownership, overlays, integrations, mutation runtime, and
 live-host lookup.
-Call `host.tryActivate()` after construction. That activation step publishes the
+Call `host.activate()` after construction. That activation step publishes the
 live host, installs declared integrations, registers hooks and overlays, and
 syncs initial runtime behavior.
-Pack-level orchestrators can use `lib.tryCreateModule(...)` and
-`host.tryActivate()` when an invalid module should be logged and skipped rather
-than stopping sibling modules. These helpers preserve the lifecycle split:
-construction stays separate from activation, and each `try*` helper only wraps
-one phase.
+`lib.createModule(...)` returns `nil, nil, err` when construction fails, so an
+invalid module can be logged and skipped rather than stopping sibling modules.
+Construction stays separate from activation: `createModule(...)` wraps only
+construction, and `host.activate()` wraps only activation.
 Declare hooks and retained overlays on the host after construction and before
-`host.tryActivate()`. These declarations are scoped to the module's
+`host.activate()`. These declarations are scoped to the module's
 `pluginGuid`, so helper files do not need to know or manage an owner token.
 Modules that use shared runtime helper files should pass the needed store or
 narrower access/read closures into those helpers:
@@ -224,7 +224,7 @@ Framework Quick Setup reads:
 For the focused hooks guide, read [capabilities/HOOKS.md](capabilities/HOOKS.md).
 
 Modules that register ModUtil path hooks should declare them inside
-local hook helpers by calling `host.hooks.*` before `host.tryActivate()`.
+local hook helpers by calling `host.hooks.*` before `host.activate()`.
 Declarations are scoped to the activating module's `pluginGuid`, so hook files
 do not need to manage owner tokens.
 
@@ -246,7 +246,7 @@ operation instead of bypassing the tracked lifecycle.
 ## Coordinated Modules
 
 Framework discovery requires:
-- a live host registered by `host.tryActivate()`
+- a live host registered by `host.activate()`
 - `host.getHostId()`
 - `host.getModuleId()`
 - `host.getPackId()`
@@ -286,12 +286,12 @@ host.fallbackUi.attachGuiOnce(function(fallbackUi)
     rom.gui.add_to_menu_bar(fallbackUi.addMenuBar)
 end)
 logic.registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 Notes:
 - fallback UI suppresses its window/menu when the module is coordinated
-- `host.tryActivate()` syncs runtime mutation state for both coordinated and fallback UI modules
+- `host.activate()` syncs runtime mutation state for both coordinated and fallback UI modules
 - `host.fallbackUi.attachGuiOnce(...)` keeps module-owned ROM GUI callsites stable while Lib owns the current runtime pointer
 - the fallback UI window includes built-in:
   - `Enabled`
@@ -364,7 +364,7 @@ local function init()
         rom.gui.add_to_menu_bar(fallbackUi.addMenuBar)
     end)
     registerHooks(host, store)
-    host.tryActivate()
+    host.activate()
 end
 
 function drawTab(ctx)
@@ -419,9 +419,9 @@ Notes on the example:
 - `config` and `reload` stay local to `main.lua`
 - `store` is passed to runtime hooks and mutation callbacks
 - draw callbacks receive the restricted author session through the live host
-- `host.tryActivate()` owns live coordinated host registration
-- `host.hooks.*` declarations happen before `host.tryActivate()`
-- `host.overlays.*` declarations happen before `host.tryActivate()`
+- `host.activate()` owns live coordinated host registration
+- `host.hooks.*` declarations happen before `host.activate()`
+- `host.overlays.*` declarations happen before `host.activate()`
 - `host.fallbackUi.attachGuiOnce(...)` keeps ROM GUI registration in module context without stacking across reloads
 - `drawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `drawQuickContent` is optional

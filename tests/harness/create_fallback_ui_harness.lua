@@ -160,7 +160,7 @@ local function createFallbackUiHarness(opts)
         if hostOpts.attachFallbackUi == true then
             authorHost.fallbackUi.attachGuiOnce(hostOpts.registerGui or function() end)
         end
-        local ok, err = authorHost.tryActivate()
+        local ok, err = authorHost.activate()
         assert(ok, tostring(err))
         return host, authorHost
     end

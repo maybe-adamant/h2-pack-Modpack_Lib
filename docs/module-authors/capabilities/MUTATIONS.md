@@ -25,7 +25,7 @@ local host = lib.createModule({
     drawTab = ui.drawTab,
 })
 host.mutation.patch(buildPatchPlan)
-host.tryActivate()
+host.activate()
 ```
 
 The callback receives committed runtime state through `store`.

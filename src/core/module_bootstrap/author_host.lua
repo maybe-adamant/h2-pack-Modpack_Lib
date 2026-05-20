@@ -23,7 +23,7 @@ local authorHost = {}
 ---@field integrations AuthorIntegrations
 ---@field mutation AuthorMutation
 ---@field overlays AuthorOverlays
----@field tryActivate fun(): boolean, string|nil
+---@field activate fun(): boolean, string|nil
 
 ---@class AuthorHooks
 ---@field wrap fun(path: string, keyOrHandler: string|function, maybeHandler: function|nil): nil
@@ -69,7 +69,7 @@ function authorHost.create(host)
         getModuleId = host.getModuleId,
         getPackId = host.getPackId,
         getMeta = host.getMeta,
-        tryActivate = host.tryActivate,
+        activate = host.activate,
         fallbackUi = fallbackUi.create(host),
         gameCache = gameCache.create(host),
         hooks = hooks.create(host),

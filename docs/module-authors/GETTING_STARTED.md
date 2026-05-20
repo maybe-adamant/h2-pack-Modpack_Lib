@@ -42,13 +42,13 @@ A module is built from four main pieces:
 - `session`
   Staged UI state. Draw code edits this and host/framework plumbing commits it later.
 - `host`
-  The author-facing view returned by `lib.createModule(...)`. Call `host.tryActivate()` after construction so Framework and fallback UI can use the registered live host.
+  The author-facing view returned by `lib.createModule(...)`. Call `host.activate()` after construction so Framework and fallback UI can use the registered live host.
 
 Typical module flow:
 
 1. `main.lua` calls `lib.createModule(...)`.
 2. The returned author host is kept local in `main.lua`.
-3. `host.tryActivate()` registers hooks, overlays, integrations, and the live host.
+3. `host.activate()` registers hooks, overlays, integrations, and the live host.
 4. UI code edits staged values through the session passed into draw callbacks.
 5. Host/framework plumbing commits staged persistent values when appropriate.
 6. Gameplay logic reads persisted state through `store.read(...)`.
@@ -133,19 +133,18 @@ local host, store = lib.createModule({
     name = "Example Module",
     drawTab = function() end,
 })
-host.tryActivate()
+host.activate()
 ```
 
 Every module must declare `id` and `name`. Coordinated modules also declare
 `modpack`. Modules with no custom settings may omit `storage`; Lib still
 injects the built-in `Enabled` and `DebugMode` aliases.
 
-Use `lib.tryCreateModule(...)` and `host.tryActivate()` at pack orchestration
-boundaries when one invalid module should be skipped without stopping sibling
-modules:
+`lib.createModule(...)` returns `nil, nil, err` when construction fails, so pack
+orchestration can skip one invalid module without stopping sibling modules:
 
 ```lua
-local host, _, err = lib.tryCreateModule({
+local host, _, err = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
@@ -155,13 +154,13 @@ local host, _, err = lib.tryCreateModule({
 })
 
 if host then
-    local ok, activateErr = host.tryActivate()
+    local ok, activateErr = host.activate()
 end
 ```
 
-The `try*` helpers preserve the construction/activation split. They wrap the
-same hard-fail APIs, log a module-scoped warning, and return an error instead
-of throwing.
+Construction and activation remain separate. `createModule(...)` catches
+construction failures and logs `host.create_failed`; `host.activate()` catches
+activation failures and logs `host.activate_failed`.
 
 ### 2. Declare storage in `data.lua`
 
@@ -195,7 +194,7 @@ local host, store = lib.createModule({
     storage = data.buildStorage(),
     drawTab = function() end,
 })
-host.tryActivate()
+host.activate()
 ```
 
 Rules:
@@ -227,7 +226,7 @@ local host, store = lib.createModule({
     drawQuickContent = ui.drawQuickContent,
 })
 logic.registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 The draw path receives the restricted author-facing session through the live host.
@@ -317,7 +316,7 @@ local host, store = lib.createModule({
 })
 host.mutation.patch(logic.buildPatchPlan)
 logic.registerHooks(host, store)
-host.tryActivate()
+host.activate()
 ```
 
 This is the final `main.lua` module wiring shape.
@@ -332,7 +331,7 @@ If the module has no runtime hooks, skip the hook declaration call.
 
 If the module belongs to a Framework-managed pack:
 
-- `host.tryActivate()` registers the module in Lib's live-host registry
+- `host.activate()` registers the module in Lib's live-host registry
 - Framework calls `host.drawTab(...)`
 - optional quick setup uses `host.drawQuickContent(...)`
 
@@ -347,7 +346,7 @@ host.fallbackUi.attachGuiOnce(function(fallbackUi)
 end)
 ```
 
-Then call `host.tryActivate()`. Activation installs or swaps the active fallback
+Then call `host.activate()`. Activation installs or swaps the active fallback
 UI runtime behind those stable callbacks.
 
 Fallback UI automatically suppresses itself when the module is coordinated.

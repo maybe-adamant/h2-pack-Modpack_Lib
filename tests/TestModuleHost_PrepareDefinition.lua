@@ -20,7 +20,7 @@ local function createAndActivate(h, pluginGuid, definition, store, session)
         session = session,
         drawTab = function() end,
     })
-    return authorHost.tryActivate()
+    return authorHost.activate()
 end
 
 function TestModuleHost_PrepareDefinition:testPrepareDefinitionReturnsPreparedClone()

@@ -140,7 +140,7 @@ local lib = {}
 ---@class AdamantModpackLib.AuthorHost
 ---Activates module hooks, integrations, live-host registration, and initial runtime sync.
 ---Call once after construction.
----@field tryActivate fun(): boolean, string? Safely activates the host and returns an error instead of throwing.
+---@field activate fun(): boolean, string? Safely activates the host and returns an error instead of throwing.
 ---@field isEnabled fun(): boolean
 ---@field getHostId fun(): string
 ---@field getModuleId fun(): string
@@ -292,7 +292,7 @@ local lib = {}
 ---@field setDebugMode fun(enabled: boolean)
 ---@field applyMutation fun(): boolean, string?
 ---@field revertMutation fun(): boolean, string?
----@field tryActivate fun(): boolean, string?
+---@field activate fun(): boolean, string?
 ---@field drawTab fun(imgui: table)
 ---@field drawQuickContent? fun(imgui: table)
 
@@ -735,16 +735,10 @@ end
 ---@field session AdamantModpackLib.Session
 
 ---@param opts AdamantModpackLib.ModuleCreateOpts
----@return AdamantModpackLib.AuthorHost host
----@return AdamantModpackLib.ManagedStore store
-function lib.createModule(opts)
-end
-
----@param opts AdamantModpackLib.ModuleCreateOpts
 ---@return AdamantModpackLib.AuthorHost? host
 ---@return AdamantModpackLib.ManagedStore? store
 ---@return string? err
-function lib.tryCreateModule(opts)
+function lib.createModule(opts)
 end
 
 ---@param frameworkPluginGuid string Must be `adamant-ModpackFramework`.

@@ -110,7 +110,7 @@ function TestOverlays_Retained:testRetainedTableCapsRowsAndHidesUnusedRows()
             ctx.refresh("runs")
         end)
     end)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
     self.h.overlays.dispatchCommit(host, {})
 
@@ -149,7 +149,7 @@ function TestOverlays_Retained:testHostOverlayDeclarationsRejectAfterActivation(
             },
         })
     end)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     lu.assertErrorMsgContains("cannot be called after host activation", function()
@@ -217,7 +217,7 @@ function TestOverlays_Retained:testHostCommitDispatchesOverlaysAfterSettingsObse
             order[#order + 1] = "settings"
         end,
     })
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     session.write("Flag", true)
@@ -249,7 +249,7 @@ function TestOverlays_Retained:testHostCommitDispatchesOverlaysWhenSettingsObser
             error("settings observer boom")
         end,
     })
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     session.write("Flag", true)
@@ -315,7 +315,7 @@ function TestOverlays_Retained:testHotReloadSameOverlayNameSurvivesOldHostRetire
     end, {
         id = "RetainedSameNameReload",
     })
-    local ok, err = firstAuthorHost.tryActivate()
+    local ok, err = firstAuthorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local firstRow = self.h.rendererState.stackRows[rowKey]
@@ -331,7 +331,7 @@ function TestOverlays_Retained:testHotReloadSameOverlayNameSurvivesOldHostRetire
     end, {
         id = "RetainedSameNameReload",
     })
-    ok, err = secondAuthorHost.tryActivate()
+    ok, err = secondAuthorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local secondRow = self.h.rendererState.stackRows[rowKey]
@@ -352,7 +352,7 @@ function TestOverlays_Retained:testRetainedIntervalDispatchesWhenDue()
             calls = calls + 1
         end)
     end)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     self.h.overlays.dispatchIntervals(0)
@@ -387,7 +387,7 @@ function TestOverlays_Retained.testRetainedIntervalDriverUsesInjectedRom()
             calls = calls + 1
         end)
     end)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     lu.assertEquals(#alwaysDrawCallbacks, baselineCallbacks + 1)
@@ -405,7 +405,7 @@ function TestOverlays_Retained:testExplicitOwnerIntervalPredicateRunsOncePerDisp
             end,
         })
     end)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     self.h.overlays.dispatchIntervals(0)
@@ -430,7 +430,7 @@ function TestOverlays_Retained:testAfterHookObservesResultsWithoutChangingReturn
             }
         end)
     end)
-    local ok, err = authorHost.tryActivate()
+    local ok, err = authorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local result = wrapped(function(value)
@@ -468,11 +468,11 @@ function TestOverlays_Retained:testHostAfterHookIsRemovedWhenOmitted()
             observed = true
         end)
     end)
-    local ok, err = firstAuthorHost.tryActivate()
+    local ok, err = firstAuthorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local _, secondAuthorHost = self:createHostWithOverlays(pluginGuid, function() end)
-    ok, err = secondAuthorHost.tryActivate()
+    ok, err = secondAuthorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local result = wrapped(function(value)
@@ -498,7 +498,7 @@ function TestOverlays_Retained:testHostAfterHookRollsBackOnActivationFailure()
             observed = "first"
         end)
     end)
-    local ok, err = firstAuthorHost.tryActivate()
+    local ok, err = firstAuthorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local _, secondAuthorHost = self:createHostWithOverlays(pluginGuid, function(overlays)
@@ -510,7 +510,7 @@ function TestOverlays_Retained:testHostAfterHookRollsBackOnActivationFailure()
             error("rollback after overlay hook")
         end,
     })
-    ok, err = secondAuthorHost.tryActivate()
+    ok, err = secondAuthorHost.activate()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "rollback after overlay hook")
@@ -534,7 +534,7 @@ function TestOverlays_Retained:testActivationFailureRollsBackOverlayDeclarations
     end, {
         id = "RetainedRollback",
     })
-    local ok, err = firstAuthorHost.tryActivate()
+    local ok, err = firstAuthorHost.activate()
     lu.assertTrue(ok, tostring(err))
 
     local _, secondAuthorHost = self:createHostWithOverlays(pluginGuid, function(overlays)
@@ -551,7 +551,7 @@ function TestOverlays_Retained:testActivationFailureRollsBackOverlayDeclarations
         end,
     })
 
-    ok, err = secondAuthorHost.tryActivate()
+    ok, err = secondAuthorHost.activate()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "rollback after overlays")
