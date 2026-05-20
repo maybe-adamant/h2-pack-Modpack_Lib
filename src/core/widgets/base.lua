@@ -7,7 +7,7 @@ local helpers = ...
 
 ---@param imgui table
 ---@return nil
-function public.widgets.separator(imgui)
+function helpers.widgets.separator(imgui)
     imgui.Separator()
 end
 
@@ -15,7 +15,7 @@ end
 ---@param text any
 ---@param opts TextOpts|nil
 ---@return nil
-function public.widgets.text(imgui, text, opts)
+function helpers.widgets.text(imgui, text, opts)
     opts = opts or {}
     local renderedText = tostring(text or "")
     local color = helpers.NormalizeColor(opts.color)

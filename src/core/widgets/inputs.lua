@@ -4,6 +4,7 @@ local helpers = ...
 ---@field label string|nil
 ---@field tooltip string|nil
 ---@field maxLen number|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 
@@ -12,7 +13,7 @@ local helpers = ...
 ---@param alias string
 ---@param opts InputTextOpts|nil
 ---@return boolean
-function public.widgets.inputText(imgui, session, alias, opts)
+function helpers.widgets.inputText(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.inputText")
     local fieldAlias = field:alias()
@@ -20,13 +21,9 @@ function public.widgets.inputText(imgui, session, alias, opts)
     local maxLen = math.max(math.floor(tonumber(opts.maxLen) or 256), 1)
     local label = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 120
-    local controlGap = helpers.ResolveGap(imgui, opts.controlGap)
 
     if label ~= "" then
-        imgui.AlignTextToFramePadding()
-        imgui.Text(label)
-        helpers.ShowTooltip(imgui, opts.tooltip)
-        helpers.SameLineWithGap(imgui, controlGap)
+        helpers.DrawInlineLabel(imgui, label, opts.tooltip, opts.labelWidth, opts.controlGap)
     end
 
     if controlWidth > 0 then

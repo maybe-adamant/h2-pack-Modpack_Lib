@@ -11,9 +11,6 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `host.integrations.*`
 - `host.gameCache.*`
 - `host.mutation.*`
-- `lib.widgets.*`
-- `lib.nav.*`
-- `lib.imguiHelpers.*`
 
 Framework-owned live-host discovery, hash/profile, overlay, UI suppression, and
 diagnostic controls are available from
@@ -412,7 +409,7 @@ Options:
 - `exclude = { Alias = true }` skips specific root aliases.
 
 Draw callbacks receive the same reset behavior through
-`ctx.session.resetToDefaults(opts?)`.
+`draw.session.resetToDefaults(opts?)`.
 
 ## `host.hooks`
 
@@ -771,77 +768,68 @@ This is infrastructure API for Framework discovery. Normal module code should
 keep the author host returned by `lib.createModule(...)` and use
 `store`/callback sessions for state access.
 
-## `lib.widgets`
+## Draw Widgets
 
-Immediate-mode widget helpers.
+Immediate-mode widget helpers are available on the module draw object as
+`draw.widgets`.
 
 Built-ins:
-- `lib.widgets.bind(imgui, session)`
-- `lib.widgets.separator(imgui)`
-- `lib.widgets.text(imgui, text, opts?)`
-- `lib.widgets.button(imgui, session, label, opts?)`
-- `lib.widgets.confirmButton(imgui, session, id, label, opts?)`
-- `lib.widgets.inputText(imgui, session, alias, opts?)`
-- `lib.widgets.dropdown(imgui, session, alias, opts?)`
-- `lib.widgets.mappedDropdown(imgui, session, alias, opts?)`
-- `lib.widgets.packedDropdown(imgui, session, alias, opts?)`
-- `lib.widgets.getPackedChoiceAlias(session, alias, opts?)`
-- `lib.widgets.radio(imgui, session, alias, opts?)`
-- `lib.widgets.mappedRadio(imgui, session, alias, opts?)`
-- `lib.widgets.packedRadio(imgui, session, alias, opts?)`
-- `lib.widgets.stepper(imgui, session, alias, opts?)`
-- `lib.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts?)`
-- `lib.widgets.checkbox(imgui, session, alias, opts?)`
-- `lib.widgets.packedCheckboxList(imgui, session, alias, opts?)`
+- `draw.widgets.separator()`
+- `draw.widgets.text(text, opts?)`
+- `draw.widgets.button(label, opts?)`
+- `draw.widgets.confirmButton(id, label, opts?)`
+- `draw.widgets.inputText(target, opts?)`
+- `draw.widgets.dropdown(target, opts?)`
+- `draw.widgets.mappedDropdown(target, opts?)`
+- `draw.widgets.packedDropdown(target, opts?)`
+- `draw.widgets.getPackedChoiceAlias(target, opts?)`
+- `draw.widgets.radio(target, opts?)`
+- `draw.widgets.mappedRadio(target, opts?)`
+- `draw.widgets.packedRadio(target, opts?)`
+- `draw.widgets.stepper(target, opts?)`
+- `draw.widgets.steppedRange(minTarget, maxTarget, opts?)`
+- `draw.widgets.checkbox(target, opts?)`
+- `draw.widgets.packedCheckboxList(target, opts?)`
 
-These are direct immediate-mode helpers. Module draw callbacks normally use
-the bound surface on `ctx.widgets`, which removes repeated `imgui` and
-`session` arguments. Bound value widgets accept either a root alias string or a
-`StorageField`:
+These are direct immediate-mode helpers. `draw.widgets` is bound to the current
+`imgui` and author session for the render call. Value widgets accept either a
+root alias string or a `StorageField`:
 
 ```lua
-function ui.drawTab(ctx)
-    ctx.widgets.checkbox("FeatureEnabled", {
+function ui.drawTab(draw)
+    draw.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 
-    ctx.imgui.SameLine()
-    ctx.widgets.dropdown("Mode", {
+    draw.imgui.SameLine()
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Default", "Custom" },
     })
 end
 ```
 
-Use `ctx.field(alias)` for an explicit root storage field, and
+Use `draw.field(alias)` for an explicit root storage field, and
 `row:field(alias)` for table-backed fields:
 
 ```lua
-local mode = ctx.field("Mode")
-ctx.widgets.dropdown(mode, opts)
+local mode = draw.field("Mode")
+draw.widgets.dropdown(mode, opts)
 
-local row = ctx.session.table("Rows"):rowHandle(1)
-ctx.widgets.packedDropdown(row:field("PackedChoices"), opts)
+local row = draw.session.table("Rows"):rowHandle(1)
+draw.widgets.packedDropdown(row:field("PackedChoices"), opts)
 ```
 
-`getPackedChoiceAlias(...)` returns the selected child alias for packed dropdown/radio use cases, or `nil` when the selected choice is none or multiple. It uses the same `selectionMode` option as `packedDropdown(...)` and `packedRadio(...)`.
+`getPackedChoiceAlias(...)` returns the selected child alias for packed
+dropdown/radio use cases, or `nil` when the selected choice is none or
+multiple. It uses the same `selectionMode` option as `packedDropdown(...)` and
+`packedRadio(...)`.
 
-## `lib.imguiHelpers`
+## Draw Navigation
 
-Low-level ImGui binding helpers used by Lib widgets and available to module UI code.
+Navigation helpers are available on the module draw object as `draw.nav`.
 
-Exports:
-- `lib.imguiHelpers.ImGuiComboFlags`
-- `lib.imguiHelpers.ImGuiCol`
-- `lib.imguiHelpers.ImGuiTreeNodeFlags`
-- `lib.imguiHelpers.unpackColor(color)`
-- `lib.imguiHelpers.textColored(ui, color, text)`
-
-The enum tables normalize ReturnOfModding ImGui constants that are passed as raw integers in Lua.
-
-## `lib.nav`
-
-### `lib.nav.verticalTabs(imgui, opts)`
+### `draw.nav.verticalTabs(opts)`
 
 Simple immediate-mode vertical tab rail.
 
@@ -861,9 +849,9 @@ Each tab entry may include:
 Returns:
 - next `activeKey`
 
-### `lib.nav.isVisible(session, condition)`
+### `draw.nav.isVisible(condition)`
 
-Evaluates a `visibleIf`-style condition against `session.view`.
+Evaluates a `visibleIf`-style condition against the draw session.
 
 Supported forms:
 - `"AliasName"`

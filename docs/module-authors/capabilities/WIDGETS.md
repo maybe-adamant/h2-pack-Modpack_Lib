@@ -1,17 +1,17 @@
 # Widgets and Navigation
 
-This document covers `lib.widgets.*` and `lib.nav.*` from a module draw-code point of view.
+This document covers `draw.widgets.*` and `draw.nav.*` from a module draw-code point of view.
 
-Draw callbacks receive a `ctx` object. Widget authoring normally uses
-`ctx.widgets`, which binds the current `imgui` and root storage field scope for
-the render call.
+Draw callbacks receive a `draw` object. Widget authoring normally uses
+`draw.widgets`, which binds the current `imgui` and root storage field scope for
+the render call. Navigation helpers use `draw.nav`, which binds the current
+`imgui` and session for the same draw call.
 
 For storage schema, table handles, packed roots, and session/store rules, read [MANAGED_STATE.md](MANAGED_STATE.md).
 
 ## Widgets
 
-Widgets live under `lib.widgets`. Module draw code usually calls the bound
-surface at `ctx.widgets`.
+Module draw code calls the bound widget surface at `draw.widgets`.
 
 Built-ins:
 - `separator`
@@ -35,7 +35,7 @@ These are direct immediate-mode helpers. Call them inside module draw functions 
 Typical call shape:
 
 ```lua
-ctx.widgets.dropdown("Mode", {
+draw.widgets.dropdown("Mode", {
     label = "Mode",
     values = { "Vanilla", "Chaos" },
     controlWidth = 180,
@@ -63,10 +63,10 @@ Most widgets target one storage field:
 - `packedCheckboxList`
 - `stepper`
 
-String targets are shorthand for root fields on `ctx.session`:
+String targets are shorthand for root fields on `draw.session`:
 
 ```lua
-ctx.widgets.checkbox("Enabled", {
+draw.widgets.checkbox("Enabled", {
     label = "Enabled",
 })
 ```
@@ -75,8 +75,8 @@ The explicit root-field form is available when a helper needs to pass a target
 around:
 
 ```lua
-local enabled = ctx.field("Enabled")
-ctx.widgets.checkbox(enabled, {
+local enabled = draw.field("Enabled")
+draw.widgets.checkbox(enabled, {
     label = "Enabled",
 })
 ```
@@ -84,8 +84,8 @@ ctx.widgets.checkbox(enabled, {
 Table rows produce `StorageField` targets through the table API:
 
 ```lua
-local row = ctx.session.table("Rows"):rowHandle(1)
-ctx.widgets.checkbox(row:field("Enabled"), {
+local row = draw.session.table("Rows"):rowHandle(1)
+draw.widgets.checkbox(row:field("Enabled"), {
     label = "Enabled",
 })
 ```
@@ -99,11 +99,11 @@ Widgets do not traverse table storage. Table/path APIs should resolve to a
 final `StorageField`, then widgets render that field.
 
 ```lua
-local row = ctx.session.table("Rows"):rowHandle(1)
-ctx.widgets.packedDropdown(row:field("PackedChoices"), opts)
+local row = draw.session.table("Rows"):rowHandle(1)
+draw.widgets.packedDropdown(row:field("PackedChoices"), opts)
 ```
 
-Author draw code can read staged values through `ctx.session.view.SomeAlias`
+Author draw code can read staged values through `draw.session.view.SomeAlias`
 for readability. Widget internals use storage fields to read and write values.
 
 ### Labels and tooltips
@@ -135,14 +135,14 @@ Colors are RGBA tables:
 
 ## Base widgets
 
-### `ctx.widgets.separator()`
+### `draw.widgets.separator()`
 
 Thin wrapper around `imgui.Separator()`.
 
 Use when:
 - you want a Lib-level helper for consistency
 
-### `ctx.widgets.text(text, opts?)`
+### `draw.widgets.text(text, opts?)`
 
 Options:
 - `color`
@@ -155,13 +155,13 @@ Use when:
 Example:
 
 ```lua
-ctx.widgets.text("Underworld", {
+draw.widgets.text("Underworld", {
     color = { 0.8, 0.7, 0.4, 1 },
     alignToFramePadding = true,
 })
 ```
 
-### `ctx.widgets.button(label, opts?)`
+### `draw.widgets.button(label, opts?)`
 
 Options:
 - `id`
@@ -175,7 +175,7 @@ Notes:
 - when `action` is provided, replaces that staged session action with `value`
 - `onClick` is optional convenience only; you can ignore it and use the boolean return directly
 
-### `ctx.widgets.confirmButton(id, label, opts?)`
+### `draw.widgets.confirmButton(id, label, opts?)`
 
 Renders a button that opens a confirmation popup.
 
@@ -194,7 +194,7 @@ Notes:
 
 ## Input widget
 
-### `ctx.widgets.inputText(target, opts?)`
+### `draw.widgets.inputText(target, opts?)`
 
 Options:
 - `id`
@@ -215,7 +215,7 @@ Use when:
 
 ## Choice widgets
 
-### `ctx.widgets.dropdown(target, opts?)`
+### `draw.widgets.dropdown(target, opts?)`
 
 Options:
 - `id`
@@ -239,7 +239,7 @@ Behavior:
 Use when:
 - the widget owns a fixed explicit choice list
 
-### `ctx.widgets.mappedDropdown(target, opts?)`
+### `draw.widgets.mappedDropdown(target, opts?)`
 
 Options:
 - `id`
@@ -273,7 +273,7 @@ Use when:
 Example:
 
 ```lua
-ctx.widgets.mappedDropdown("SelectedRoot", {
+draw.widgets.mappedDropdown("SelectedRoot", {
     label = "Root",
     controlWidth = 220,
     getPreview = function(view)
@@ -295,7 +295,7 @@ ctx.widgets.mappedDropdown("SelectedRoot", {
 })
 ```
 
-### `ctx.widgets.packedDropdown(target, opts?)`
+### `draw.widgets.packedDropdown(target, opts?)`
 
 Single-choice dropdown over a packed root.
 
@@ -331,7 +331,7 @@ Use when:
 Example:
 
 ```lua
-ctx.widgets.packedDropdown("PackedForcedBoon", {
+draw.widgets.packedDropdown("PackedForcedBoon", {
     label = "Force 1",
     noneLabel = "None",
     selectionMode = "singleEnabled",
@@ -344,7 +344,7 @@ ctx.widgets.packedDropdown("PackedForcedBoon", {
 })
 ```
 
-### `ctx.widgets.radio(target, opts?)`
+### `draw.widgets.radio(target, opts?)`
 
 Options:
 - `label`
@@ -358,7 +358,7 @@ Options:
 Use when:
 - the choice list is small and visible all at once is better than a combo
 
-### `ctx.widgets.mappedRadio(target, opts?)`
+### `draw.widgets.mappedRadio(target, opts?)`
 
 Options:
 - `label`
@@ -380,7 +380,7 @@ Use when:
 Note:
 - `getOptions` receives the target owner's view
 
-### `ctx.widgets.packedRadio(target, opts?)`
+### `draw.widgets.packedRadio(target, opts?)`
 
 Packed single-choice radio surface.
 
@@ -398,7 +398,7 @@ Use when:
 
 ## Numeric widgets
 
-### `ctx.widgets.stepper(target, opts?)`
+### `draw.widgets.stepper(target, opts?)`
 
 Stepper with `-` and `+` buttons around a rendered value.
 
@@ -422,7 +422,7 @@ Use when:
 - the value is small and ordinal
 - button stepping is more readable than typing
 
-### `ctx.widgets.steppedRange(minTarget, maxTarget, opts?)`
+### `draw.widgets.steppedRange(minTarget, maxTarget, opts?)`
 
 Two coupled steppers rendered as:
 - min stepper
@@ -450,7 +450,7 @@ Use when:
 
 ## Boolean widgets
 
-### `ctx.widgets.checkbox(target, opts?)`
+### `draw.widgets.checkbox(target, opts?)`
 
 Options:
 - `label`
@@ -463,7 +463,7 @@ Behavior:
 Use when:
 - the field is a plain toggle
 
-### `ctx.widgets.packedCheckboxList(target, opts?)`
+### `draw.widgets.packedCheckboxList(target, opts?)`
 
 Checkbox list over packed child aliases.
 
@@ -493,8 +493,8 @@ Use when:
 Example:
 
 ```lua
-ctx.widgets.packedCheckboxList("PackedBannedAphrodite", {
-    filterText = ctx.session.view.BanFilterText,
+draw.widgets.packedCheckboxList("PackedBannedAphrodite", {
+    filterText = draw.session.view.BanFilterText,
     optionsPerLine = 2,
     valueColors = {
         PackedBannedAphrodite_Attack = { 1, 0.8, 0.8, 1 },
@@ -519,18 +519,18 @@ Use:
 
 ## Nav
 
-Navigation helpers live under `lib.nav`.
+Navigation helpers live under the bound draw surface at `draw.nav`.
 
 Surface:
-- `lib.nav.verticalTabs(ui, opts)`
-- `lib.nav.isVisible(session, condition)`
+- `draw.nav.verticalTabs(opts)`
+- `draw.nav.isVisible(condition)`
 
 `verticalTabs(...)` renders a simple immediate-mode vertical tab rail.
 
 Example:
 
 ```lua
-activeKey = lib.nav.verticalTabs(ctx.imgui, {
+activeKey = draw.nav.verticalTabs({
     id = "ExampleTabs",
     navWidth = 220,
     activeKey = activeKey,
@@ -541,10 +541,21 @@ activeKey = lib.nav.verticalTabs(ctx.imgui, {
 })
 ```
 
+`isVisible(...)` evaluates a storage-backed visibility condition against the
+draw session:
+
+```lua
+if draw.nav.isVisible({ alias = "ShowAdvanced", value = true }) then
+    draw.widgets.checkbox("AdvancedFlag", {
+        label = "Advanced Flag",
+    })
+end
+```
+
 ## Scope
 
 Widgets are direct immediate-mode helpers. Bound controls return a boolean
 changed or clicked flag; display-only helpers such as `separator` and `text`
 draw and return nothing. Composition is ordinary Lua control flow: authors call
-the helpers they want, in the order they want, inside their own `drawTab(ctx)`
+the helpers they want, in the order they want, inside their own `drawTab(draw)`
 function.

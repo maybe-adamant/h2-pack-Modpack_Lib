@@ -3,16 +3,17 @@
 Reference for writing or auditing module draw code without re-deriving render-path performance analysis from scratch.
 
 This guidance applies to module draw code:
-- `drawTab(ctx)`
-- optional `drawQuickContent(ctx)`
-- `lib.widgets.*`
+- `drawTab(draw)`
+- optional `drawQuickContent(draw)`
+- `draw.widgets.*`
+- `draw.nav.*`
 - raw ImGui for structure
 
 ## Why Draw Paths Need Care
 
 Module UI is immediate-mode:
-- `drawTab(ctx)`
-- optional `drawQuickContent(ctx)`
+- `drawTab(draw)`
+- optional `drawQuickContent(draw)`
 
 These run every imgui frame.
 Any unnecessary allocation or repeated C-boundary call inside those paths shows up immediately.
@@ -22,7 +23,7 @@ Any unnecessary allocation or repeated C-boundary call inside those paths shows 
 This document assumes:
 - raw `config` stays local to `main.lua`
 - `lib.createModule(...)` owns the definition and state construction boundary
-- draw code reads staged values from `ctx.session.view`
+- draw code reads staged values from `draw.session.view`
 - runtime/gameplay code reads persisted values through `store.read(...)`
 - debug toggles write persisted values through the host/framework flow
 - hash/profile import and config flush behavior belong to host/framework plumbing, not draw callbacks
@@ -132,8 +133,8 @@ Do not rebuild the same large option table multiple times in the same frame.
 
 ## Good Patterns
 
-- use `lib.widgets.*` for common controls
-- use `lib.nav.verticalTabs(...)` for simple vertical nav rails
+- use `draw.widgets.*` for common controls
+- use `draw.nav.verticalTabs(...)` for simple vertical nav rails
 - keep draw helpers local and concrete
 - duplicate small UI when that makes render order clearer
 - compute derived view text only when it actually improves readability

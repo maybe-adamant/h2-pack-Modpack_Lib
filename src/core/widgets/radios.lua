@@ -79,7 +79,7 @@ end
 ---@param alias string
 ---@param opts RadioOpts|nil
 ---@return boolean
-function public.widgets.radio(imgui, session, alias, opts)
+function helpers.widgets.radio(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.radio")
     local current = helpers.NormalizeChoiceValue(opts, field:read())
@@ -117,7 +117,7 @@ end
 ---@param alias string
 ---@param opts MappedRadioOpts|nil
 ---@return boolean
-function public.widgets.mappedRadio(imgui, session, alias, opts)
+function helpers.widgets.mappedRadio(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.mappedRadio")
     local owner = helpers.GetFieldOwner(field)
@@ -162,7 +162,7 @@ end
 ---@param alias string
 ---@param opts PackedRadioOpts|nil
 ---@return boolean
-function public.widgets.packedRadio(imgui, session, alias, opts)
+function helpers.widgets.packedRadio(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.packedRadio")
     local children = helpers.ResolvePackedChildren(field)

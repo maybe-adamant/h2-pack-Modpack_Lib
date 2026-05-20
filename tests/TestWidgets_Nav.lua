@@ -26,6 +26,18 @@ function TestWidgets_Nav:testVisibilityConditions()
     lu.assertTrue(self.h.nav.isVisible(session, 42))
 end
 
+function TestWidgets_Nav:testBoundNavUsesCapturedSessionForVisibility()
+    local session = self.h.createMapSession({
+        Enabled = true,
+        Region = "Surface",
+    })
+    local bound = self.h.nav.bind({}, session)
+
+    lu.assertTrue(bound.isVisible("Enabled"))
+    lu.assertTrue(bound.isVisible({ alias = "Region", value = "Surface" }))
+    lu.assertFalse(bound.isVisible({ alias = "Region", value = "Underworld" }))
+end
+
 function TestWidgets_Nav:testVerticalTabsReturnsSelectedKeyAndDrawsGroupsAndColors()
     local calls = {
         beginChild = 0,
@@ -91,4 +103,45 @@ function TestWidgets_Nav:testVerticalTabsReturnsSelectedKeyAndDrawsGroupsAndColo
     lu.assertEquals(calls.pushColors, 1)
     lu.assertEquals(calls.popColors, 1)
     lu.assertEquals(calls.colorArgs, { 5, 1, 0, 0, 1 })
+end
+
+function TestWidgets_Nav:testBoundNavUsesCapturedImguiForVerticalTabs()
+    local calls = {
+        labels = {},
+    }
+    local imgui = {
+        BeginChild = function(id)
+            calls.childId = id
+        end,
+        EndChild = function()
+            calls.ended = true
+        end,
+        SameLine = function()
+            calls.sameLine = true
+        end,
+        Separator = function()
+        end,
+        TextDisabled = function()
+        end,
+        Selectable = function(label)
+            calls.labels[#calls.labels + 1] = label
+            return label == "Second##two"
+        end,
+    }
+    local bound = self.h.nav.bind(imgui, self.h.createMapSession({}))
+
+    local selected = bound.verticalTabs({
+        id = "bound",
+        activeKey = "one",
+        tabs = {
+            { key = "one", label = "First" },
+            { key = "two", label = "Second" },
+        },
+    })
+
+    lu.assertEquals(selected, "two")
+    lu.assertEquals(calls.childId, "bound##nav")
+    lu.assertEquals(calls.labels, { "First##one", "Second##two" })
+    lu.assertTrue(calls.ended)
+    lu.assertTrue(calls.sameLine)
 end

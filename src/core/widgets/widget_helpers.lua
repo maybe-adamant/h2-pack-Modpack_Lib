@@ -4,6 +4,7 @@ local logging = deps.logging
 local storageService = deps.storage
 local widgetHelpers = {
     imguiHelpers = deps.imguiHelpers,
+    widgets = deps.widgets,
 }
 
 ---@alias Color number[]
@@ -95,6 +96,27 @@ end
 function widgetHelpers.SameLineWithGap(imgui, gap)
     imgui.SameLine()
     widgetHelpers.AdvanceInlineGap(imgui, gap)
+end
+
+function widgetHelpers.DrawInlineLabel(imgui, label, tooltip, labelWidth, controlGap)
+    local labelText = tostring(label or "")
+    if labelText == "" then
+        return
+    end
+
+    local rowStartX = imgui.GetCursorPosX()
+    imgui.AlignTextToFramePadding()
+    imgui.Text(labelText)
+    widgetHelpers.ShowTooltip(imgui, tooltip)
+    imgui.SameLine()
+
+    local targetX = tonumber(labelWidth) and rowStartX + tonumber(labelWidth) or nil
+    local currentX = imgui.GetCursorPosX()
+    if targetX ~= nil and targetX > currentX then
+        imgui.SetCursorPosX(targetX)
+    else
+        widgetHelpers.AdvanceInlineGap(imgui, widgetHelpers.ResolveGap(imgui, controlGap))
+    end
 end
 
 function widgetHelpers.DrawWithValueColor(imgui, color, drawFn)

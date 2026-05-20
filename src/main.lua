@@ -25,9 +25,6 @@ local externals = {
 ---@class AdamantModpackLib
 ---@field createModule fun(opts: ModuleCreateOpts): AuthorHost|nil, ManagedStore|nil, string|nil
 ---@field createFrameworkRuntime fun(frameworkPluginGuid: string): AdamantModpackLib.FrameworkRuntime
----@field imguiHelpers table
----@field widgets table
----@field nav table
 
 local core = import('core/init.lua', nil, {
     config = libConfig,

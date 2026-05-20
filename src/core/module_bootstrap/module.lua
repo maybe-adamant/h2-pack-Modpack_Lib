@@ -16,8 +16,8 @@ local modulePublic = {}
 ---@field storage StorageSchema|nil
 ---@field hashGroupPlan HashGroupPlan|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
----@field drawTab fun(ctx: DrawContext)
----@field drawQuickContent fun(ctx: DrawContext)|nil
+---@field drawTab fun(draw: DrawContext)
+---@field drawQuickContent fun(draw: DrawContext)|nil
 
 local KnownModuleOpts = {
     pluginGuid = true,

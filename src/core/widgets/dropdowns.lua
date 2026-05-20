@@ -8,6 +8,7 @@ local imguiHelpers = helpers.imguiHelpers
 ---@field default ChoiceValue|nil
 ---@field displayValues ChoiceDisplayValues|nil
 ---@field valueColors ValueColorMap|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 
@@ -22,6 +23,7 @@ local imguiHelpers = helpers.imguiHelpers
 ---@field id string|number|nil
 ---@field label string|nil
 ---@field tooltip string|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 ---@field getPreview fun(view: table<string, any>): string|number|boolean|nil
@@ -32,6 +34,7 @@ local imguiHelpers = helpers.imguiHelpers
 ---@field id string|number|nil
 ---@field label string|nil
 ---@field tooltip string|nil
+---@field labelWidth number|nil
 ---@field controlWidth number|nil
 ---@field controlGap number|nil
 ---@field displayValues ChoiceDisplayValues|nil
@@ -84,13 +87,9 @@ end
 local function DrawLabeledDropdownControl(imgui, opts, previewColor, drawControl)
     local labelText = tostring(opts.label or "")
     local controlWidth = tonumber(opts.controlWidth) or 0
-    local controlGap = helpers.ResolveGap(imgui, opts.controlGap)
 
     if labelText ~= "" then
-        imgui.AlignTextToFramePadding()
-        imgui.Text(labelText)
-        helpers.ShowTooltip(imgui, opts.tooltip)
-        helpers.SameLineWithGap(imgui, controlGap)
+        helpers.DrawInlineLabel(imgui, labelText, opts.tooltip, opts.labelWidth, opts.controlGap)
     end
 
     if controlWidth > 0 then
@@ -109,7 +108,7 @@ end
 ---@param alias string
 ---@param opts DropdownOpts|nil
 ---@return boolean
-function public.widgets.dropdown(imgui, session, alias, opts)
+function helpers.widgets.dropdown(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.dropdown")
     local fieldAlias = field:alias()
@@ -169,7 +168,7 @@ end
 ---@param alias string
 ---@param opts MappedDropdownOpts|nil
 ---@return boolean
-function public.widgets.mappedDropdown(imgui, session, alias, opts)
+function helpers.widgets.mappedDropdown(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.mappedDropdown")
     local fieldAlias = field:alias()
@@ -223,7 +222,7 @@ end
 ---@param alias string
 ---@param opts PackedDropdownOpts|nil
 ---@return boolean
-function public.widgets.packedDropdown(imgui, session, alias, opts)
+function helpers.widgets.packedDropdown(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.packedDropdown")
     local controlId = opts.id or field:alias()
@@ -290,7 +289,7 @@ end
 ---@param alias string
 ---@param opts PackedDropdownOpts|PackedRadioOpts|nil
 ---@return string|nil selectedAlias
-function public.widgets.getPackedChoiceAlias(session, alias, opts)
+function helpers.widgets.getPackedChoiceAlias(session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.getPackedChoiceAlias")
     local children = helpers.ResolvePackedChildren(field)

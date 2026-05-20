@@ -18,10 +18,10 @@ end
 New draw callbacks receive one render-scoped context:
 
 ```lua
-function ui.drawTab(ctx)
+function ui.drawTab(draw)
 end
 
-function ui.drawQuickContent(ctx)
+function ui.drawQuickContent(draw)
 end
 ```
 
@@ -51,23 +51,39 @@ Lib creates the context at the host draw boundary for each render call.
 ---@field session AdamantModpackLib.AuthorSession
 ---@field host AdamantModpackLib.AuthorHost
 ---@field widgets AdamantModpackLib.BoundWidgets
+---@field nav AdamantModpackLib.BoundNav
 ```
 
-`ctx.widgets` is the bound widget surface. Widget calls no longer repeat
+`draw.widgets` is the bound widget surface. Widget calls no longer repeat
 `imgui` and `session`:
 
 ```lua
-function ui.drawTab(ctx)
-    ctx.widgets.dropdown("Mode", {
+function ui.drawTab(draw)
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Default", "Custom" },
     })
 
-    ctx.widgets.checkbox("FeatureEnabled", {
+    draw.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 
-    ctx.imgui.SameLine()
+    draw.imgui.SameLine()
+end
+```
+
+`draw.nav` is the bound navigation surface. Navigation calls no longer repeat
+`imgui` or `session`:
+
+```lua
+activeKey = draw.nav.verticalTabs({
+    id = "ModuleTabs",
+    activeKey = activeKey,
+    tabs = tabs,
+})
+
+if draw.nav.isVisible("ShowAdvanced") then
+    draw.widgets.checkbox("AdvancedFlag", opts)
 end
 ```
 
@@ -85,8 +101,8 @@ The context shape keeps the entrypoint explicit while reducing module-side
 plumbing:
 
 ```lua
-subPanel.draw(ctx)
-ctx.widgets.checkbox("FeatureEnabled", opts)
+subPanel.draw(draw)
+draw.widgets.checkbox("FeatureEnabled", opts)
 ```
 
 This intentionally differs from a `createDraw(...)` factory. `imgui`,
@@ -155,9 +171,9 @@ handles.
 Normal root widgets should stay concise:
 
 ```lua
-ctx.widgets.checkbox("FeatureEnabled", opts)
-ctx.widgets.dropdown("Mode", opts)
-ctx.widgets.packedCheckboxList("GodPool", opts)
+draw.widgets.checkbox("FeatureEnabled", opts)
+draw.widgets.dropdown("Mode", opts)
+draw.widgets.packedCheckboxList("GodPool", opts)
 ```
 
 The string target is shorthand for a root storage field on the draw context's
@@ -165,19 +181,19 @@ author session. The full root form is available when a helper wants to pass a
 resolved target around:
 
 ```lua
-local mode = ctx.field("Mode")
-ctx.widgets.dropdown(mode, opts)
+local mode = draw.field("Mode")
+draw.widgets.dropdown(mode, opts)
 ```
 
 Table-backed widgets use a `StorageField` produced by the table API:
 
 ```lua
-local row = ctx.session.table("ConfigurableBanPools"):rowHandle(index)
+local row = draw.session.table("ConfigurableBanPools"):rowHandle(index)
 local bans = row:field("BanPool")
 
-ctx.widgets.packedCheckboxList(bans, opts)
-ctx.widgets.packedDropdown(bans, opts)
-local selected = ctx.widgets.getPackedChoiceAlias(bans, opts)
+draw.widgets.packedCheckboxList(bans, opts)
+draw.widgets.packedDropdown(bans, opts)
+local selected = draw.widgets.getPackedChoiceAlias(bans, opts)
 ```
 
 `StorageField` is the resolved leaf value target for widgets. It is not a path,
@@ -187,20 +203,20 @@ are leaf renderers that read schema/value data from the final field target.
 
 Bound widgets accept only these target forms:
 
-- `string`: root field alias, resolved through `ctx.field(alias)`.
+- `string`: root field alias, resolved through `draw.field(alias)`.
 - `StorageField`: explicit resolved storage field.
 
 They do not accept arbitrary table-shaped targets, parse scoped path strings,
-or expose a public `ctx.widgets.forSession(...)` rebinding API. Future path
+or expose a public `draw.widgets.forSession(...)` rebinding API. Future path
 support can live in storage APIs and resolve to `StorageField` before widgets
 see it.
 
 Implementation audit checklist:
 
-- Add `ctx.field(alias)` for explicit root storage fields.
+- Add `draw.field(alias)` for explicit root storage fields.
 - Add `rowHandle:field(alias)` for table row storage fields.
 - Route bound widget targets through one `StorageField` normalization path.
-- Remove `ctx.widgets.forSession(...)` from the public bound widget surface.
+- Remove `draw.widgets.forSession(...)` from the public bound widget surface.
 - Replace loose `(handle, alias)` widget call sites with named domain helpers
   that return `StorageField` values.
 - Keep normal root widget calls using string aliases as the ergonomic shorthand.
@@ -222,8 +238,8 @@ end
 After:
 
 ```lua
-function ui.drawTab(ctx)
-    ctx.widgets.checkbox("FeatureEnabled", {
+function ui.drawTab(draw)
+    draw.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 end
@@ -240,7 +256,7 @@ components.draw(imgui, session, host)
 After:
 
 ```lua
-components.draw(ctx)
+components.draw(draw)
 ```
 
 3. Keep static module dependencies in normal module binding.
@@ -259,7 +275,7 @@ function ui.bind(deps)
 end
 ```
 
-`ctx` is for render-scoped live surfaces only. Do not store it across frames,
+`draw` is for render-scoped live surfaces only. Do not store it across frames,
 hot reloads, or module activation boundaries.
 
 ## Rules
@@ -267,10 +283,15 @@ hot reloads, or module activation boundaries.
 - Keep `drawTab = ui.drawTab` and `drawQuickContent = ui.drawQuickContent` in
   module creation.
 - Do not introduce `createDraw(...)` for normal module authoring.
-- Use `ctx.widgets.*` for Lib widgets that bind to `imgui` and `session`.
-- Use `ctx.imgui` for raw ImGui layout calls.
-- Use `ctx.session` only when direct staged-state access is clearer than a
+- Use `draw.widgets.*` for Lib widgets that bind to `imgui` and `session`.
+- Use `draw.nav.*` for Lib navigation helpers that bind to `imgui` and
+  `session`.
+- Use `draw.imgui` for raw ImGui layout calls.
+- Use `draw.session` only when direct staged-state access is clearer than a
   widget helper.
-- Use `ctx.host` for host capabilities such as metadata, logging, enabled
+- Use `draw.host` for host capabilities such as metadata, logging, enabled
   checks, or activation.
 - Keep static module data, catalogs, and action services in `ui.bind(...)`.
+- Framework `drawPackQuickContent(ctx)` still uses its own coordinator/framework
+  context object and is intentionally not part of this draw-object rename. Audit
+  it separately before changing that callback shape.

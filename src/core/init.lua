@@ -111,10 +111,13 @@ local mutationBundle = import('core/mutations/mutations.lua', nil, {
 })
 local mutation = mutationBundle.service
 public.mutation = nil
-import('core/widgets/init.lua', nil, {
+local widgetsBundle = import('core/widgets/init.lua', nil, {
     logging = logging,
     storage = storage,
 })
+public.widgets = nil
+public.nav = nil
+public.imguiHelpers = nil
 local fallbackUiBundle = import('core/fallback/fallback_ui.lua', nil, {
     gameDeps = gameDeps,
     rom = externals.rom,
@@ -148,7 +151,8 @@ local moduleHost = import('core/module_bootstrap/host.lua', nil, {
     fallbackUi = fallbackUiBundle.service,
     coordinator = coordinator,
     storage = storage,
-    widgets = public.widgets,
+    widgets = widgetsBundle.widgets,
+    nav = widgetsBundle.nav,
     authorHost = authorHost,
 })
 public.getLiveModuleHost = nil

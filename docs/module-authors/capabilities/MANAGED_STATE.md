@@ -24,8 +24,8 @@ Use each state surface for one job:
 Draw code should stage changes through `session`. Gameplay, hooks, overlays, integrations, and mutations should read committed values through `store`.
 
 ```lua
-function ui.drawTab(ctx)
-    ctx.widgets.checkbox("FeatureEnabled", {
+function ui.drawTab(draw)
+    draw.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 end

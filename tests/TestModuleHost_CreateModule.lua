@@ -16,6 +16,7 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     local drawHost = nil
     local drawImgui = nil
     local drawWidgets = nil
+    local drawNav = nil
     local authorSchemaNode = nil
     local authorRowValue = nil
     local authorRootField = nil
@@ -39,16 +40,17 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
                 },
             },
         },
-        drawTab = function(ctx)
-            drawImgui = ctx.imgui
-            drawHost = ctx.host
-            drawWidgets = ctx.widgets
-            authorSchemaNode = ctx.session.getAliasSchema("Flag")
-            authorRootField = ctx.field("Flag")
-            local row = ctx.session.table("Rows"):rowHandle(1)
+        drawTab = function(draw)
+            drawImgui = draw.imgui
+            drawHost = draw.host
+            drawWidgets = draw.widgets
+            drawNav = draw.nav
+            authorSchemaNode = draw.session.getAliasSchema("Flag")
+            authorRootField = draw.field("Flag")
+            local row = draw.session.table("Rows"):rowHandle(1)
             authorRowField = row:field("Limit")
             authorRowValue = row.read("Limit")
-            ctx.session.write("Flag", true)
+            draw.session.write("Flag", true)
         end,
     })
 
@@ -61,6 +63,8 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertNotNil(drawImgui)
     lu.assertEquals(type(drawWidgets.checkbox), "function")
     lu.assertNil(drawWidgets.forSession)
+    lu.assertEquals(type(drawNav.verticalTabs), "function")
+    lu.assertEquals(type(drawNav.isVisible), "function")
     lu.assertEquals(type(host.isEnabled), "function")
     lu.assertEquals(store.read("Flag"), false)
     liveHost.flush()

@@ -113,7 +113,7 @@ end
 ---@param alias string
 ---@param opts StepperOpts|nil
 ---@return boolean
-function public.widgets.stepper(imgui, session, alias, opts)
+function helpers.widgets.stepper(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.stepper")
     local fieldAlias = field:alias()
@@ -142,7 +142,7 @@ end
 ---@param maxAlias string
 ---@param opts SteppedRangeOpts|nil
 ---@return boolean
-function public.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts)
+function helpers.widgets.steppedRange(imgui, session, minAlias, maxAlias, opts)
     opts = opts or {}
     local minField = helpers.ResolveStorageField(session, minAlias, "widgets.steppedRange")
     local maxField = helpers.ResolveStorageField(session, maxAlias, "widgets.steppedRange")

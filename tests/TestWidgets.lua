@@ -23,6 +23,33 @@ function TestWidgets:testPlainDropdownUsesNativePreview()
 
     lu.assertEquals(state.beginComboPreview, "Two")
     lu.assertEquals(state.customPreviewCalls, 0)
+    lu.assertEquals(state.cursorPositions[1], 80)
+end
+
+function TestWidgets:testLabeledControlFallsBackToGapWhenLabelWidthIsTooSmall()
+    local imgui, state = self.h.makeDropdownImgui()
+
+    self.h.widgets.dropdown(imgui, self.h.createValueSession(2), "Mode", {
+        label = "Long Label",
+        values = { 1, 2 },
+        labelWidth = 4,
+        controlGap = 7,
+    })
+
+    lu.assertEquals(state.cursorPositions[1], 87)
+end
+
+function TestWidgets:testInputTextHonorsLabelWidth()
+    local imgui, state = self.h.makeDropdownImgui()
+
+    self.h.widgets.inputText(imgui, self.h.createValueSession("abc"), "Filter", {
+        label = "Filter",
+        labelWidth = 90,
+        maxLen = 64,
+    })
+
+    lu.assertEquals(state.cursorPositions[1], 90)
+    lu.assertEquals(state.inputText, { id = "##Filter", value = "abc", maxLen = 64 })
 end
 
 function TestWidgets:testColoredDropdownUsesCustomPreview()

@@ -32,7 +32,7 @@ The module-author API used to be less cohesive. Authors created a host, then
 used a mix of callback contracts and global Lib namespaces:
 
 ```lua
-drawTab(ctx)
+drawTab(draw)
 registerHooks(host, store)
 registerPatchMutation(plan, host, store)
 host.integrations.register(...)
@@ -328,7 +328,7 @@ Potential future author surfaces:
   runtime/event/mutation callbacks.
 
 Current implementation deliberately stops short of this phase-gated state
-facade. Draw still receives `ctx.session`, mutation callbacks still receive
+facade. Draw still receives `draw.session`, mutation callbacks still receive
 `store` explicitly, and hook/integration/overlay callbacks may close over the
 raw store returned by module creation. Revisit `host.store` together with the
 draw/session API decision.

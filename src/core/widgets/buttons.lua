@@ -26,7 +26,7 @@ end
 ---@param label any
 ---@param opts ButtonOpts|nil
 ---@return boolean
-function public.widgets.button(imgui, session, label, opts)
+function helpers.widgets.button(imgui, session, label, opts)
     opts = opts or {}
     local id = tostring(opts.id or label or "")
     local clicked = imgui.Button(tostring(label or "") .. "##" .. id)
@@ -46,7 +46,7 @@ end
 ---@param label any
 ---@param opts ConfirmButtonOpts|nil
 ---@return boolean
-function public.widgets.confirmButton(imgui, session, id, label, opts)
+function helpers.widgets.confirmButton(imgui, session, id, label, opts)
     opts = opts or {}
     local popupId = tostring(id) .. "##popup"
     local changed = false

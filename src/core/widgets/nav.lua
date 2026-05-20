@@ -1,4 +1,4 @@
-public.nav = public.nav or {}
+local nav = {}
 
 ---@class NavTab
 ---@field key string|number
@@ -28,7 +28,7 @@ end
 ---@param imgui table
 ---@param opts VerticalTabsOpts|nil
 ---@return string|number|nil
-function public.nav.verticalTabs(imgui, opts)
+function nav.verticalTabs(imgui, opts)
     opts = opts or {}
     local id = tostring(opts.id or "verticalTabs")
     local navWidth = tonumber(opts.navWidth) or 180
@@ -73,7 +73,7 @@ end
 ---@param session Session|nil
 ---@param condition string|VisibilityCondition|nil
 ---@return boolean
-function public.nav.isVisible(session, condition)
+function nav.isVisible(session, condition)
     if condition == nil then
         return true
     end
@@ -107,3 +107,19 @@ function public.nav.isVisible(session, condition)
 
     return value == true
 end
+
+---@param imgui table
+---@param session Session
+---@return BoundNav
+function nav.bind(imgui, session)
+    return {
+        verticalTabs = function(opts)
+            return nav.verticalTabs(imgui, opts)
+        end,
+        isVisible = function(condition)
+            return nav.isVisible(session, condition)
+        end,
+    }
+end
+
+return nav

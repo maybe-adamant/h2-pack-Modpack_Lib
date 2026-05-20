@@ -4,15 +4,12 @@ This guide describes the supported module contract in Lib:
 - namespaced public API
 - managed storage and explicit `session`
 - immediate-mode widgets
-- direct draw-function authoring through `drawTab(ctx)`
+- direct draw-function authoring through `drawTab(draw)`
 
 ## Lib Surface
 
 Common module author surfaces:
 - `lib.createModule(...)`
-- `lib.widgets.*`
-- `lib.nav.*`
-- `lib.imguiHelpers.*`
 - `host.integrations.*`
 - `host.gameCache.*`
 
@@ -47,20 +44,20 @@ Use focused capability guides for feature-level authoring details:
 Typical coordinated module:
 
 ```lua
-local function drawTab(ctx)
-    ctx.widgets.checkbox("EnabledFlag", {
+local function drawTab(draw)
+    draw.widgets.checkbox("EnabledFlag", {
         label = "Enabled",
     })
 
-    ctx.widgets.dropdown("Mode", {
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos" },
         controlWidth = 180,
     })
 end
 
-local function drawQuickContent(ctx)
-    ctx.widgets.dropdown("Mode", {
+local function drawQuickContent(draw)
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos" },
         controlWidth = 140,
@@ -135,7 +132,7 @@ Callback argument order follows a stable convention:
 - state/context handle next, using `session` for staged UI state and `host` for runtime/module context
 - `store` last when persisted runtime values are needed
 
-Examples: `drawTab(ctx)`, local `registerHooks(host, store)` helpers, local
+Examples: `drawTab(draw)`, local `registerHooks(host, store)` helpers, local
 overlay declaration helpers that call `host.overlays.*`, and
 `host.mutation.patch(function(plan, host, store) ... end)`.
 
@@ -196,12 +193,12 @@ For the focused widget and navigation guide, read [capabilities/WIDGETS.md](capa
 Module UI is authored directly in Lua draw functions.
 
 Typical patterns:
-- `lib.widgets.checkbox(...)`
-- `lib.widgets.dropdown(...)`
-- `lib.widgets.radio(...)`
-- `lib.widgets.stepper(...)`
-- `lib.widgets.packedCheckboxList(...)`
-- `lib.nav.verticalTabs(...)`
+- `draw.widgets.checkbox(...)`
+- `draw.widgets.dropdown(...)`
+- `draw.widgets.radio(...)`
+- `draw.widgets.stepper(...)`
+- `draw.widgets.packedCheckboxList(...)`
+- `draw.nav.verticalTabs(...)`
 
 Use raw ImGui layout as needed:
 - `ui.Text(...)`
@@ -214,8 +211,8 @@ Lib widgets cover common controls. Use raw ImGui for custom structure and layout
 ## Quick Content
 
 Framework Quick Setup reads:
-- coordinator `renderQuickSetup(ctx)`
-- module `drawQuickContent(ctx)`
+- coordinator `drawPackQuickContent(ctx)`
+- module `drawQuickContent(draw)`
 
 `drawQuickContent` is a Framework Quick Setup hook.
 
@@ -260,7 +257,7 @@ Framework behavior:
 - each coordinated module gets its own top-level tab
 - `ModuleHost.drawTab(imgui)` is the normal rendering contract
 - `ModuleHost.drawQuickContent(imgui)` participates only in Quick Setup
-- authored draw callbacks receive `drawTab(ctx)` and `drawQuickContent(ctx)`
+- authored draw callbacks receive `drawTab(draw)` and `drawQuickContent(draw)`
 
 ## Fallback UI Modules
 
@@ -367,32 +364,32 @@ local function init()
     host.activate()
 end
 
-function drawTab(ctx)
-    ctx.widgets.checkbox("FeatureEnabled", {
+function drawTab(draw)
+    draw.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
         tooltip = "Turns the feature logic on for this module.",
     })
 
-    ctx.widgets.dropdown("Mode", {
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos", "Custom" },
         controlWidth = 180,
     })
 
-    ctx.widgets.inputText("FilterText", {
+    draw.widgets.inputText("FilterText", {
         label = "Filter",
         controlWidth = 180,
     })
 
-    ctx.imgui.Separator()
-    ctx.widgets.text("Packed Flags")
-    ctx.widgets.packedCheckboxList("PackedFlags", {
+    draw.imgui.Separator()
+    draw.widgets.text("Packed Flags")
+    draw.widgets.packedCheckboxList("PackedFlags", {
         optionsPerLine = 2,
     })
 end
 
-function drawQuickContent(ctx)
-    ctx.widgets.dropdown("Mode", {
+function drawQuickContent(draw)
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos", "Custom" },
         controlWidth = 140,
@@ -423,6 +420,6 @@ Notes on the example:
 - `host.hooks.*` declarations happen before `host.activate()`
 - `host.overlays.*` declarations happen before `host.activate()`
 - `host.fallbackUi.attachGuiOnce(...)` keeps ROM GUI registration in module context without stacking across reloads
-- `drawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
+- `drawTab` uses raw ImGui for structure and `draw.widgets.*` / `draw.nav.*` for Lib draw helpers
 - `drawQuickContent` is optional
 - packed widgets use the session or row handle passed to the draw path

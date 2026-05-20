@@ -80,9 +80,6 @@ Reference and historical notes:
 - `host.integrations`
 - `host.gameCache`
 - `host.fallbackUi`
-- `lib.imguiHelpers`
-- `lib.widgets`
-- `lib.nav`
 
 Common top-level helpers:
 - `lib.createModule(...)`

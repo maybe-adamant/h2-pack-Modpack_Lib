@@ -38,13 +38,21 @@ local function makeDropdownImgui()
         beginComboPreview = nil,
         customPreviewCalls = 0,
         customPreviewText = nil,
+        cursorX = 0,
+        cursorPositions = {},
     }
 
     local imgui = {
-        GetCursorPosX = function() return 0 end,
-        SetCursorPosX = function() end,
+        GetCursorPosX = function() return state.cursorX end,
+        SetCursorPosX = function(x)
+            state.cursorX = x
+            state.cursorPositions[#state.cursorPositions + 1] = x
+        end,
         AlignTextToFramePadding = function() end,
-        Text = function() end,
+        Text = function(text)
+            state.lastText = text
+            state.cursorX = #(tostring(text or "")) * 8
+        end,
         IsItemHovered = function() return false end,
         SetTooltip = function() end,
         SameLine = function() end,
@@ -52,6 +60,10 @@ local function makeDropdownImgui()
         Dummy = function() end,
         PushItemWidth = function() end,
         PopItemWidth = function() end,
+        InputText = function(id, value, maxLen)
+            state.inputText = { id = id, value = value, maxLen = maxLen }
+            return value, false
+        end,
         BeginCombo = function(id, preview)
             state.beginComboId = id
             state.beginComboPreview = preview
@@ -121,8 +133,8 @@ local function createWidgetHarness(opts)
     local h = {
         harness = base,
         public = base.public,
-        widgets = base.public.widgets,
-        nav = base.public.nav,
+        widgets = base.widgets,
+        nav = base.nav,
         moduleHost = base.moduleHost,
         moduleState = base.moduleState,
 

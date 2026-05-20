@@ -11,33 +11,4 @@ imguiHelpers.ImGuiCol = {
     Text = 0,
 }
 
-imguiHelpers.ImGuiTreeNodeFlags = {
-    None = 0,
-    Selected = 1,
-    Framed = 2,
-    AllowOverlap = 4,
-    NoTreePushOnOpen = 8,
-    NoAutoOpenOnLog = 16,
-    DefaultOpen = 32,
-    OpenOnDoubleClick = 64,
-    OpenOnArrow = 128,
-    Leaf = 256,
-    Bullet = 512,
-    FramePadding = 1024,
-    SpanAvailWidth = 2048,
-    SpanFullWidth = 4096,
-    NavLeftJumpsBackHere = 8192,
-    CollapsingHeader = 26,
-}
-
-function imguiHelpers.unpackColor(color)
-    return color[1], color[2], color[3], color[4]
-end
-
-function imguiHelpers.textColored(ui, color, text)
-    ui.TextColored(color[1], color[2], color[3], color[4], text)
-end
-
-public.imguiHelpers = imguiHelpers
-
 return imguiHelpers

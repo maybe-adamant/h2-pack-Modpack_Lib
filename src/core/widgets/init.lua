@@ -1,11 +1,12 @@
 local deps = ...
 
-public.widgets = public.widgets or {}
+local widgets = {}
 local imguiHelpers = import 'core/widgets/imgui_helpers.lua'
 local widgetHelpers = import('core/widgets/widget_helpers.lua', nil, {
     logging = deps.logging,
     storage = deps.storage,
     imguiHelpers = imguiHelpers,
+    widgets = widgets,
 })
 import('core/widgets/base.lua', nil, widgetHelpers)
 import('core/widgets/inputs.lua', nil, widgetHelpers)
@@ -15,7 +16,7 @@ import('core/widgets/steppers.lua', nil, widgetHelpers)
 import('core/widgets/checkboxes.lua', nil, widgetHelpers)
 import('core/widgets/buttons.lua', nil, widgetHelpers)
 
-import 'core/widgets/nav.lua'
+local nav = import 'core/widgets/nav.lua'
 
 ---@class BoundWidgets
 ---@field separator fun()
@@ -38,28 +39,28 @@ import 'core/widgets/nav.lua'
 ---@param imgui table
 ---@param session Session
 ---@return BoundWidgets
-function public.widgets.bind(imgui, session)
+function widgets.bind(imgui, session)
     local function resolveField(target, methodName)
-        return deps.storage.field.resolve(session, target, "ctx.widgets." .. methodName)
+        return deps.storage.field.resolve(session, target, "draw.widgets." .. methodName)
     end
 
     local function callFieldWidget(methodName, target, opts)
         local field = resolveField(target, methodName)
-        return public.widgets[methodName](imgui, field:owner(), field:alias(), opts)
+        return widgets[methodName](imgui, field:owner(), field:alias(), opts)
     end
 
     return {
         separator = function()
-            return public.widgets.separator(imgui)
+            return widgets.separator(imgui)
         end,
         text = function(text, opts)
-            return public.widgets.text(imgui, text, opts)
+            return widgets.text(imgui, text, opts)
         end,
         button = function(label, opts)
-            return public.widgets.button(imgui, session, label, opts)
+            return widgets.button(imgui, session, label, opts)
         end,
         confirmButton = function(id, label, opts)
-            return public.widgets.confirmButton(imgui, session, id, label, opts)
+            return widgets.confirmButton(imgui, session, id, label, opts)
         end,
         inputText = function(target, opts)
             return callFieldWidget("inputText", target, opts)
@@ -75,7 +76,7 @@ function public.widgets.bind(imgui, session)
         end,
         getPackedChoiceAlias = function(target, opts)
             local field = resolveField(target, "getPackedChoiceAlias")
-            return public.widgets.getPackedChoiceAlias(field:owner(), field:alias(), opts)
+            return widgets.getPackedChoiceAlias(field:owner(), field:alias(), opts)
         end,
         radio = function(target, opts)
             return callFieldWidget("radio", target, opts)
@@ -94,10 +95,10 @@ function public.widgets.bind(imgui, session)
             local maxField = resolveField(maxTarget, "steppedRange")
             if minField:owner() ~= maxField:owner() then
                 deps.logging.violate("widgets.mismatched_field_owners",
-                    "ctx.widgets.steppedRange: min and max fields must share one storage owner"
+                    "draw.widgets.steppedRange: min and max fields must share one storage owner"
                 )
             end
-            return public.widgets.steppedRange(imgui, minField:owner(), minField:alias(), maxField:alias(), opts)
+            return widgets.steppedRange(imgui, minField:owner(), minField:alias(), maxField:alias(), opts)
         end,
         checkbox = function(target, opts)
             return callFieldWidget("checkbox", target, opts)
@@ -107,3 +108,9 @@ function public.widgets.bind(imgui, session)
         end,
     }
 end
+
+return {
+    widgets = widgets,
+    nav = nav,
+    imguiHelpers = imguiHelpers,
+}

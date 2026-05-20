@@ -99,11 +99,11 @@ Use this file to declare module data. UI belongs in `ui.lua`; gameplay behavior 
 
 Owns immediate-mode UI:
 
-- `drawTab(ctx)`
-- optional `drawQuickContent(ctx)`
+- `drawTab(draw)`
+- optional `drawQuickContent(draw)`
 
-This code should read and write staged values through `ctx.session` or the
-bound helpers on `ctx.widgets`.
+This code should read and write staged values through `draw.session` or the
+bound helpers on `draw.widgets`.
 
 ### `src/logic.lua`
 
@@ -239,12 +239,12 @@ Example:
 ```lua
 local MODE_VALUES = { "Vanilla", "Chaos" }
 
-local function drawTab(ctx)
-    ctx.widgets.checkbox("FeatureEnabled", {
+local function drawTab(draw)
+    draw.widgets.checkbox("FeatureEnabled", {
         label = "Enable Feature",
     })
 
-    ctx.widgets.dropdown("Mode", {
+    draw.widgets.dropdown("Mode", {
         label = "Mode",
         values = MODE_VALUES,
         controlWidth = 180,
@@ -436,7 +436,7 @@ Keep UI and game mutation separate. UI edits state; logic applies state.
 
 ### Putting UI outside draw functions
 
-Author UI through draw functions such as `drawTab(ctx)`.
+Author UI through draw functions such as `drawTab(draw)`.
 
 ## LuaLS Setup
 
@@ -450,14 +450,14 @@ lib = mods["adamant-ModpackLib"]
 And for local callback declarations:
 
 ```lua
----@type fun(ctx: AdamantModpackLib.DrawContext)
+---@type fun(draw: AdamantModpackLib.DrawContext)
 local drawTab
----@type fun(ctx: AdamantModpackLib.DrawContext)|nil
+---@type fun(draw: AdamantModpackLib.DrawContext)|nil
 local drawQuickContent
 ```
 
-That lets LuaLS infer `ctx.imgui`, the author `ctx.session`, the author
-`ctx.host`, and bound `ctx.widgets` through `local function drawTab(ctx)`.
+That lets LuaLS infer `draw.imgui`, the author `draw.session`, the author
+`draw.host`, and bound `draw.widgets` through `local function drawTab(draw)`.
 
 ## Recommended Next Reads
 

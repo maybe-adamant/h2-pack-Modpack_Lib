@@ -20,7 +20,7 @@ local DEFAULT_PACKED_SLOT_COUNT = 32
 ---@param alias string
 ---@param opts CheckboxOpts|nil
 ---@return boolean
-function public.widgets.checkbox(imgui, session, alias, opts)
+function helpers.widgets.checkbox(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.checkbox")
     local fieldAlias = field:alias()
@@ -43,7 +43,7 @@ end
 ---@param alias string
 ---@param opts PackedCheckboxListOpts|nil
 ---@return boolean
-function public.widgets.packedCheckboxList(imgui, session, alias, opts)
+function helpers.widgets.packedCheckboxList(imgui, session, alias, opts)
     opts = opts or {}
     local field = helpers.ResolveStorageField(session, alias, "widgets.packedCheckboxList")
     local owner = helpers.GetFieldOwner(field)
