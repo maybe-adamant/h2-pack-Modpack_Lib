@@ -1,16 +1,15 @@
 # Game Cache
 
 Game cache is a Lib-owned namespace for module runtime cache buckets attached
-to live game tables such as `CurrentRun`, room data, loot data, or other
-object-like game structures.
+to `CurrentRun`.
 
-Use it when cache state should follow the lifetime of a specific game table. It
+Use it when cache state should follow the lifetime of the active run. It
 is not persisted, staged, hashed, profiled, or reset by Lib.
 
 ## Normal Shape
 
 ```lua
-local runState = lib.gameCache.get(CurrentRun, PACK_ID, MODULE_ID, "run", function()
+local runState = host.gameCache.currentRun.get("run", function()
     return {
         ForcedNPCPending = {},
         NPCEncounterSeen = {},
@@ -18,22 +17,28 @@ local runState = lib.gameCache.get(CurrentRun, PACK_ID, MODULE_ID, "run", functi
 end)
 ```
 
-The namespace has four parts:
+`currentRun.get(...)` returns `nil` when there is no active `CurrentRun`.
 
-- `object`: the live game table
-- `packId`: pack namespace
-- `moduleId`: module namespace inside the pack
-- `key`: cache bucket inside the module namespace
+The author-host namespace binds the module's host id, which is backed by the
+module's `pluginGuid`. Module code supplies only the cache domain and local key.
+Internally, cache storage has three parts:
 
-Lib stores the bucket under one private root on the object so modules do not attach ad hoc top-level keys.
+- `CurrentRun`: the live game run table
+- owner id: the module's runtime owner identity, derived from `pluginGuid`
+- `key`: cache bucket inside the owner namespace
+
+Lib stores the bucket under one private root on `CurrentRun` so modules do not
+attach ad hoc top-level keys. Pack and module ids remain Lib/Framework domain
+metadata; `pluginGuid` is the module lifecycle identity that Lib maps to cache
+ownership.
 
 ## Public Surface
 
 Use:
 
-- `lib.gameCache.get(object, packId, moduleId, key, factory?)`
-- `lib.gameCache.peek(object, packId, moduleId, key)`
-- `lib.gameCache.clear(object, packId, moduleId, key)`
+- `host.gameCache.currentRun.get(key, factory?)`
+- `host.gameCache.currentRun.peek(key)`
+- `host.gameCache.currentRun.clear(key)`
 
 `get(...)` creates the cache bucket when missing. The optional factory runs
 only on first creation and must return a table.
@@ -47,16 +52,14 @@ only on first creation and must return a table.
 Use game cache for:
 
 - per-run transient state attached to `CurrentRun`
-- per-room state attached to room tables
-- per-loot or per-encounter state attached to live game tables
-- data that should disappear when the game table is replaced
+- data that should disappear when `CurrentRun` is replaced
 
 Use managed storage instead when the value is module configuration or should persist through config.
 
 ## Common Mistakes
 
 - Do not store config settings in game cache.
-- Do not attach module keys directly to game tables.
+- Do not attach module keys directly to `CurrentRun`.
 - Do not use game cache for values that must participate in hashes or profiles.
 - Do not let the factory return non-table values.
 

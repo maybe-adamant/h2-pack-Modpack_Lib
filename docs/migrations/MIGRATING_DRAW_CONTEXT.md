@@ -272,5 +272,5 @@ hot reloads, or module activation boundaries.
 - Use `ctx.session` only when direct staged-state access is clearer than a
   widget helper.
 - Use `ctx.host` for host capabilities such as metadata, logging, enabled
-  checks, or reset helpers.
+  checks, or activation.
 - Keep static module data, catalogs, and action services in `ui.bind(...)`.

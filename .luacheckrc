@@ -33,8 +33,9 @@ globals = {
     "TestMutation_DefinitionLifecycle",
     "TestOverlays",
     "TestOverlays_Retained",
-    "TestStandaloneHost",
+    "TestFallbackUi",
     "TestStorageValidation",
+    "TestSystemScope",
     "TestValues",
     "TestWidgets",
     "TestWidgets_Nav"

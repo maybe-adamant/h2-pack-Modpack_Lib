@@ -7,17 +7,17 @@ local chalk = deps.chalk
 
 local moduleState = {}
 
-local backendModule = import('core/module_state/private_backend.lua', nil, {
+local backendModule = import('core/module_state/backend.lua', nil, {
     chalk = chalk,
 })
 
-local managedStore = import('core/module_state/private_store.lua', nil, {
+local managedStore = import('core/module_state/store.lua', nil, {
     logging = logging,
     storage = storageService,
     values = values,
 })
 
-local sessionModule = import('core/module_state/private_session.lua', nil, {
+local sessionModule = import('core/module_state/session.lua', nil, {
     logging = logging,
     storage = storageService,
     values = values,
@@ -110,15 +110,11 @@ end
 ---@param opts table|nil Optional `{ exclude = { Alias = true } }` map.
 ---@return boolean changed True when at least one alias was reset.
 ---@return number count Number of aliases reset.
-function moduleState.resetStorageToDefaults(storage, session, opts)
-    if type(storage) ~= "table" or type(session) ~= "table" then
-        return false, 0
-    end
-
+function moduleState.resetSessionToDefaults(storage, session, opts)
     local exclude = type(opts) == "table" and type(opts.exclude) == "table" and opts.exclude or {}
     local count = 0
 
-    for _, node in ipairs(storageService.getStageRoots(storage) or {}) do
+    for _, node in ipairs(storageService.getStageRoots(storage)) do
         local alias = node.alias
         if node._persist and alias ~= nil and not exclude[alias] then
             local current = session.read(alias)
@@ -131,7 +127,5 @@ function moduleState.resetStorageToDefaults(storage, session, opts)
 
     return count > 0, count
 end
-
-public.resetStorageToDefaults = moduleState.resetStorageToDefaults
 
 return moduleState

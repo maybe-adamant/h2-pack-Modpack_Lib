@@ -6,29 +6,30 @@ Use integrations when modules can cooperate but should still work when the provi
 
 ## Provider Shape
 
-Hosted modules should register providers inside `registerIntegrations(host, store)`:
+Hosted modules register providers on the author host before activation:
 
 ```lua
-local function registerIntegrations(host, store)
-    lib.integrations.register("run-director.god-availability", MODULE_ID, {
+local host, store = lib.createModule({
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
+    drawTab = ui.drawTab,
+})
+
+host.integrations.register("run-director.god-availability", {
+    providerId = MODULE_ID,
+    api = {
         isActive = function()
             return host.isEnabled()
         end,
         isAvailable = function(godKey)
             return true
         end,
-    })
-end
-
-local host = lib.createModule({
-    pluginGuid = PLUGIN_GUID,
-    config = config,
-    id = MODULE_ID,
-    name = "Example Module",
-    storage = data.buildStorage(),
-    registerIntegrations = registerIntegrations,
-    drawTab = ui.drawTab,
+    },
 })
+
 host.tryActivate()
 ```
 
@@ -39,29 +40,30 @@ host.tryActivate()
 Consumers should prefer `invoke(...)`:
 
 ```lua
-local active = lib.integrations.invoke("run-director.god-availability", "isActive", false)
+local active = host.integrations.invoke("run-director.god-availability", "isActive", false)
 if active then
-    return lib.integrations.invoke("run-director.god-availability", "isAvailable", true, godKey) ~= false
+    return host.integrations.invoke("run-director.god-availability", "isAvailable", true, godKey) ~= false
 end
 return true
 ```
 
 `invoke(...)` resolves the current preferred provider at call time and returns the fallback when the provider or method is absent.
+Consumer code should use the author host passed into draw, hook, overlay, and
+module helper paths.
 
 ## Public Surface
 
 Use:
 
-- `lib.integrations.register(id, providerId, api)`
-- `lib.integrations.unregister(id, providerId)`
-- `lib.integrations.unregisterProvider(providerId)`
-- `lib.integrations.invoke(id, methodName, fallback, ...)`
-- `lib.integrations.get(id)`
-- `lib.integrations.list(id)`
+- `host.integrations.register(id, { providerId = providerId, api = api })`
+- `host.integrations.invoke(id, methodName, fallback, ...)`
 
-Hosted provider registrations made during `registerIntegrations(...)` are owned by the activating host and are retired when that host is replaced.
+Hosted provider registrations should use `host.integrations.register(...)`.
+They are owned by the module lifecycle owner and are retired when that owner is
+replaced.
 
-Manual unregister calls are mainly for non-hosted or advanced provider ownership.
+Provider declarations close when activation begins. Register the complete
+current provider set before calling `host.tryActivate()`.
 
 ## Naming
 

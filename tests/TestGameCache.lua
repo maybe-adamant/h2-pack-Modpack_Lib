@@ -5,20 +5,21 @@ TestGameCache = {}
 
 function TestGameCache:setUp()
     self.harness = createLibHarness()
-    self.gameCache = self.harness.public.gameCache
+    self.gameCache = self.harness.gameCache
 end
 
-function TestGameCache:testGetCreatesNamespacedObjectStateOnce()
-    local object = {}
+function TestGameCache:testCurrentRunCreatesNamespacedStateOnce()
+    local currentRun = {}
+    self.harness.env.CurrentRun = currentRun
     local calls = 0
 
-    local first = self.gameCache.get(object, "pack-a", "module-a", "run", function()
+    local first = self.gameCache.currentRun.get("owner-a", "run", function()
         calls = calls + 1
         return { Count = 1 }
     end)
     first.Count = 2
 
-    local second = self.gameCache.get(object, "pack-a", "module-a", "run", function()
+    local second = self.gameCache.currentRun.get("owner-a", "run", function()
         calls = calls + 1
         return { Count = 99 }
     end)
@@ -26,73 +27,136 @@ function TestGameCache:testGetCreatesNamespacedObjectStateOnce()
     lu.assertEquals(calls, 1)
     lu.assertIs(first, second)
     lu.assertEquals(second.Count, 2)
-    lu.assertNotNil(object._AdamantModpackLibGameCache)
+    lu.assertNotNil(currentRun._AdamantModpackLibGameCache)
 end
 
-function TestGameCache:testNamespacesPreventPackAndModuleCollisions()
-    local object = {}
+function TestGameCache:testCurrentRunNamespacesPreventOwnerCollisions()
+    self.harness.env.CurrentRun = {}
 
-    local a = self.gameCache.get(object, "pack-a", "module-a", "run")
-    local b = self.gameCache.get(object, "pack-a", "module-b", "run")
-    local c = self.gameCache.get(object, "pack-b", "module-a", "run")
+    local a = self.gameCache.currentRun.get("owner-a", "run")
+    local b = self.gameCache.currentRun.get("owner-b", "run")
 
     a.Value = "a"
     b.Value = "b"
-    c.Value = "c"
 
-    lu.assertEquals(self.gameCache.peek(object, "pack-a", "module-a", "run").Value, "a")
-    lu.assertEquals(self.gameCache.peek(object, "pack-a", "module-b", "run").Value, "b")
-    lu.assertEquals(self.gameCache.peek(object, "pack-b", "module-a", "run").Value, "c")
+    lu.assertEquals(self.gameCache.currentRun.peek("owner-a", "run").Value, "a")
+    lu.assertEquals(self.gameCache.currentRun.peek("owner-b", "run").Value, "b")
 end
 
-function TestGameCache:testPeekAndClearDoNotCreateBuckets()
-    local object = {}
+function TestGameCache:testCurrentRunPeekAndClearDoNotCreateBuckets()
+    local currentRun = {}
+    self.harness.env.CurrentRun = currentRun
 
-    lu.assertNil(self.gameCache.peek(object, "pack", "module", "run"))
-    lu.assertNil(object._AdamantModpackLibGameCache)
-    lu.assertFalse(self.gameCache.clear(object, "pack", "module", "run"))
+    lu.assertNil(self.gameCache.currentRun.peek("owner", "run"))
+    lu.assertNil(currentRun._AdamantModpackLibGameCache)
+    lu.assertFalse(self.gameCache.currentRun.clear("owner", "run"))
 
-    self.gameCache.get(object, "pack", "module", "run")
-    lu.assertNotNil(self.gameCache.peek(object, "pack", "module", "run"))
-    lu.assertTrue(self.gameCache.clear(object, "pack", "module", "run"))
-    lu.assertNil(self.gameCache.peek(object, "pack", "module", "run"))
-    lu.assertNil(object._AdamantModpackLibGameCache)
+    self.gameCache.currentRun.get("owner", "run")
+    lu.assertNotNil(self.gameCache.currentRun.peek("owner", "run"))
+    lu.assertTrue(self.gameCache.currentRun.clear("owner", "run"))
+    lu.assertNil(self.gameCache.currentRun.peek("owner", "run"))
+    lu.assertNil(currentRun._AdamantModpackLibGameCache)
 end
 
-function TestGameCache:testGetRejectsInvalidInputs()
-    lu.assertErrorMsgContains("object must be a table", function()
-        self.gameCache.get(nil, "pack", "module", "run")
+function TestGameCache:testCurrentRunRejectsInvalidInputs()
+    self.harness.env.CurrentRun = {}
+
+    lu.assertErrorMsgContains("ownerId must be a non-empty string", function()
+        self.gameCache.currentRun.get("", "run")
     end)
-    lu.assertErrorMsgContains("packId must be a non-empty string", function()
-        self.gameCache.get({}, "", "module", "run")
+    lu.assertErrorMsgContains("key must be a non-empty string", function()
+        self.gameCache.currentRun.get("owner", "")
+    end)
+    lu.assertErrorMsgContains("factory must be a function", function()
+        self.gameCache.currentRun.get("owner", "run", true)
     end)
     lu.assertErrorMsgContains("factory must return a table", function()
-        self.gameCache.get({}, "pack", "module", "run", function()
+        self.gameCache.currentRun.get("owner", "run", function()
             return true
         end)
     end)
 end
 
-function TestGameCache:testGetRejectsCorruptedNamespaceBuckets()
+function TestGameCache:testCurrentRunRejectsCorruptedNamespaceBuckets()
     lu.assertErrorMsgContains("root bucket is not a table", function()
-        self.gameCache.get({ _AdamantModpackLibGameCache = true }, "pack", "module", "run")
+        self.harness.env.CurrentRun = { _AdamantModpackLibGameCache = true }
+        self.gameCache.currentRun.get("owner", "run")
     end)
 
-    lu.assertErrorMsgContains("pack bucket is not a table", function()
-        self.gameCache.get({
+    lu.assertErrorMsgContains("owner bucket is not a table", function()
+        self.harness.env.CurrentRun = {
             _AdamantModpackLibGameCache = {
-                pack = true,
+                owner = true,
             },
-        }, "pack", "module", "run")
+        }
+        self.gameCache.currentRun.get("owner", "run")
     end)
+end
 
-    lu.assertErrorMsgContains("module bucket is not a table", function()
-        self.gameCache.get({
-            _AdamantModpackLibGameCache = {
-                pack = {
-                    module = true,
-                },
-            },
-        }, "pack", "module", "run")
+function TestGameCache:testAuthorHostCurrentRunCacheBindsOwnerIdentity()
+    local currentRun = {}
+    self.harness.env.CurrentRun = currentRun
+
+    local host = self.harness.public.createModule({
+        pluginGuid = "test-game-cache-host",
+        config = {},
+        modpack = "test-pack",
+        id = "CacheHost",
+        name = "Cache Host",
+        drawTab = function() end,
+    })
+
+    local state = host.gameCache.currentRun.get("run", function()
+        return { Count = 1 }
+    end)
+    state.Count = 2
+
+    lu.assertEquals(self.gameCache.currentRun.peek("test-game-cache-host", "run").Count, 2)
+    lu.assertIs(host.gameCache.currentRun.peek("run"), state)
+    lu.assertTrue(host.gameCache.currentRun.clear("run"))
+    lu.assertNil(self.gameCache.currentRun.peek("test-game-cache-host", "run"))
+end
+
+function TestGameCache:testAuthorHostCurrentRunCacheReturnsEmptyWhenNoCurrentRun()
+    self.harness.env.CurrentRun = nil
+
+    local host = self.harness.public.createModule({
+        pluginGuid = "test-game-cache-no-run",
+        config = {},
+        modpack = "test-pack",
+        id = "NoRunCacheHost",
+        name = "No Run Cache Host",
+        drawTab = function() end,
+    })
+
+    lu.assertNil(host.gameCache.currentRun.get("run"))
+    lu.assertNil(host.gameCache.currentRun.peek("run"))
+    lu.assertFalse(host.gameCache.currentRun.clear("run"))
+end
+
+function TestGameCache:testAuthorHostCurrentRunCacheRejectsInvalidInputsWithoutCurrentRun()
+    self.harness.env.CurrentRun = nil
+
+    local host = self.harness.public.createModule({
+        pluginGuid = "test-game-cache-invalid-host",
+        config = {},
+        id = "InvalidCacheHost",
+        name = "Invalid Cache Host",
+        drawTab = function() end,
+    })
+
+    lu.assertErrorMsgContains("key must be a non-empty string", function()
+        host.gameCache.currentRun.get("")
+    end)
+    lu.assertErrorMsgContains("factory must be a function", function()
+        host.gameCache.currentRun.get("run", true)
+    end)
+end
+
+function TestGameCache:testAuthorCurrentRunCacheRejectsUnmanagedHost()
+    local host = self.harness.gameCacheBundle.author.create({})
+
+    lu.assertErrorMsgContains("expected managed module host state", function()
+        host.currentRun.get("run")
     end)
 end

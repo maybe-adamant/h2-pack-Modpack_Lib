@@ -11,11 +11,12 @@ local function createModuleHostHarness(harnessOpts)
         moduleHost = base.moduleHost,
         moduleState = base.moduleState,
         hostLifecycle = base.hostLifecycle,
+        moduleRuntimeRegistry = base.moduleRuntimeRegistry,
         hostState = base.hostState,
         coordinator = base.coordinator,
         integrations = base.integrations,
         overlays = base.overlays,
-        standalone = base.standalone,
+        fallbackUi = base.fallbackUi,
         warnings = {},
     }
 
@@ -43,26 +44,25 @@ local function createModuleHostHarness(harnessOpts)
         return state.store, state.session
     end
 
-    function h:createHost(pluginGuid, hostOpts, activationOpts)
+    function h:createHost(pluginGuid, hostOpts)
         hostOpts = hostOpts or {}
-        activationOpts = activationOpts or {}
-        return self.moduleHost.create({
+        local host, authorHost = self.moduleHost.create({
             pluginGuid = pluginGuid,
             definition = hostOpts.definition,
             store = hostOpts.store,
             session = hostOpts.session,
-            registerHooks = activationOpts.registerHooks or hostOpts.registerHooks,
-            registerPatchMutation = hostOpts.registerPatchMutation,
             onSettingsCommitted = hostOpts.onSettingsCommitted,
-            registerIntegrations = activationOpts.registerIntegrations or hostOpts.registerIntegrations,
-            registerOverlays = activationOpts.registerOverlays or hostOpts.registerOverlays,
             drawTab = hostOpts.drawTab,
             drawQuickContent = hostOpts.drawQuickContent,
         })
+        if hostOpts.patchMutation ~= nil then
+            authorHost.mutation.patch(hostOpts.patchMutation)
+        end
+        return host, authorHost
     end
 
-    function h:createActivatedHost(pluginGuid, hostOpts, activationOpts)
-        local host, authorHost = self:createHost(pluginGuid, hostOpts, activationOpts)
+    function h:createActivatedHost(pluginGuid, hostOpts)
+        local host, authorHost = self:createHost(pluginGuid, hostOpts)
         local ok, err = authorHost.tryActivate()
         return host, authorHost, ok, err
     end
@@ -74,7 +74,7 @@ local function createModuleHostHarness(harnessOpts)
     end
 
     function h:liveHost(pluginGuid)
-        return self.public.getLiveModuleHost(pluginGuid)
+        return self.moduleHost.getLiveHost(pluginGuid)
     end
 
     return h

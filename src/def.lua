@@ -11,9 +11,6 @@ local lib = {}
 ---@alias AdamantModpackLib.PackedSelectionMode "singleEnabled"|"singleDisabled"
 ---@alias AdamantModpackLib.MutationShape "patch"
 
----@class AdamantModpackLib.Config
----@field DebugMode boolean Whether Lib should emit internal diagnostic warnings.
-
 ---@class AdamantModpackLib.HashGroup
 ---@field keyPrefix string Hash group family prefix.
 ---@field items (string|string[])[] Ordered aliases or alias bundles to pack together.
@@ -145,10 +142,90 @@ local lib = {}
 ---Call once after construction.
 ---@field tryActivate fun(): boolean, string? Safely activates the host and returns an error instead of throwing.
 ---@field isEnabled fun(): boolean
----@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
+---@field getHostId fun(): string
+---@field getModuleId fun(): string
+---@field getPackId fun(): string?
 ---@field getMeta fun(): AdamantModpackLib.ModuleMeta
 ---@field log fun(fmt: string, ...) Print a module-scoped log line.
 ---@field logIf fun(fmt: string, ...) Print a module-scoped log line when DebugMode is enabled.
+---@field fallbackUi AdamantModpackLib.AuthorFallbackUi
+---@field gameCache AdamantModpackLib.AuthorGameCache
+---@field hooks AdamantModpackLib.AuthorHooks
+---@field integrations AdamantModpackLib.AuthorIntegrations
+---@field mutation AdamantModpackLib.AuthorMutation
+---@field overlays AdamantModpackLib.RetainedOverlayRegistrar
+
+---@class AdamantModpackLib.FrameworkRuntime
+---@field diagnostics AdamantModpackLib.FrameworkDiagnosticsRuntime
+---@field coordinator AdamantModpackLib.FrameworkCoordinatorRuntime
+---@field hashing AdamantModpackLib.FrameworkHashingApi
+---@field modules AdamantModpackLib.FrameworkModulesRuntime
+---@field overlays AdamantModpackLib.FrameworkOverlaysRuntime
+---@field ui AdamantModpackLib.FrameworkUiRuntime
+
+---@class AdamantModpackLib.FrameworkDiagnosticsRuntime
+---@field isLibDebugEnabled fun(): boolean
+---@field setLibDebugEnabled fun(enabled: boolean)
+
+---@class AdamantModpackLib.FrameworkCoordinatorRuntime
+---@field register fun(packId: string, config: table?)
+---@field registerRebuild fun(packId: string, callback: fun(reason: table)|nil)
+---@field isRegistered fun(packId: string?): boolean
+
+---@class AdamantModpackLib.FrameworkModulesRuntime
+---@field getLiveHost fun(pluginGuid: string?): AdamantModpackLib.ModuleHost?
+
+---@class AdamantModpackLib.FrameworkOverlaysRuntime
+---@field order table<string, integer> Shared overlay order bands.
+---@field define fun(packId: string, name: string, register: fun(overlays: AdamantModpackLib.SystemOverlayRegistrar)): boolean
+
+---@alias AdamantModpackLib.StorageAliasMap table<string, AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode>
+
+---@class AdamantModpackLib.FrameworkHashingApi
+---@field getRoots fun(storage: AdamantModpackLib.StorageSchema): AdamantModpackLib.StorageNode[]
+---@field getAliases fun(storage: AdamantModpackLib.StorageSchema): AdamantModpackLib.StorageAliasMap
+---@field valuesEqual fun(node: AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode?, a: any, b: any): boolean
+---@field getPackWidth fun(node: AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode): number?
+---@field toHash fun(node: AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode, value: any): string?
+---@field fromHash fun(node: AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode, str: string): any
+---@field isHashTokenValid fun(node: AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode, str: string?): boolean
+---@field readPackedBits fun(packed: number?, offset: number?, width: number?): number
+---@field writePackedBits fun(packed: number?, offset: number?, width: number?, value: number?): number
+
+---@class AdamantModpackLib.FrameworkUiRuntime
+---@field suppressOverlays fun(): AdamantModpackLib.UiSuppressionToken
+---@field areOverlaysSuppressed fun(): boolean
+
+---@class AdamantModpackLib.AuthorFallbackUi
+---@field attachGuiOnce fun(register: fun(ui: AdamantModpackLib.FallbackUiBridge)): boolean
+
+---@class AdamantModpackLib.AuthorHooks
+---@field wrap fun(path: string, keyOrHandler: string|fun(base: function, ...: any): any, maybeHandler?: fun(base: function, ...: any): any)
+---@field override fun(path: string, keyOrReplacement: string|fun(...: any): any, maybeReplacement?: fun(...: any): any)
+---@field contextWrap fun(path: string, keyOrContext: string|fun(...: any): any, maybeContext?: fun(...: any): any)
+
+---@class AdamantModpackLib.AuthorIntegrationRegistration
+---@field providerId string Public provider identity returned to consumers.
+---@field api table Provider API table exposed to consumers.
+
+---@class AdamantModpackLib.AuthorIntegrations
+---@field register fun(id: string, opts: AdamantModpackLib.AuthorIntegrationRegistration): table
+---@field invoke fun(id: string, methodName: string, fallback: any, ...): any, string?
+
+---@class AdamantModpackLib.AuthorMutation
+---@field patch fun(callback: fun(
+---    plan: AdamantModpackLib.MutationPlan,
+---    host: AdamantModpackLib.AuthorHost,
+---    store: AdamantModpackLib.ManagedStore
+---))
+
+---@class AdamantModpackLib.AuthorGameCache
+---@field currentRun AdamantModpackLib.AuthorCurrentRunGameCache
+
+---@class AdamantModpackLib.AuthorCurrentRunGameCache
+---@field get fun(key: string, factory?: fun(): table): table?
+---@field peek fun(key: string): table?
+---@field clear fun(key: string): boolean
 
 ---@class AdamantModpackLib.ModuleDefinition
 ---@field modpack? string Coordinator pack id for coordinated modules.
@@ -162,15 +239,11 @@ local lib = {}
 ---@class AdamantModpackLib.PreparedDefinition: AdamantModpackLib.ModuleDefinition
 
 ---@class AdamantModpackLib.MutationBundle
----@field affectsRunData boolean
 ---@field patchMutation? fun(
 ---    plan: AdamantModpackLib.MutationPlan,
 ---    host: AdamantModpackLib.AuthorHost?,
 ---    store: AdamantModpackLib.ManagedStore
 ---)
-
----@alias AdamantModpackLib.RegisterHooks
----| fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
 
 ---@class AdamantModpackLib.ModuleCreateOpts
 ---@field pluginGuid string Plugin guid captured at module file load time.
@@ -182,23 +255,11 @@ local lib = {}
 ---@field tooltip? string UI tooltip.
 ---@field storage? AdamantModpackLib.StorageSchema Raw storage schema.
 ---@field hashGroupPlan? AdamantModpackLib.HashGroupPlan Raw hash/profile group plan.
----@field registerHooks? AdamantModpackLib.RegisterHooks
----@field registerPatchMutation? fun(
----    plan: AdamantModpackLib.MutationPlan,
----    host: AdamantModpackLib.AuthorHost,
----    store: AdamantModpackLib.ManagedStore
----)
 --- Post-commit observer for rebuilding derived runtime/UI structures.
 ---@field onSettingsCommitted? fun(
 ---    host: AdamantModpackLib.AuthorHost,
 ---    store: AdamantModpackLib.ManagedStore,
 ---    commit: AdamantModpackLib.CommitContext
----)
----@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
----@field registerOverlays? fun(
----    overlays: AdamantModpackLib.RetainedOverlayRegistrar,
----    host: AdamantModpackLib.AuthorHost,
----    store: AdamantModpackLib.ManagedStore
 ---)
 ---@field drawTab fun(ctx: AdamantModpackLib.DrawContext)
 ---@field drawQuickContent? fun(ctx: AdamantModpackLib.DrawContext)
@@ -211,7 +272,9 @@ local lib = {}
 ---@field widgets AdamantModpackLib.BoundWidgetsApi
 
 ---@class AdamantModpackLib.ModuleHost
----@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
+---@field getHostId fun(): string
+---@field getModuleId fun(): string
+---@field getPackId fun(): string?
 ---@field getMeta fun(): AdamantModpackLib.ModuleMeta
 ---@field affectsRunData fun(): boolean
 ---@field getHashHints fun(): AdamantModpackLib.HashGroupPlan?
@@ -233,10 +296,6 @@ local lib = {}
 ---@field drawTab fun(imgui: table)
 ---@field drawQuickContent? fun(imgui: table)
 
----@class AdamantModpackLib.ModuleIdentity
----@field id string
----@field modpack? string
-
 ---@class AdamantModpackLib.ModuleMeta
 ---@field name? string
 ---@field shortName? string
@@ -245,7 +304,7 @@ local lib = {}
 ---@class AdamantModpackLib.ResetOpts
 ---@field exclude? table<string, boolean> Root aliases to skip.
 
----@class AdamantModpackLib.StandaloneRuntime
+---@class AdamantModpackLib.FallbackUiBridge
 ---@field renderWindow fun()
 ---@field addMenuBar fun()
 ---@field handleHostGuiClosed fun()
@@ -266,15 +325,6 @@ local lib = {}
 ---@field appendUnique AdamantModpackLib.MutationPlanFn
 ---@field removeElement AdamantModpackLib.MutationPlanFn
 ---@field setElement AdamantModpackLib.MutationPlanFn
-
----@class AdamantModpackLib.IntegrationProvider
----@field providerId string Public provider identity returned to integration consumers.
----@field api table
-
----@class AdamantModpackLib.GameCacheApi
----@field get fun(object: table, packId: string, moduleId: string, key: string, factory?: fun(): table): table
----@field peek fun(object: table, packId: string, moduleId: string, key: string): table?
----@field clear fun(object: table, packId: string, moduleId: string, key: string): boolean
 
 ---@class AdamantModpackLib.VisibilityCondition
 ---@field alias string
@@ -419,108 +469,6 @@ local lib = {}
 ---@field optionsPerLine? number
 ---@field optionGap? number
 
----@class AdamantModpackLib.CoordinatorApi
----@type AdamantModpackLib.CoordinatorApi
-lib.coordinator = {}
-
----@param packId string
----@param config AdamantModpackLib.CoordinatorConfig
-function lib.coordinator.register(packId, config)
-end
-
----@param packId string
----@param callback fun(reason: table): boolean
-function lib.coordinator.registerRebuild(packId, callback)
-end
-
----@param packId string
----@param reason table
----@return boolean requested
-function lib.coordinator.requestRebuild(packId, reason)
-end
-
----@param packId string?
----@return boolean registered
-function lib.coordinator.isRegistered(packId)
-end
-
----@class AdamantModpackLib.MutationApi
----@type AdamantModpackLib.MutationApi
-lib.mutation = {}
-
----@return AdamantModpackLib.MutationPlan
-function lib.mutation.createPlan()
-end
-
----@class AdamantModpackLib.IntegrationsApi
----@type AdamantModpackLib.IntegrationsApi
-lib.integrations = {}
-
----@param id string
----@param providerId string Public provider identity, independent from module lifecycle ownership.
----@param api table
----@return table api
-function lib.integrations.register(id, providerId, api)
-end
-
----@param id string
----@param providerId string Public provider identity.
----@return boolean removed
-function lib.integrations.unregister(id, providerId)
-end
-
----@param providerId string Public provider identity.
----@return integer count
-function lib.integrations.unregisterProvider(providerId)
-end
-
----@param id string
----@return table? api
----@return string? providerId
-function lib.integrations.get(id)
-end
-
----@param id string
----@param methodName string
----@param fallback any
----@return any result
----@return string? providerId
-function lib.integrations.invoke(id, methodName, fallback, ...)
-end
-
----@param id string
----@return AdamantModpackLib.IntegrationProvider[] providers
-function lib.integrations.list(id)
-end
-
----@type AdamantModpackLib.GameCacheApi
-lib.gameCache = {}
-
----@param object table
----@param packId string
----@param moduleId string
----@param key string
----@param factory? fun(): table
----@return table state
-function lib.gameCache.get(object, packId, moduleId, key, factory)
-end
-
----@param object table
----@param packId string
----@param moduleId string
----@param key string
----@return table? state
-function lib.gameCache.peek(object, packId, moduleId, key)
-end
-
----@param object table
----@param packId string
----@param moduleId string
----@param key string
----@return boolean cleared
-function lib.gameCache.clear(object, packId, moduleId, key)
-end
-
 ---@class AdamantModpackLib.RetainedOverlayColumn
 ---@field key? string Stable column key used by retained values.
 ---@field componentName? string Explicit retained HUD component name for this column.
@@ -568,6 +516,7 @@ end
 ---@field results table
 
 ---@class AdamantModpackLib.RetainedOverlayRegistrar
+---@field order table<string, integer> Shared overlay order bands.
 ---@field createLine fun(name: string, spec: AdamantModpackLib.RetainedLineSpec)
 ---@field createTable fun(name: string, spec: AdamantModpackLib.RetainedTableSpec)
 ---@field onCommit fun(callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, commit: AdamantModpackLib.CommitContext))
@@ -586,114 +535,8 @@ end
 ---@field createLine fun(name: string, spec: AdamantModpackLib.RetainedLineSpec)
 ---@field onCommit fun(callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, commit: AdamantModpackLib.CommitContext))
 
----@class AdamantModpackLib.OverlaysApi
----@field order table<string, integer> Shared overlay order bands.
----@type AdamantModpackLib.OverlaysApi
-lib.overlays = {}
-
 ---@class AdamantModpackLib.UiSuppressionToken
 ---@field release fun()
-
----@param ownerId string Stable explicit owner id for system overlays.
----@param register fun(overlays: AdamantModpackLib.SystemOverlayRegistrar)
----@return boolean ok
-function lib.overlays.defineSystem(ownerId, register)
-end
-
----@return boolean suppressed
-function lib.overlays.isUiSuppressed()
-end
-
----@return AdamantModpackLib.UiSuppressionToken token
-function lib.overlays.suppressForUi()
-end
-
----@class AdamantModpackLib.HashingApi
----@type AdamantModpackLib.HashingApi
-lib.hashing = {}
-
----Returns read-only prepared storage roots used for hash/profile metadata inspection.
----@param storage AdamantModpackLib.StorageSchema
----@return AdamantModpackLib.StorageNode[] roots
-function lib.hashing.getRoots(storage)
-end
-
----Returns a read-only prepared alias map used for hash/widget metadata inspection.
----@param storage AdamantModpackLib.StorageSchema
----@return table<string, AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode> aliases
-function lib.hashing.getAliases(storage)
-end
-
----@param node AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode?
----@param a any
----@param b any
----@return boolean equal
-function lib.hashing.valuesEqual(node, a, b)
-end
-
----@param node AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode
----@return number? width
-function lib.hashing.getPackWidth(node)
-end
-
----@param node AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode
----@param value any
----@return string? encoded
-function lib.hashing.toHash(node, value)
-end
-
----@param node AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode
----@param str string
----@return any value
-function lib.hashing.fromHash(node, str)
-end
-
----@param node AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode
----@param str string?
----@return boolean valid
-function lib.hashing.isHashTokenValid(node, str)
-end
-
----@param packed number?
----@param offset number?
----@param width number?
----@return number value
-function lib.hashing.readPackedBits(packed, offset, width)
-end
-
----@param packed number?
----@param offset number?
----@param width number?
----@param value number?
----@return number packedValue
-function lib.hashing.writePackedBits(packed, offset, width, value)
-end
-
----@class AdamantModpackLib.HooksApi
----@type AdamantModpackLib.HooksApi
-lib.hooks = {}
-
----@param path string
----@param keyOrHandler string|fun(base: function, ...: any): any
----@param maybeHandler? fun(base: function, ...: any): any
-function lib.hooks.Wrap(path, keyOrHandler, maybeHandler)
-end
-
----@param path string
----@param keyOrReplacement string|fun(...: any): any
----@param maybeReplacement? fun(...: any): any
-function lib.hooks.Override(path, keyOrReplacement, maybeReplacement)
-end
-
----@class AdamantModpackLib.HooksContextApi
----@type AdamantModpackLib.HooksContextApi
-lib.hooks.Context = {}
-
----@param path string
----@param keyOrContext string|fun(...: any): any
----@param maybeContext? fun(...: any): any
-function lib.hooks.Context.Wrap(path, keyOrContext, maybeContext)
-end
 
 ---@class AdamantModpackLib.ImguiHelpersApi
 ---@type AdamantModpackLib.ImguiHelpersApi
@@ -887,20 +730,9 @@ end
 function lib.nav.isVisible(session, condition)
 end
 
----@type AdamantModpackLib.Config
-lib.config = {}
-
 ---@class AdamantModpackLib.ModuleState
 ---@field store AdamantModpackLib.ManagedStore
 ---@field session AdamantModpackLib.Session
-
----@param storage AdamantModpackLib.StorageSchema
----@param session AdamantModpackLib.Session
----@param opts? AdamantModpackLib.ResetOpts
----@return boolean changed
----@return integer count
-function lib.resetStorageToDefaults(storage, session, opts)
-end
 
 ---@param opts AdamantModpackLib.ModuleCreateOpts
 ---@return AdamantModpackLib.AuthorHost host
@@ -915,19 +747,9 @@ end
 function lib.tryCreateModule(opts)
 end
 
----@param pluginGuid string Plugin guid used when creating the module host.
----@return AdamantModpackLib.StandaloneRuntime runtime
-function lib.standaloneHost(pluginGuid)
-end
-
----@param pluginGuid string Plugin guid used when creating the module host.
----@return AdamantModpackLib.StandaloneRuntime bridge
-function lib.standaloneUiBridge(pluginGuid)
-end
-
----@param pluginGuid string?
----@return AdamantModpackLib.ModuleHost? host
-function lib.getLiveModuleHost(pluginGuid)
+---@param frameworkPluginGuid string Must be `adamant-ModpackFramework`.
+---@return AdamantModpackLib.FrameworkRuntime runtime
+function lib.createFrameworkRuntime(frameworkPluginGuid)
 end
 
 return lib

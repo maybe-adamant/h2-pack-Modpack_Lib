@@ -41,6 +41,10 @@ function TestGameDeps:setUp()
 end
 
 function TestGameDeps:testGameGlobalsAreLateReadFromHarnessEnvironment()
+    local currentRun = {}
+    self.harness.env.CurrentRun = currentRun
+
+    lu.assertIs(self.gameDeps.gameCache.CurrentRun(), currentRun)
     lu.assertIs(self.gameDeps.overlays.ScreenData(), self.harness.env.ScreenData)
     lu.assertIs(self.gameDeps.overlays.HUDScreen(), self.harness.env.HUDScreen)
     lu.assertEquals(self.gameDeps.overlays.ShowingCombatUI(), true)
@@ -57,6 +61,30 @@ function TestGameDeps:testGameGlobalsAreLateReadFromHarnessEnvironment()
 
     lu.assertIs(self.gameDeps.overlays.ScreenData(), replacementScreenData)
     lu.assertEquals(self.gameDeps.overlays.ShowingCombatUI(), false)
+end
+
+function TestGameDeps:testOptionalGlobalTablesRejectMalformedValues()
+    self.harness.env.CurrentRun = true
+
+    lu.assertErrorMsgContains("CurrentRun must be nil or a table", function()
+        self.gameDeps.gameCache.CurrentRun()
+    end)
+end
+
+function TestGameDeps:testGameGlobalFunctionsRejectMalformedValues()
+    self.harness.env.ModifyTextBox = true
+
+    lu.assertErrorMsgContains("ModifyTextBox must be a function", function()
+        self.gameDeps.overlays.ModifyTextBox({})
+    end)
+end
+
+function TestGameDeps:testRomGameFunctionsRejectMalformedValues()
+    self.harness.rom.game.SetupRunData = true
+
+    lu.assertErrorMsgContains("rom.game.SetupRunData must be a function", function()
+        self.gameDeps.runData.SetupRunData()
+    end)
 end
 
 function TestGameDeps:testSetupRunDataUsesRomGameBoundary()

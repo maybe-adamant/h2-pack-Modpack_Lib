@@ -10,10 +10,14 @@ module-authored `owner` tokens.
 - `pluginGuid` is the stable lookup identity for a module host.
 - The committed host is the managed lifecycle owner for hooks, overlays,
   integrations, activation metadata, and structural hot-reload comparison.
-- Mutation runtime is still plugin-scoped because raw game-table edits are
-  process-global.
+- Mutation runtime is still module-owner scoped because raw game-table edits
+  are process-global. For module hosts, that owner id is derived from
+  `pluginGuid`.
 - `definition.id` remains the module's domain/UI/profile/hash identity.
 - `modpack` remains coordinator grouping.
+- Stateless capability backends use `ownerId`, not `pluginGuid`. Module-host
+  adapters derive that owner id from `pluginGuid`; system scopes provide their
+  own deliberately scoped owner ids.
 
 ## Module Migration
 
@@ -37,42 +41,44 @@ local data = import("mods/data.lua")
 local logic = import("mods/logic.lua")
 local ui = import("mods/ui.lua")
 
-local host = lib.tryCreateModule({
+local host, store = lib.tryCreateModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     id = MODULE_ID,
     name = "Example Module",
     storage = data.buildStorage(),
-    registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
 })
+logic.registerHooks(host, store)
 ```
 
-Modules should use `lib.standaloneUiBridge(pluginGuid)` for stable standalone
-GUI callbacks instead of keeping private persistent tables for standalone UI
-handles. Private persistent tables are still valid for truly module-owned cached
-data, but they should not be passed to Lib as lifecycle owners.
+Modules should use `host.fallbackUi.attachGuiOnce(...)` for stable fallback UI
+callbacks instead of keeping private persistent tables for UI handles. Private
+persistent tables are still valid for truly module-owned cached data, but they
+should not be passed to Lib as lifecycle owners.
 
 ## Hook And Overlay Notes
 
-Normal module hooks stay ownerless inside `registerHooks(host, store)`:
+Normal module hooks are declared on the returned author host before activation:
 
 ```lua
 local function registerHooks(host, store)
-    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+    host.hooks.wrap("SomeGameFunction", function(base, ...)
         return base(...)
     end)
 end
 ```
 
-Lib scopes those declarations to the module's `pluginGuid`. Explicit-owned APIs
-were retired for normal authoring. Lib and Framework infrastructure should use
-the narrow `lib.overlays.defineSystem(...)` HUD-line surface instead of general
-owner tokens.
+Lib scopes those declarations to the module's `pluginGuid` at the host-adapter
+boundary, then passes a generic `ownerId` into the stateless hook backend.
+Explicit-owned and ownerless ambient hook APIs were retired for normal
+authoring. Lib infrastructure uses private system scopes for first-party
+ownership, while Framework consumes first-party capability namespaces through
+`lib.createFrameworkRuntime("adamant-ModpackFramework")`.
 
 ## Integration Notes
 
-`registerIntegrations(host, store)` is refreshed by the module's `pluginGuid`.
-The `providerId` passed to `lib.integrations.register(id, providerId, api)` is
-still the public integration provider identity, not the lifecycle owner. It can
-remain a module/domain id chosen for consumers.
+Integration providers are declared with `host.integrations.register(...)`
+before activation and refreshed by the module's `pluginGuid`. The `providerId`
+inside the registration opts is still the public integration provider identity,
+not the lifecycle owner. It can remain a module/domain id chosen for consumers.

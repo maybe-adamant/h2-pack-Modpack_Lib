@@ -17,11 +17,11 @@ function TestModuleHost_IsEnabled:makeStore(enabled)
     return store
 end
 
-function TestModuleHost_IsEnabled:testEnabledStandalone()
+function TestModuleHost_IsEnabled:testEnabledUncoordinated()
     lu.assertTrue(self.h.hostLifecycle.isEnabled(self:makeStore(true), "test-pack"))
 end
 
-function TestModuleHost_IsEnabled:testDisabledStandalone()
+function TestModuleHost_IsEnabled:testDisabledUncoordinated()
     lu.assertFalse(self.h.hostLifecycle.isEnabled(self:makeStore(false), "test-pack"))
 end
 
@@ -31,21 +31,21 @@ function TestModuleHost_IsEnabled:testEnabledNoPackId()
 end
 
 function TestModuleHost_IsEnabled:testEnabledWithCoordEnabled()
-    self.h.public.coordinator.register("test-pack", { ModEnabled = true })
+    self.h.coordinator.register("test-pack", { ModEnabled = true })
     lu.assertTrue(self.h.hostLifecycle.isEnabled(self:makeStore(true), "test-pack"))
 end
 
 function TestModuleHost_IsEnabled:testDisabledWithCoordEnabled()
-    self.h.public.coordinator.register("test-pack", { ModEnabled = true })
+    self.h.coordinator.register("test-pack", { ModEnabled = true })
     lu.assertFalse(self.h.hostLifecycle.isEnabled(self:makeStore(false), "test-pack"))
 end
 
 function TestModuleHost_IsEnabled:testEnabledWithCoordDisabled()
-    self.h.public.coordinator.register("test-pack", { ModEnabled = false })
+    self.h.coordinator.register("test-pack", { ModEnabled = false })
     lu.assertFalse(self.h.hostLifecycle.isEnabled(self:makeStore(true), "test-pack"))
 end
 
 function TestModuleHost_IsEnabled:testDisabledWithCoordDisabled()
-    self.h.public.coordinator.register("test-pack", { ModEnabled = false })
+    self.h.coordinator.register("test-pack", { ModEnabled = false })
     lu.assertFalse(self.h.hostLifecycle.isEnabled(self:makeStore(false), "test-pack"))
 end

@@ -28,31 +28,31 @@ The runtime model is already host-centered. Host activation owns:
 - session commit and runtime refresh
 - draw dispatch
 
-The module-author API is less cohesive. Authors create a host, then use a mix
-of callback contracts and global Lib namespaces:
+The module-author API used to be less cohesive. Authors created a host, then
+used a mix of callback contracts and global Lib namespaces:
 
 ```lua
 drawTab(ctx)
 registerHooks(host, store)
-registerOverlays(overlays, host, store)
 registerPatchMutation(plan, host, store)
-registerIntegrations(host, store)
+host.integrations.register(...)
+host.integrations.invoke(...)
 
 lib.hooks.*
-lib.overlays.*
-lib.integrations.*
 lib.mutation.*
 lib.widgets.*
 ```
 
-This works, but it creates a bifurcated design:
+That worked, but it created a bifurcated design:
 
 - Lib and Framework manage module lifecycle through a host-like object.
 - Module authors interact with a host plus many separate global service
   surfaces.
 
-The proposed design makes the module-facing API match the runtime shape without
-making Lib itself stateful.
+The accepted design makes the module-facing API match the runtime shape without
+making Lib itself stateful. Hooks, integrations, game cache, and retained module
+overlays are already host-owned author surfaces; mutation and draw-related
+surfaces remain migration candidates.
 
 ## Core Direction
 
@@ -78,8 +78,8 @@ host.hooks.wrap("SomeGameFunction", function(base, ...)
     return base(...)
 end)
 
-host.mutation.patch(function(plan)
-    if host.store.read("PatchEnabled") then
+host.mutation.patch(function(plan, host, store)
+    if store.read("PatchEnabled") then
         plan:set(SomeGameTable, "Enabled", true)
     end
 end)
@@ -88,10 +88,13 @@ host.overlays.createLine("summary", {
     region = "middleRightStack",
 })
 
-host.integrations.register("run-director.some-provider", MODULE_ID, {
-    isAvailable = function()
-        return host.store.read("FeatureEnabled") == true
-    end,
+host.integrations.register("run-director.some-provider", {
+    providerId = MODULE_ID,
+    api = {
+        isAvailable = function()
+            return host.store.read("FeatureEnabled") == true
+        end,
+    },
 })
 
 host.tryActivate()
@@ -117,20 +120,24 @@ create host -> declare capabilities -> activate host
 
 ## Vocabulary
 
-Use two role names when discussing the implementation:
+Use these role names when discussing the implementation:
 
-- `lifecycleHost`: internal Lib/Framework-facing host. It owns activation,
-  replacement, commit, sync, rollback, and Framework draw entrypoints.
-- `authorHost`: module-facing facade. It owns author capability declarations
+- `ModuleHost`: the full Lib object created by `moduleHost.create(...)`. It is
+  the Framework/runtime surface for activation, replacement, commit, sync,
+  rollback, mutation transitions, staged writes, and Framework draw entrypoints.
+- `live module host`: an activated `ModuleHost` published in the live-host
+  registry and consumed by Framework or fallback UI.
+- `AuthorHost`: module-facing facade. It owns author capability declarations
   and exposes scoped draw/runtime surfaces.
 
-The author host is not merely a subset of the lifecycle host. They are two
+The author host is not merely a subset of the `ModuleHost`. They are two
 views over one module runtime. Some methods overlap, such as identity, metadata,
 logging, enabled state, and activation handoff, but their responsibilities are
 different.
 
 User-facing docs may simply call the author-facing object `host`; module
-authors do not need to learn the internal distinction up front.
+authors do not need to learn the internal distinction up front. Treat
+`lifecycle` as a responsibility of `ModuleHost`, not as the canonical type name.
 
 ## Lib Surface Target
 
@@ -156,6 +163,111 @@ Normal module-owned capabilities should move behind author-host namespaces:
 
 Existing global capability APIs may remain during migration. They should not be
 the destination authoring model.
+
+## Capability Bundle Shape
+
+Capability modules should return a named audience bundle. This is the standard
+shape for migrated capabilities and the checklist to audit against.
+
+Do not mutate `public` from a subsystem file. Do not mix author wrappers,
+public exports, and backend internals into one generic service table. A
+capability module should describe its audiences explicitly:
+
+```lua
+return {
+    service = service,
+    author = authorApi,
+    framework = frameworkApi,
+    public = publicApi,
+}
+```
+
+Audience names have strict meanings:
+
+- `service`: trusted backend used by Lib lifecycle and other internals.
+- `author`: factories for host-bound author facades.
+- `framework`: Framework-only runtime helpers exposed through
+  `lib.createFrameworkRuntime(...)`.
+- `public`: remaining `lib.*` exports, if that subsystem still has any.
+
+Subsystems omit audiences they do not expose. The bundle should not include
+empty audience tables just to satisfy the shape.
+
+`core/init.lua` is the composition root. It mounts `public` exports, passes
+`author` factories into `AuthorHost`, and passes `service` objects to internal
+runtime owners. This keeps the public Lib surface visible in one place and
+prevents subsystem imports from changing global API shape as a side effect.
+
+The audience split is not ceremony. It answers three different questions:
+
+- what Lib internals call (`service`)
+- what module authors receive through `host.*` (`author`)
+- what Framework receives through its runtime object (`framework`)
+- what remains directly callable as `lib.*` (`public`)
+
+Two current examples anchor the intended outcomes:
+
+- `gameCache` returns `service` and `author`. It has no public `lib.gameCache`
+  author API because cache access is owner-bound through `host.gameCache`.
+- `integrations` returns `service` and `author`. Provider registration is
+  owner-bound through `host.integrations.register(...)`, while consumers invoke
+  through `host.integrations.invoke(...)`.
+- `hashing` returns `framework`. It has no `service` audience because Lib
+  internals do not consume the hashing helpers; Framework receives them through
+  `frameworkRuntime.hashing`.
+
+Audit rule: if a migrated capability exposes a callable table, reviewers should
+be able to classify each method as exactly one of `service`, `author`,
+`framework`, or `public`. If a method fits more than one audience, split the
+wrapper from the backend instead of widening a shared table.
+
+For non-trivial capabilities, split implementation files along the same
+boundary:
+
+- domain-named implementation files, such as `current_run_cache.lua`:
+  stateless backend logic and backend-owned validation. Avoid generic names
+  like `core.lua`.
+- `adapter_author.lua`: host-bound adapter factories. These validate
+  managed-host access,
+  extract host-owned state such as `host.getHostId()`, and pass explicit state
+  into the backend.
+- `adapter_host.lua`: internal lifecycle-host adapter when Lib runtime code
+  still needs host-shaped service methods such as `applyForHost(...)`. These
+  should prove managed-host access, unpack host state, and delegate to explicit
+  backend functions.
+- `adapter_public.lua`: remaining direct `lib.*` bridge when a capability still
+  exposes public functions. Public adapters should validate at the public call
+  boundary or delegate to a backend that does.
+- `adapter_framework.lua`: Framework-runtime adapter when Framework needs a
+  helper that normal module authors should not receive directly.
+- the subsystem entrypoint, such as `game_cache.lua`: composition only. It
+  imports the backend and adapter, builds the audience bundle, and wires runtime
+  dependencies.
+
+Adapters should not duplicate backend validation. Their job is to prove and
+unwrap the host; backend code owns subsystem semantics. Mutations are the
+reference example for a capability that needs both `adapter_author.lua` and
+`adapter_host.lua`; integrations are the reference example for a capability
+that needs all three adapter audiences. Hooks are the reference example for a
+capability with host/author adapters plus an internal physical-install service
+used by another subsystem.
+
+Identity boundary:
+
+- `pluginGuid` is the module bootstrap/runtime identity. It belongs in
+  `createModule(...)`, live-host lookup, plugin metadata, hot-reload
+  comparison, and module-host adapters.
+- `ownerId` is the capability-subsystem identity. Stateless subsystem logic
+  should only know that it received a stable unique owner key; it should not
+  know whether that owner is a module host, Framework system, Lib system, or
+  future internal owner.
+- Module-host adapters translate by reading `host.getHostId()` and passing the
+  result into subsystem backends as `ownerId`.
+- System adapters do not pretend to be plugins. They use the explicit
+  `ownerId` stored on the managed system scope.
+- System owner ids must be deliberately scoped, such as
+  `adamant-lib.overlays.renderer` or `adamant-framework.<pack>.hud`, because
+  system owners and module-backed owners share capability owner namespaces.
 
 ## Phase Model
 
@@ -188,7 +300,9 @@ Declaration surfaces that close after activation:
 Runtime/status methods may remain usable after activation:
 
 - `host.isEnabled()`
-- `host.getIdentity()`
+- `host.getHostId()`
+- `host.getModuleId()`
+- `host.getPackId()`
 - `host.getMeta()`
 - `host.log(...)`
 - `host.logIf(...)`
@@ -208,11 +322,17 @@ UI intent is staged.
 Runtime behavior is committed.
 ```
 
-Destination author surfaces:
+Potential future author surfaces:
 
 - `host.session`: staged UI state, available during draw.
 - `host.store`: committed runtime state facade, available during sanctioned
   runtime/event/mutation callbacks.
+
+Current implementation deliberately stops short of this phase-gated state
+facade. Draw still receives `ctx.session`, mutation callbacks still receive
+`store` explicitly, and hook/integration/overlay callbacks may close over the
+raw store returned by module creation. Revisit `host.store` together with the
+draw/session API decision.
 
 Typical use:
 
@@ -247,10 +367,10 @@ while still rejecting `read(...)` outside a Lib-owned runtime invocation window.
 
 Draw is a Lib-owned invocation window.
 
-The lifecycle host receives the Framework-facing call:
+The `ModuleHost` receives the Framework-facing call:
 
 ```lua
-lifecycleHost.drawTab(imgui)
+moduleHost.drawTab(imgui)
 ```
 
 It should open the author host's draw phase, invoke the authored callback, and
@@ -293,6 +413,10 @@ end)
 The author no longer calls `lib.hooks.*`. Ownership is structural because the
 hook registrar is already bound to the module host.
 
+Author hook declarations are staged on managed host state until activation.
+The hook declaration backend should only build plain declaration records; it
+should not keep a host-keyed weak registry of staged author declarations.
+
 Store access should be open during hook dispatch, not during general module
 declaration. Hook handlers may capture `host.store.read`; the facade should
 validate phase when the captured function is called.
@@ -317,6 +441,11 @@ end)
 Overlay projection callbacks may keep their projection context. That context is
 already event-specific and intentionally narrower than the author host.
 
+Author overlay declarations are staged on managed host state until activation.
+The declaration backend should only build plain declaration records; the host
+adapter translates `host.getHostId()` into the owner id consumed by retained
+overlay internals.
+
 The declaration namespace closes after activation. Projection callbacks run
 later under Lib-owned overlay dispatch.
 
@@ -329,54 +458,69 @@ enable/disable, settings commit, reload, and rollback.
 Destination:
 
 ```lua
-host.mutation.patch(function(plan)
-    if host.store.read("FeatureEnabled") then
+host.mutation.patch(function(plan, host, store)
+    if store.read("FeatureEnabled") then
         plan:set(SomeGameTable, "Enabled", true)
     end
 end)
 ```
 
-`host.store` should be open while Lib builds the mutation plan. Mutation plan
-application and rollback remain internal lifecycle-host responsibilities.
+The callback keeps the explicit `(plan, host, store)` shape for now. Mutation
+plan application and rollback remain internal lifecycle-host responsibilities.
+Moving runtime reads to a phase-gated `host.store` facade is a separate design
+choice that should be evaluated together with the draw/session shape.
 
 ## Integrations
 
-Provider registration should be host-owned and use the host identity as the
-default provider identity:
+Game cache clarified the rule for host facades: bind the stable lifecycle
+owner at the host boundary, but do not move backend ownership or unrelated
+identity concepts into the host.
+
+For integrations, keep these identities separate:
+
+- lifecycle owner: the module host/plugin runtime identity that owns activation,
+  rollback, refresh, and retirement
+- provider id: the public cross-module provider identity returned to consumers
+- integration id: the domain API name, such as
+  `run-director.god-availability`
+
+Do not collapse `providerId` into `pluginGuid` by accident. A default provider
+id may be added for ergonomics, but it must be an explicit documented policy.
+The host facade's first responsibility is lifecycle ownership, not redefining
+public provider identity.
+
+Provider registration should be host-owned:
 
 ```lua
 host.integrations.register("run-director.god-availability", {
-    isActive = function()
-        return host.isEnabled()
-    end,
-    isAvailable = function(godKey)
-        return host.store.read(godKey) ~= false
-    end,
+    providerId = "GodPool",
+    api = {
+        isActive = function()
+            return host.isEnabled()
+        end,
+        isAvailable = function(godKey)
+            return host.store.read(godKey) ~= false
+        end,
+    },
 })
 ```
 
-The legacy/global backend shape can remain unchanged:
+The host path does not use `ActiveHostInstallStack`-style ambient ownership
+inference. `host.integrations.register(...)` records against the host directly
+before activation. Provider registration is no longer exposed through the
+global integration namespace.
 
-```lua
-lib.integrations.register(integrationId, providerId, api)
-```
-
-The host facade does not need to expose `providerId` for normal authoring.
-Lifecycle ownership is implicit because registration happens through the host,
-and provider identity can default to the module id. If a real module needs
-multiple public provider identities later, add an explicit advanced option
-rather than making the common path noisier.
-
-Consumer invocation should also be host-owned:
+Consumer invocation can be exposed on the host for author ergonomics and
+future caller-aware diagnostics:
 
 ```lua
 local ok = host.integrations.invoke("run-director.god-availability", "isAvailable", true, godKey)
 ```
 
-This makes the caller real in the implementation: Lib can know that host A
-invoked provider code owned by host B. That caller identity is useful for
-diagnostics, phase gating, and future policy. It should not be passed to
-provider methods by default.
+This should remain a facade over the global integration registry, not
+caller-aware RPC. Lib may know that host A invoked provider code owned by host
+B for diagnostics, phase gating, and future policy, but that caller identity
+should not be passed to provider methods by default.
 
 Provider APIs should stay domain-shaped:
 
@@ -389,27 +533,42 @@ end
 Do not turn integrations into caller-aware RPC unless a concrete use case needs
 that larger contract.
 
-Migration/advanced surfaces:
+Validation ownership should follow the game-cache lesson:
 
-- keep `lib.integrations.register(id, providerId, api)` unchanged
-- keep `lib.integrations.invoke(...)` temporarily as migration or advanced API
-- keep direct `get/list` as advanced escape hatches and prefer `invoke(...)`
+- `host.integrations.register(...)` validates the author-facing registration
+  shape and binds lifecycle ownership
+- `registry.lua` should trust normalized ids, provider ids, APIs, and
+  owner ids/tokens once called internally
+- `invoke(...)` validates `id` and `methodName` because invocation is an
+  author-facing call boundary
+- provider method failures stay under `integrations.provider_failed`
+
+Do not expose direct public provider registration, invocation, `get`, or `list`
+unless a concrete advanced use case survives the host-facade migration.
 
 Provider APIs also need careful wrapping if strict store-phase enforcement is a
 goal. `invoke(...)` is easy to phase-scope because Lib owns the call boundary;
-direct `get/list` can expose provider tables that bypass invocation wrapping.
+direct provider-table access can bypass invocation wrapping.
 
 ## Game Cache
 
-Game cache should move behind the author host, but it is not a capability
+Game cache now has an author-host facade, but it is not a capability
 declaration like hooks or overlays.
 
-The current global subsystem provides namespaced runtime cache buckets on live
-game tables. It is not staged, persisted, hashed, profiled, or reset by Lib. Its
-lifetime follows a game table rather than the module host.
+The game-cache subsystem owns the stateless backend for namespaced runtime
+cache buckets on `CurrentRun`. It is not staged, persisted, hashed, profiled,
+or reset by Lib. Its lifetime follows the active run rather than the module
+host.
 
-The host facade should bind pack/module identity and expose concrete lifecycle
-domains. The expected first domain is the active run:
+The backend is internal service code. The module-author surface is only the
+host-bound facade; there is no global `lib.gameCache.*` author API.
+
+The host facade receives the managed host, uses private host state only to
+verify that the object is Lib-managed, then reads runtime ownership from
+`host.getHostId()`. The host adapter translates that module runtime identity
+into the `ownerId` passed to the backend. The backend only sees an owner key
+used under the cache root. The facade then exposes concrete lifecycle domains.
+The first domain is the active run:
 
 ```lua
 local state = host.gameCache.currentRun.get("run", function()
@@ -419,7 +578,7 @@ local state = host.gameCache.currentRun.get("run", function()
 end)
 ```
 
-Expected current-run surface:
+Current-run surface:
 
 ```lua
 host.gameCache.currentRun.get(key, factory)
@@ -428,22 +587,14 @@ host.gameCache.currentRun.clear(key)
 ```
 
 This is intentionally more specific than `host.cache` or
-`host.gameCache.get(...)`. It tells authors that the cache is tied to a game
-lifecycle domain, not a general memoization table.
+`host.gameCache.get(...)`. It tells authors that the cache is tied to the
+active run, not a general memoization table.
 
 Future domains can be added when real call sites need them:
 
 ```lua
 host.gameCache.currentRoom.get(key, factory)
 host.gameCache.currentEncounter.get(key, factory)
-```
-
-A generic object-backed escape hatch may still be useful for advanced code:
-
-```lua
-host.gameCache.object.get(object, key, factory)
-host.gameCache.object.peek(object, key)
-host.gameCache.object.clear(object, key)
 ```
 
 Do not introduce stringly typed domains such as
@@ -503,7 +654,7 @@ host facade over stateless Lib backends.
 - Do not expose raw managed store/session objects directly through host.
 - Do not make `host.read(...)` choose session or store by phase.
 - Do not flatten all capability methods directly onto host.
-- Do not turn the lifecycle host into the author capability surface.
+- Do not turn `ModuleHost` into the author capability surface.
 - Do not force integration consumer APIs into this design before their call
   sites are audited.
 - Do not make game cache a generic host cache or stringly typed event cache.
@@ -516,8 +667,8 @@ The target architecture is:
 Lib:
   stateless construction and backend capability implementation
 
-lifecycleHost:
-  internal/framework-facing lifecycle owner
+ModuleHost:
+  internal/framework-facing runtime and lifecycle owner
 
 authorHost:
   module-facing bound capability facade

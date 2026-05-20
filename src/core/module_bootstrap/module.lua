@@ -3,6 +3,7 @@ local deps = ...
 local logging = deps.logging
 local moduleHost = deps.moduleHost
 local moduleState = deps.moduleState
+local modulePublic = {}
 
 ---@class ModuleCreateOpts
 ---@field pluginGuid string
@@ -14,11 +15,7 @@ local moduleState = deps.moduleState
 ---@field tooltip string|nil
 ---@field storage StorageSchema|nil
 ---@field hashGroupPlan HashGroupPlan|nil
----@field registerHooks fun(host: AuthorHost, store: ManagedStore)|nil
----@field registerPatchMutation fun(plan: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
----@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
----@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field drawTab fun(ctx: DrawContext)
 ---@field drawQuickContent fun(ctx: DrawContext)|nil
 
@@ -32,11 +29,7 @@ local KnownModuleOpts = {
     tooltip = true,
     storage = true,
     hashGroupPlan = true,
-    registerHooks = true,
-    registerPatchMutation = true,
     onSettingsCommitted = true,
-    registerIntegrations = true,
-    registerOverlays = true,
     drawTab = true,
     drawQuickContent = true,
 }
@@ -82,10 +75,7 @@ end
 
 --- Creates a module through the canonical prepare -> store -> host pipeline.
 --- Call `host.tryActivate()` after construction.
----@param opts ModuleCreateOpts
----@return AuthorHost host
----@return ManagedStore store
-function public.createModule(opts)
+local function createModule(opts)
     if type(opts) ~= "table" then
         logging.violate("host.invalid_create_opts", "createModule: opts must be a table")
     end
@@ -108,16 +98,13 @@ function public.createModule(opts)
         pluginGuid = opts.pluginGuid,
         store = store,
         session = session,
-        registerHooks = opts.registerHooks,
-        registerPatchMutation = opts.registerPatchMutation,
         onSettingsCommitted = opts.onSettingsCommitted,
-        registerIntegrations = opts.registerIntegrations,
-        registerOverlays = opts.registerOverlays,
         drawTab = opts.drawTab,
         drawQuickContent = opts.drawQuickContent,
     })
     return authorHost, store
 end
+modulePublic.createModule = createModule
 
 --- Safely creates a module through the canonical prepare -> store -> host pipeline.
 --- Returns nils plus the construction error instead of throwing.
@@ -125,8 +112,8 @@ end
 ---@return AuthorHost|nil host
 ---@return ManagedStore|nil store
 ---@return string|nil err
-function public.tryCreateModule(opts)
-    local ok, host, store = pcall(public.createModule, opts)
+local function tryCreateModule(opts)
+    local ok, host, store = pcall(createModule, opts)
     if ok then
         return host, store, nil
     end
@@ -135,3 +122,8 @@ function public.tryCreateModule(opts)
     logging.violate("host.create_failed", "createModule failed; skipping module: %s", err)
     return nil, nil, err
 end
+modulePublic.tryCreateModule = tryCreateModule
+
+return {
+    public = modulePublic,
+}

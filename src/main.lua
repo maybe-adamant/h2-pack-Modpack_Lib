@@ -1,5 +1,5 @@
 -- =============================================================================
--- ADAMANT-LIB: Shared utilities for adamant standalone mods
+-- ADAMANT-LIB: Shared utilities for adamant mods
 -- =============================================================================
 -- Access via: local lib = rom.mods['adamant-ModpackLib']
 
@@ -13,7 +13,7 @@ _PLUGIN = _PLUGIN
 local modutil = mods['SGG_Modding-ModUtil']
 local chalk = mods['SGG_Modding-Chalk']
 local libConfig = chalk.auto('config.lua')
-public.config = libConfig
+public.config = nil
 
 local externals = {
     rom = rom,
@@ -23,19 +23,10 @@ local externals = {
 }
 
 ---@class AdamantModpackLib
----@field config table
----@field resetStorageToDefaults fun(storage: StorageSchema, session: Session, opts: table|nil)
 ---@field createModule fun(opts: ModuleCreateOpts): AuthorHost, ManagedStore
 ---@field tryCreateModule fun(opts: ModuleCreateOpts): AuthorHost|nil, ManagedStore|nil, string|nil
----@field standaloneHost fun(pluginGuid: string): StandaloneRuntime
----@field standaloneUiBridge fun(pluginGuid: string): StandaloneRuntime
----@field getLiveModuleHost fun(pluginGuid: string|nil): ModuleHost|nil
----@field coordinator table
----@field mutation table
----@field gameCache table
----@field hashing table
+---@field createFrameworkRuntime fun(frameworkPluginGuid: string): AdamantModpackLib.FrameworkRuntime
 ---@field imguiHelpers table
----@field overlays table
 ---@field widgets table
 ---@field nav table
 
@@ -44,7 +35,7 @@ local core = import('core/init.lua', nil, {
     externals = externals,
 })
 
--- Standalone framework debug toggle - hidden when Core/Framework registers coordinators.
+-- Fallback framework debug toggle - hidden when Core/Framework registers coordinators.
 rom.gui.add_to_menu_bar(function()
     if core.coordinator.hasRegistrations() then return end
     if rom.ImGui.BeginMenu("adamant-lib") then

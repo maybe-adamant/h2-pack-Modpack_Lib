@@ -1,15 +1,17 @@
 local deps = ...
 
 local logging = deps.logging
-local moduleHost = deps.moduleHost
+local hostState = deps.hostState
 local coordinator = deps.coordinator
 local overlays = deps.overlays
+local createSystem = deps.createSystem
 local runtime = deps.runtime
 local rom = deps.rom
 local modutil = deps.modutil
 local SetupRunData = deps.gameDeps.runData.SetupRunData
 
----@class StandaloneRuntime
+---@class FallbackUiRuntime
+---@field host table|nil
 ---@field renderWindow fun()
 ---@field addMenuBar fun()
 ---@field handleHostGuiClosed fun()
@@ -17,39 +19,56 @@ local SetupRunData = deps.gameDeps.runData.SetupRunData
 local DEFAULT_WINDOW_WIDTH = 960
 local DEFAULT_WINDOW_HEIGHT = 720
 
-runtime.standalone = runtime.standalone or {}
--- Hot-reload-stable standalone runtime. Bridges and GUI callbacks late-read
+runtime.fallbackUi = runtime.fallbackUi or {}
+-- Hot-reload-stable fallback UI runtime. Bridges and GUI callbacks late-read
 -- this table so replacement module hosts can swap behavior without new handles.
-runtime.standalone.runtimes = runtime.standalone.runtimes or {}
-runtime.standalone.fallbackHud = runtime.standalone.fallbackHud or {}
+runtime.fallbackUi.bridges = runtime.fallbackUi.bridges or {}
+runtime.fallbackUi.guiAttached = runtime.fallbackUi.guiAttached or {}
+runtime.fallbackUi.runtimes = runtime.fallbackUi.runtimes or {}
+runtime.fallbackUi.fallbackHud = runtime.fallbackUi.fallbackHud or {}
 
-local standaloneState = runtime.standalone
-local runtimes = standaloneState.runtimes
-local standalone = {}
+local fallbackUiState = runtime.fallbackUi
+local bridges = fallbackUiState.bridges
+local guiAttached = fallbackUiState.guiAttached
+local runtimes = fallbackUiState.runtimes
+local fallbackUi = {}
 
-local fallbackHud = import('core/standalone_host/private_fallback_hud.lua', nil, {
-    moduleHost = moduleHost,
+local fallbackHud = import('core/fallback/fallback_hud.lua', nil, {
     coordinator = coordinator,
     overlays = overlays,
+    createSystem = createSystem,
     runtimes = runtimes,
-    state = standaloneState.fallbackHud,
+    state = fallbackUiState.fallbackHud,
 })
 
-local function validatePluginGuid(apiName, pluginGuid)
-    if type(pluginGuid) ~= "string" or pluginGuid == "" then
-        logging.violate("host.invalid_standalone_binding", "%s: pluginGuid is required", apiName)
+local function requireHostState(host, apiName)
+    local state = hostState.get(host)
+    if not state then
+        logging.violate("fallback_ui.invalid_args", "%s: expected managed module host", apiName)
     end
+    return state
 end
 
-local function getStandaloneRuntime(pluginGuid)
-    local activeRuntime = runtimes[pluginGuid]
+local function requireAttachmentOpen(host)
+    local state = requireHostState(host, "host.fallbackUi.attachGuiOnce")
+    if state.activating == true or state.activated == true then
+        logging.violate(
+            "fallback_ui.invalid_args",
+            "host.fallbackUi.attachGuiOnce cannot be called after activation begins"
+        )
+    end
+    return state
+end
+
+local function getFallbackUiRuntime(ownerId)
+    local activeRuntime = runtimes[ownerId]
     if type(activeRuntime) ~= "table" then
         return nil
     end
     return activeRuntime
 end
 
-local function disposeStandaloneRuntime(pluginGuid, activeRuntime)
+local function disposeFallbackUiRuntime(ownerId, activeRuntime)
     if type(activeRuntime) ~= "table" then
         return true, nil
     end
@@ -59,8 +78,8 @@ local function disposeStandaloneRuntime(pluginGuid, activeRuntime)
         closeOk, closeErr = pcall(activeRuntime.handleHostGuiClosed)
     end
 
-    if runtimes[pluginGuid] == activeRuntime then
-        runtimes[pluginGuid] = nil
+    if runtimes[ownerId] == activeRuntime then
+        runtimes[ownerId] = nil
         fallbackHud.refreshMarker()
     end
 
@@ -70,42 +89,29 @@ local function disposeStandaloneRuntime(pluginGuid, activeRuntime)
     return true, nil
 end
 
-local function warnStandaloneRuntimeDispose(pluginGuid, err)
+local function warnFallbackUiRuntimeDispose(ownerId, err)
     logging.violate(
         "host.retire_failed",
-        "standalone runtime '%s' retirement failed: %s",
-        tostring(pluginGuid),
+        "fallback UI runtime '%s' retirement failed: %s",
+        tostring(ownerId),
         tostring(err)
     )
 end
 
-local function attachRuntimeReceipt(pluginGuid, host, activeRuntime)
-    if not moduleHost.getState(host) then
-        return
+local function getOrCreateBridge(ownerId)
+    local existing = bridges[ownerId]
+    if type(existing) == "table" then
+        return existing
     end
-
-    moduleHost.addEffectReceipt(host, "standalone", {
-        dispose = function()
-            return disposeStandaloneRuntime(pluginGuid, activeRuntime)
-        end,
-    })
-end
-
---- Creates stable callbacks that late-read the current standalone runtime.
----@param pluginGuid string Plugin guid used when creating the module host.
----@return StandaloneRuntime bridge Standalone bridge with `renderWindow` and `addMenuBar` callbacks.
-function standalone.standaloneUiBridge(pluginGuid)
-    validatePluginGuid("standaloneUiBridge", pluginGuid)
-
     local function callRuntime(method)
-        local activeRuntime = getStandaloneRuntime(pluginGuid)
+        local activeRuntime = getFallbackUiRuntime(ownerId)
         local callback = activeRuntime and activeRuntime[method] or nil
         if type(callback) == "function" then
             return callback()
         end
     end
 
-    return {
+    local bridge = {
         renderWindow = function()
             return callRuntime("renderWindow")
         end,
@@ -116,30 +122,32 @@ function standalone.standaloneUiBridge(pluginGuid)
             return callRuntime("handleHostGuiClosed")
         end,
     }
+    bridges[ownerId] = bridge
+    return bridge
 end
 
-local function isCoordinated(identity)
-    return identity.modpack and coordinator.isRegistered(identity.modpack) or false
+function fallbackUi.attachGuiOnce(host, register)
+    if type(register) ~= "function" then
+        logging.violate("fallback_ui.invalid_args", "host.fallbackUi.attachGuiOnce: register must be a function")
+    end
+    local state = requireAttachmentOpen(host)
+    local ownerId = host.getHostId()
+    state.fallbackUiRequested = true
+    local bridge = getOrCreateBridge(ownerId)
+    if guiAttached[ownerId] == true then
+        return false
+    end
+
+    register(bridge)
+    guiAttached[ownerId] = true
+    return true
 end
 
---- Initializes standalone module hosting and returns window/menu-bar renderers.
----@param pluginGuid string Plugin guid used when creating the module host.
----@return StandaloneRuntime runtime Standalone runtime with `renderWindow` and `addMenuBar` callbacks.
-function standalone.standaloneHost(pluginGuid)
-    validatePluginGuid("standaloneHost", pluginGuid)
-    local host = moduleHost.getLiveHost(pluginGuid)
-    if type(host) ~= "table" then
-        logging.violate(
-            "host.invalid_standalone_binding",
-            "standaloneHost: no live module host is registered for current module '%s'",
-            tostring(pluginGuid)
-        )
-    end
+local function isCoordinated(packId)
+    return packId and coordinator.isRegistered(packId) or false
+end
 
-    local function getIdentity()
-        return host.getIdentity() or {}
-    end
-
+local function createRuntime(host)
     local function getMeta()
         return host.getMeta() or {}
     end
@@ -207,9 +215,10 @@ function standalone.standaloneHost(pluginGuid)
     end
 
     local function renderWindow()
-        local identity = getIdentity()
+        local moduleId = host.getModuleId()
+        local packId = host.getPackId()
         local meta = getMeta()
-        if isCoordinated(identity) then
+        if isCoordinated(packId) then
             return
         end
         if not showWindow then
@@ -219,7 +228,7 @@ function standalone.standaloneHost(pluginGuid)
         suppressOverlays()
 
         local imgui = rom.ImGui
-        local title = tostring(meta.name or identity.id or "Module") .. "###" .. tostring(identity.id)
+        local title = tostring(meta.name or moduleId or "Module") .. "###" .. tostring(moduleId)
         seedWindowSize(imgui)
         local open, shouldDraw = imgui.Begin(title, showWindow)
         if shouldDraw then
@@ -231,7 +240,7 @@ function standalone.standaloneHost(pluginGuid)
                     markRunDataDirty()
                 else
                     logging.violate("host.enable_transition_failed", "%s %s failed: %s",
-                        tostring(meta.name or identity.id or "module"),
+                        tostring(meta.name or moduleId or "module"),
                         enabledValue and "enable" or "disable",
                         tostring(err))
                 end
@@ -256,7 +265,7 @@ function standalone.standaloneHost(pluginGuid)
                 logging.violate(
                     "host.session_commit_failed",
                     "%s session commit failed; restored previous config where possible: %s",
-                    tostring(meta.name or identity.id or "module"),
+                    tostring(meta.name or moduleId or "module"),
                     tostring(err)
                 )
             end
@@ -268,9 +277,9 @@ function standalone.standaloneHost(pluginGuid)
     end
 
     local function addMenuBar()
-        local identity = getIdentity()
+        local packId = host.getPackId()
         local meta = getMeta()
-        if isCoordinated(identity) then return end
+        if isCoordinated(packId) then return end
         if rom.ImGui.BeginMenu(meta.name) then
             if rom.ImGui.MenuItem(meta.name) then
                 setWindowOpen(not showWindow)
@@ -280,26 +289,58 @@ function standalone.standaloneHost(pluginGuid)
     end
 
     local activeRuntime = {
+        host = host,
         renderWindow = renderWindow,
         addMenuBar = addMenuBar,
         handleHostGuiClosed = handleHostGuiClosed,
     }
-
-    local previousRuntime = getStandaloneRuntime(pluginGuid)
-    if previousRuntime and previousRuntime ~= activeRuntime then
-        local disposeOk, disposeErr = disposeStandaloneRuntime(pluginGuid, previousRuntime)
-        if not disposeOk then
-            warnStandaloneRuntimeDispose(pluginGuid, disposeErr)
-        end
-    end
-
-    runtimes[pluginGuid] = activeRuntime
-    attachRuntimeReceipt(pluginGuid, host, activeRuntime)
-    fallbackHud.refreshMarker()
     return activeRuntime
 end
 
-function standalone.handleHostGuiClosed()
+function fallbackUi.installForHost(host)
+    local ownerId = host.getHostId()
+    local activeRuntime = createRuntime(host)
+    local previousRuntime = nil
+    local installed = false
+
+    return {
+        commit = function()
+            previousRuntime = getFallbackUiRuntime(ownerId)
+            if previousRuntime and previousRuntime ~= activeRuntime then
+                local disposeOk, disposeErr = disposeFallbackUiRuntime(ownerId, previousRuntime)
+                if not disposeOk then
+                    warnFallbackUiRuntimeDispose(ownerId, disposeErr)
+                end
+            end
+            runtimes[ownerId] = activeRuntime
+            installed = true
+            fallbackHud.refreshMarker()
+            return true
+        end,
+        dispose = function()
+            if installed ~= true then
+                return true
+            end
+            local ok, err = disposeFallbackUiRuntime(ownerId, activeRuntime)
+            if ok and previousRuntime and previousRuntime ~= activeRuntime
+                and getFallbackUiRuntime(ownerId) == nil then
+                runtimes[ownerId] = previousRuntime
+                fallbackHud.refreshMarker()
+            end
+            return ok, err
+        end,
+    }
+end
+
+function fallbackUi.create(host)
+    return {
+        attachGuiOnce = function(register)
+            return fallbackUi.attachGuiOnce(host, register)
+        end
+    }
+end
+
+function fallbackUi.handleHostGuiClosed()
     for _, activeRuntime in pairs(runtimes) do
         if type(activeRuntime.handleHostGuiClosed) == "function" then
             activeRuntime.handleHostGuiClosed()
@@ -307,12 +348,12 @@ function standalone.handleHostGuiClosed()
     end
 end
 
-function standalone.createFallbackMarker()
+function fallbackUi.createFallbackMarker()
     return fallbackHud.createMarker()
 end
 
 local function installGuiCloseWatcher()
-    if standaloneState.guiCloseWatcherRegistered then
+    if fallbackUiState.guiCloseWatcherRegistered then
         return
     end
     if not (rom and rom.gui and type(rom.gui.add_always_draw_imgui) == "function"
@@ -320,26 +361,30 @@ local function installGuiCloseWatcher()
         return
     end
 
-    standaloneState.guiCloseWatcherRegistered = true
-    standaloneState.wasGuiOpen = rom.gui.is_open() == true
+    fallbackUiState.guiCloseWatcherRegistered = true
+    fallbackUiState.wasGuiOpen = rom.gui.is_open() == true
     rom.gui.add_always_draw_imgui(function()
         local isGuiOpen = rom.gui.is_open() == true
-        if standaloneState.wasGuiOpen and not isGuiOpen
-            and type(standaloneState.handleHostGuiClosed) == "function" then
-            standaloneState.handleHostGuiClosed()
+        if fallbackUiState.wasGuiOpen and not isGuiOpen
+            and type(fallbackUiState.handleHostGuiClosed) == "function" then
+            fallbackUiState.handleHostGuiClosed()
         end
-        standaloneState.wasGuiOpen = isGuiOpen
+        fallbackUiState.wasGuiOpen = isGuiOpen
     end)
 end
 
-standaloneState.handleHostGuiClosed = standalone.handleHostGuiClosed
-public.standaloneUiBridge = standalone.standaloneUiBridge
-public.standaloneHost = standalone.standaloneHost
+fallbackUiState.handleHostGuiClosed = fallbackUi.handleHostGuiClosed
 
 installGuiCloseWatcher()
 
 modutil.once_loaded.game(function()
-    standalone.createFallbackMarker()
+    fallbackUi.createFallbackMarker()
 end)
 
-return standalone
+return {
+    service = fallbackUi,
+    author = {
+        create = fallbackUi.create,
+    },
+    public = {},
+}

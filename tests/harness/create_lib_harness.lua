@@ -156,7 +156,6 @@ local function createLibHarness(opts)
 
     local config = opts.config or { DebugMode = false }
     local public = opts.public or {}
-    public.config = config
 
     local runtime = opts.runtime or {}
     local plugin = opts.plugin or { guid = "test-module" }
@@ -217,20 +216,41 @@ local function createLibHarness(opts)
         logging = imports["core/logging/logging.lua"],
         values = imports["core/helpers/values.lua"],
         gameDeps = externals.gameDeps or imports["core/game_deps/game_deps.lua"],
+        gameCacheBundle = imports["core/game_cache/game_cache.lua"],
+        gameCache = imports["core/game_cache/game_cache.lua"].service,
+        hashingBundle = imports["core/hashing/hashing.lua"],
+        hashing = imports["core/hashing/hashing.lua"].framework,
         storage = imports["core/storage/storage.lua"],
-        hostState = imports["core/module_host_state.lua"],
+        moduleRuntimeRegistry = imports["core/lib_bootstrap/runtime_registry.lua"],
+        runtimeRegistry = imports["core/lib_bootstrap/runtime_registry.lua"],
+        hostState = imports["core/lib_bootstrap/module_host_state.lua"],
+        systemScope = imports["core/lib_bootstrap/system_scope.lua"],
         moduleState = imports["core/module_state/module_state.lua"],
         coordinator = imports["core/coordinator/coordinator.lua"],
-        integrations = imports["core/integrations/integrations.lua"],
-        hooks = imports["core/hooks/hooks.lua"],
-        overlays = imports["core/overlays/overlays.lua"],
-        mutation = imports["core/mutations/mutations.lua"],
+        integrationsBundle = imports["core/integrations/integrations.lua"],
+        integrations = imports["core/integrations/integrations.lua"].service,
+        hooksBundle = imports["core/hooks/hooks.lua"],
+        hooks = imports["core/hooks/hooks.lua"].service,
+        overlaysBundle = imports["core/overlays/overlays.lua"],
+        overlays = imports["core/overlays/overlays.lua"].service,
+        mutationBundle = imports["core/mutations/mutations.lua"],
+        mutation = imports["core/mutations/mutations.lua"].service,
+        mutationPlan = imports["core/mutations/mutations.lua"].plan,
         moduleDefinition = imports["core/module_bootstrap/definition.lua"],
-        hostLifecycle = imports["core/module_bootstrap/private_host_lifecycle.lua"],
+        authorHost = imports["core/module_bootstrap/author_host.lua"],
+        hostLifecycle = imports["core/module_bootstrap/host_lifecycle.lua"],
         moduleHost = imports["core/module_bootstrap/host.lua"],
-        standalone = imports["core/standalone_host/standalone_host.lua"],
+        moduleBundle = imports["core/module_bootstrap/module.lua"],
+        fallbackUiBundle = imports["core/fallback/fallback_ui.lua"],
+        fallbackUi = imports["core/fallback/fallback_ui.lua"].service,
     }
     harness.externals.gameDeps = harness.gameDeps
+    function harness.createSystem(ownerId)
+        return harness.systemScope.create(ownerId, {
+            hooks = harness.hooksBundle.system,
+            overlays = harness.overlaysBundle.system,
+        })
+    end
 
     return harness
 end

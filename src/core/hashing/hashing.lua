@@ -2,17 +2,17 @@ local deps = ...
 
 local storageService = deps.storage
 local StorageTypes = storageService.types
-local hashingPublic = {}
+local hashing = {}
 
 ---@param storage StorageSchema
 ---@return StorageNode[]
-function hashingPublic.getRoots(storage)
+function hashing.getRoots(storage)
     return storageService.getRoots(storage)
 end
 
 ---@param storage StorageSchema
 ---@return table<string, StorageNode|PackedBitNode>
-function hashingPublic.getAliases(storage)
+function hashing.getAliases(storage)
     return storageService.getAliases(storage)
 end
 
@@ -20,14 +20,14 @@ end
 ---@param a any
 ---@param b any
 ---@return boolean
-function hashingPublic.valuesEqual(node, a, b)
+function hashing.valuesEqual(node, a, b)
     return storageService.valuesEqual(node, a, b)
 end
 
 --- Returns the packed bit width for a node type, or nil when the node is not packable.
 ---@param node StorageNode|PackedBitNode
 ---@return number|nil
-function hashingPublic.getPackWidth(node)
+function hashing.getPackWidth(node)
     if type(node) ~= "table" then return nil end
     local storageType = StorageTypes[node.type]
     if storageType and storageType.packWidth then
@@ -39,7 +39,7 @@ end
 ---@param node StorageNode|PackedBitNode
 ---@param value any
 ---@return string|nil
-function hashingPublic.toHash(node, value)
+function hashing.toHash(node, value)
     local storageType = node and node.type and StorageTypes[node.type] or nil
     if not storageType then
         return nil
@@ -50,7 +50,7 @@ end
 ---@param node StorageNode|PackedBitNode
 ---@param str string
 ---@return any
-function hashingPublic.fromHash(node, str)
+function hashing.fromHash(node, str)
     local storageType = node and node.type and StorageTypes[node.type] or nil
     if not storageType then
         return nil
@@ -61,7 +61,7 @@ end
 ---@param node StorageNode|PackedBitNode
 ---@param str string|nil
 ---@return boolean
-function hashingPublic.isHashTokenValid(node, str)
+function hashing.isHashTokenValid(node, str)
     return storageService.isHashTokenValid(node, str)
 end
 
@@ -69,7 +69,7 @@ end
 ---@param offset number|nil
 ---@param width number|nil
 ---@return number
-function hashingPublic.readPackedBits(packed, offset, width)
+function hashing.readPackedBits(packed, offset, width)
     return storageService.packed.readPackedBits(packed, offset, width)
 end
 
@@ -78,8 +78,10 @@ end
 ---@param width number|nil
 ---@param value number|nil
 ---@return number
-function hashingPublic.writePackedBits(packed, offset, width, value)
+function hashing.writePackedBits(packed, offset, width, value)
     return storageService.packed.writePackedBits(packed, offset, width, value)
 end
 
-public.hashing = hashingPublic
+return {
+    framework = hashing,
+}

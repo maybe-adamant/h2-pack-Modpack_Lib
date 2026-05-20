@@ -1,8 +1,8 @@
 local deps = ...
 
-local moduleHost = deps.moduleHost
 local coordinator = deps.coordinator
 local overlays = deps.overlays
+local createSystem = deps.createSystem
 local runtimes = deps.runtimes
 local state = deps.state
 
@@ -11,19 +11,19 @@ local MARKER_TEXT = "Modded"
 
 local fallbackHud = {}
 
-local function isRuntimeUncoordinated(pluginGuid)
-    local host = moduleHost.getLiveHost(pluginGuid)
-    if type(host) ~= "table" or type(host.getIdentity) ~= "function" then
+local function isRuntimeUncoordinated(activeRuntime)
+    local host = activeRuntime and activeRuntime.host
+    if type(host) ~= "table" or type(host.getPackId) ~= "function" then
         return false
     end
 
-    local identity = host.getIdentity() or {}
-    return not (identity.modpack and coordinator.isRegistered(identity.modpack))
+    local packId = host.getPackId()
+    return not (packId and coordinator.isRegistered(packId))
 end
 
 local function shouldShowFallbackMarker()
-    for pluginGuid in pairs(runtimes) do
-        if isRuntimeUncoordinated(pluginGuid) then
+    for _, activeRuntime in pairs(runtimes) do
+        if isRuntimeUncoordinated(activeRuntime) then
             return true
         end
     end
@@ -39,15 +39,16 @@ function fallbackHud.createMarker()
         return
     end
     state.initialized = true
-    overlays.defineSystem(FALLBACK_OWNER, function(registry)
-        registry.createLine("marker", {
-            componentName = "ModpackMark_StandaloneLib",
+    local system = createSystem(FALLBACK_OWNER)
+    system.overlays.define(function(overlay)
+        overlay.createLine("marker", {
+            componentName = "ModpackMark_FallbackUi",
             region = "middleRightStack",
             order = 0,
             visible = shouldShowFallbackMarker,
             minWidth = 80,
         })
-        registry.onCommit(function(ctx)
+        overlay.onCommit(function(ctx)
             ctx.setLine("marker", MARKER_TEXT)
             ctx.refresh("marker")
         end)

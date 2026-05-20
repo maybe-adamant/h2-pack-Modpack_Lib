@@ -13,7 +13,6 @@ function TestModuleHost_CreateModule:tearDown()
 end
 
 function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
-    local callbackHost = nil
     local drawHost = nil
     local drawImgui = nil
     local drawWidgets = nil
@@ -40,9 +39,6 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
                 },
             },
         },
-        registerIntegrations = function(authorHost)
-            callbackHost = authorHost
-        end,
         drawTab = function(ctx)
             drawImgui = ctx.imgui
             drawHost = ctx.host
@@ -61,7 +57,6 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     local liveHost = self.h:liveHost("test-create-module")
     liveHost.drawTab({})
 
-    lu.assertEquals(host, callbackHost)
     lu.assertEquals(host, drawHost)
     lu.assertNotNil(drawImgui)
     lu.assertEquals(type(drawWidgets.checkbox), "function")
@@ -70,6 +65,12 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(store.read("Flag"), false)
     liveHost.flush()
     lu.assertEquals(store.read("Flag"), true)
+    lu.assertEquals(self.h.moduleRuntimeRegistry.getPluginInfo("test-create-module"), {
+        pluginGuid = "test-create-module",
+        packId = "create-module-pack",
+        moduleId = "CreateModule",
+        name = "Create Module",
+    })
     lu.assertNotNil(authorSchemaNode)
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
@@ -80,34 +81,6 @@ function TestModuleHost_CreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(authorRowField:read(), 2)
     local liveState = self.h.moduleHost.getState(liveHost)
     lu.assertEquals(type(liveState.definition._structuralFingerprint), "string")
-end
-
-function TestModuleHost_CreateModule:testCreateModulePassesRuntimeHandlesToHookRefresh()
-    local hookSawStore = false
-    local hookSawHost = false
-
-    local host, store = self.h.public.createModule({
-        pluginGuid = "test-create-module-publish-store",
-        config = {},
-        modpack = "create-module-pack",
-        id = "PublishStore",
-        name = "Publish Store",
-        storage = {
-            { type = "bool", alias = "Flag", default = true },
-        },
-        registerHooks = function(authorHost, activeStore)
-            hookSawStore = activeStore and activeStore.read("Flag") == true
-            hookSawHost = authorHost ~= nil
-        end,
-        drawTab = function() end,
-    })
-
-    lu.assertFalse(hookSawStore)
-    host.tryActivate()
-    lu.assertTrue(hookSawStore)
-    lu.assertTrue(hookSawHost)
-    lu.assertEquals(type(host.isEnabled), "function")
-    lu.assertEquals(store.read("Flag"), true)
 end
 
 function TestModuleHost_CreateModule:testCreateModuleReturnsOnlyAuthorHostSurface()
@@ -121,16 +94,86 @@ function TestModuleHost_CreateModule:testCreateModuleReturnsOnlyAuthorHostSurfac
     })
 
     lu.assertEquals(type(host.isEnabled), "function")
-    lu.assertEquals(type(host.getIdentity), "function")
+    lu.assertEquals(type(host.getHostId), "function")
+    lu.assertEquals(type(host.getModuleId), "function")
+    lu.assertEquals(type(host.getPackId), "function")
+    lu.assertNil(host.getIdentity)
     lu.assertEquals(type(host.getMeta), "function")
     lu.assertEquals(type(host.log), "function")
     lu.assertEquals(type(host.logIf), "function")
+    lu.assertEquals(type(host.gameCache), "table")
+    lu.assertEquals(type(host.gameCache.currentRun.get), "function")
+    lu.assertEquals(type(host.hooks), "table")
+    lu.assertEquals(type(host.hooks.wrap), "function")
+    lu.assertEquals(type(host.hooks.override), "function")
+    lu.assertEquals(type(host.hooks.contextWrap), "function")
+    lu.assertEquals(type(host.integrations), "table")
+    lu.assertEquals(type(host.integrations.register), "function")
+    lu.assertEquals(type(host.integrations.invoke), "function")
+    lu.assertEquals(type(host.mutation), "table")
+    lu.assertEquals(type(host.mutation.patch), "function")
+    lu.assertEquals(type(host.overlays), "table")
+    lu.assertEquals(type(host.overlays.order), "table")
+    lu.assertEquals(type(host.overlays.createLine), "function")
+    lu.assertEquals(type(host.overlays.createTable), "function")
+    lu.assertEquals(type(host.overlays.onCommit), "function")
+    lu.assertEquals(type(host.overlays.onInterval), "function")
+    lu.assertEquals(type(host.overlays.afterHook), "function")
+    local gameCacheSurfaceCount = 0
+    for key in pairs(host.gameCache) do
+        gameCacheSurfaceCount = gameCacheSurfaceCount + 1
+        lu.assertEquals(key, "currentRun")
+    end
+    lu.assertEquals(gameCacheSurfaceCount, 1)
     lu.assertEquals(type(host.tryActivate), "function")
     lu.assertNil(host.read)
     lu.assertNil(host.writeAndFlush)
     lu.assertNil(host.commitIfDirty)
     lu.assertNil(host.applyMutation)
     lu.assertNil(host.setEnabled)
+end
+
+function TestModuleHost_CreateModule:testHostMutationPatchDeclaresActivationMutation()
+    local target = { Value = "base" }
+    local patchHost = nil
+    local patchStore = nil
+    local host, store = self.h.public.createModule({
+        pluginGuid = "test-create-module-host-mutation-patch",
+        config = {
+            Enabled = true,
+        },
+        id = "HostMutationPatch",
+        name = "Host Mutation Patch",
+        drawTab = function() end,
+    })
+
+    host.mutation.patch(function(plan, activeHost, activeStore)
+        patchHost = activeHost
+        patchStore = activeStore
+        plan:set(target, "Value", "patched")
+    end)
+
+    local ok, err = host.tryActivate()
+
+    lu.assertTrue(ok, tostring(err))
+    lu.assertEquals(target.Value, "patched")
+    lu.assertEquals(patchHost, host)
+    lu.assertEquals(patchStore, store)
+end
+
+function TestModuleHost_CreateModule:testHostMutationPatchRejectsAfterActivation()
+    local host = self.h.public.createModule({
+        pluginGuid = "test-create-module-host-mutation-after-activation",
+        config = {},
+        id = "HostMutationAfterActivation",
+        name = "Host Mutation After Activation",
+        drawTab = function() end,
+    })
+    host.tryActivate()
+
+    lu.assertErrorMsgContains("after host activation", function()
+        host.mutation.patch(function() end)
+    end)
 end
 
 function TestModuleHost_CreateModule:testTryCreateModuleReturnsErrorAndLogsWarning()
@@ -205,6 +248,58 @@ function TestModuleHost_CreateModule:testCreateModuleTreatsManualMutationAsUnkno
                 apply = function() end,
                 revert = function() end,
             },
+            drawTab = function() end,
+        })
+    end)
+end
+
+function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterPatchMutationAsUnknownOption()
+    lu.assertErrorMsgContains("unknown option 'registerPatchMutation'", function()
+        self.h.public.createModule({
+            pluginGuid = "test-create-module-patch-mutation-unknown",
+            config = {},
+            id = "PatchMutationUnknown",
+            name = "Patch Mutation Unknown",
+            registerPatchMutation = function() end,
+            drawTab = function() end,
+        })
+    end)
+end
+
+function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterIntegrationsAsUnknownOption()
+    lu.assertErrorMsgContains("unknown option 'registerIntegrations'", function()
+        self.h.public.createModule({
+            pluginGuid = "test-create-module-register-integrations-unknown",
+            config = {},
+            id = "RegisterIntegrationsUnknown",
+            name = "Register Integrations Unknown",
+            registerIntegrations = function() end,
+            drawTab = function() end,
+        })
+    end)
+end
+
+function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterHooksAsUnknownOption()
+    lu.assertErrorMsgContains("unknown option 'registerHooks'", function()
+        self.h.public.createModule({
+            pluginGuid = "test-create-module-register-hooks-unknown",
+            config = {},
+            id = "RegisterHooksUnknown",
+            name = "Register Hooks Unknown",
+            registerHooks = function() end,
+            drawTab = function() end,
+        })
+    end)
+end
+
+function TestModuleHost_CreateModule:testCreateModuleTreatsRegisterOverlaysAsUnknownOption()
+    lu.assertErrorMsgContains("unknown option 'registerOverlays'", function()
+        self.h.public.createModule({
+            pluginGuid = "test-create-module-register-overlays-unknown",
+            config = {},
+            id = "RegisterOverlaysUnknown",
+            name = "Register Overlays Unknown",
+            registerOverlays = function() end,
             drawTab = function() end,
         })
     end)

@@ -6,7 +6,7 @@ TestHashing = {}
 function TestHashing:setUp()
     self.harness = createLibHarness()
     self.storage = self.harness.storage
-    self.hashing = assert(self.harness.public.hashing, "hashing public surface missing")
+    self.hashing = assert(self.harness.hashing, "hashing framework surface missing")
 end
 
 function TestHashing:tearDown()

@@ -16,32 +16,33 @@ function TestModuleHost:tearDown()
     self.h:restoreWarnings()
 end
 
-local function createActivatedHost(h, pluginGuid, opts, activationOpts)
-    activationOpts = activationOpts or {}
+local function createActivatedHost(h, pluginGuid, opts)
     local host, authorHost = h.moduleHost.create({
         pluginGuid = pluginGuid,
         definition = opts.definition,
         store = opts.store,
         session = opts.session,
-        registerHooks = activationOpts.registerHooks or opts.registerHooks,
-        registerPatchMutation = opts.registerPatchMutation,
         onSettingsCommitted = opts.onSettingsCommitted,
-        registerIntegrations = activationOpts.registerIntegrations or opts.registerIntegrations,
-        registerOverlays = activationOpts.registerOverlays or opts.registerOverlays,
         drawTab = opts.drawTab,
         drawQuickContent = opts.drawQuickContent,
     })
+    if opts.patchMutation ~= nil then
+        authorHost.mutation.patch(opts.patchMutation)
+    end
+    if type(opts.configureHost) == "function" then
+        opts.configureHost(authorHost, opts.store)
+    end
     authorHost.tryActivate()
     return host, authorHost
 end
 
-function TestModuleHost:testStandaloneHostWarnsWhenSessionCommitFails()
+function TestModuleHost:testFallbackUiWarnsWhenSessionCommitFails()
     local drawCalls = 0
-    local pluginGuid = "test-standalone-commit"
+    local pluginGuid = "test-fallback-ui-commit"
     local definition = self.h.moduleHost.prepareDefinition({}, {
-        modpack = "standalone-pack",
-        id = "StandaloneTest",
-        name = "Standalone Test",
+        modpack = "fallback-pack",
+        id = "FallbackUiTest",
+        name = "Fallback UI Test",
         storage = {},
     })
     local store, session = self.h:createModuleState({
@@ -69,51 +70,60 @@ function TestModuleHost:testStandaloneHostWarnsWhenSessionCommitFails()
         definition = definition,
         store = store,
         session = session,
+        configureHost = function(authorHost)
+            authorHost.fallbackUi.attachGuiOnce(function() end)
+        end,
         drawTab = function()
             drawCalls = drawCalls + 1
         end,
     })
-    local moduleHost = self.h.public.getLiveModuleHost(pluginGuid)
+    local moduleHost = self.h.moduleHost.getLiveHost(pluginGuid)
     moduleHost.commitIfDirty = function()
         return false, "commit boom", false
     end
 
-    local runtime = self.h.public.standaloneHost(pluginGuid)
+    local runtime = self.h.runtime.fallbackUi.runtimes[pluginGuid]
     runtime.addMenuBar()
     runtime.renderWindow()
 
     lu.assertEquals(drawCalls, 1)
     lu.assertEquals(#self.h.warnings, 1)
-    lu.assertStrContains(self.h.warnings[1], "Standalone Test session commit failed")
+    lu.assertStrContains(self.h.warnings[1], "Fallback UI Test session commit failed")
     lu.assertStrContains(self.h.warnings[1], "commit boom")
-    lu.assertEquals(self.h.public.getLiveModuleHost(pluginGuid), moduleHost)
+    lu.assertEquals(self.h.moduleHost.getLiveHost(pluginGuid), moduleHost)
 end
 
-function TestModuleHost:testStandaloneHostCanResolveCurrentModuleHostFromLibRegistry()
-    local pluginGuid = "test-standalone-registry"
+function TestModuleHost:testFallbackUiInstallsDuringActivation()
+    local pluginGuid = "test-fallback-ui-activation"
     local definition = self.h.moduleHost.prepareDefinition({}, {
-        id = "StandaloneRegistryHost",
-        name = "Standalone Registry Host",
+        id = "FallbackUiRegistryHost",
+        name = "Fallback UI Registry Host",
         storage = {},
     })
     local store, session = self.h:createModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
+    local attached = nil
     local _, authorHost = createActivatedHost(self.h, pluginGuid, {
         definition = definition,
         store = store,
         session = session,
+        configureHost = function(activeAuthorHost)
+            attached = activeAuthorHost.fallbackUi.attachGuiOnce(function() end)
+        end,
         drawTab = function() end,
     })
-    local host = self.h.public.getLiveModuleHost(pluginGuid)
+    local host = self.h.moduleHost.getLiveHost(pluginGuid)
 
-    local runtime = self.h.public.standaloneHost(pluginGuid)
+    local runtime = self.h.runtime.fallbackUi.runtimes[pluginGuid]
 
+    lu.assertTrue(attached)
     lu.assertEquals(type(runtime.renderWindow), "function")
     lu.assertEquals(type(runtime.addMenuBar), "function")
     lu.assertEquals(type(authorHost.isEnabled), "function")
-    lu.assertEquals(self.h.public.getLiveModuleHost(pluginGuid), host)
+    lu.assertEquals(type(authorHost.fallbackUi.attachGuiOnce), "function")
+    lu.assertEquals(self.h.moduleHost.getLiveHost(pluginGuid), host)
 end
 
 function TestModuleHost:testFlushNotifiesSettingsObserver()
@@ -139,7 +149,7 @@ function TestModuleHost:testFlushNotifiesSettingsObserver()
         end,
         drawTab = function() end,
     })
-    local host = self.h.public.getLiveModuleHost("test-settings-observer-host")
+    local host = self.h.moduleHost.getLiveHost("test-settings-observer-host")
 
     host.stage("Value", true)
     local ok, err = host.flush()
@@ -167,7 +177,7 @@ function TestModuleHost:testPatchMutationReceivesAuthorHost()
         definition = definition,
         store = store,
         session = session,
-        registerPatchMutation = function(plan, activeHost, activeStore)
+        patchMutation = function(plan, activeHost, activeStore)
             patchHost = activeHost
             patchStore = activeStore
             plan:set(target, "Value", true)
@@ -224,7 +234,7 @@ function TestModuleHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelp
             capturedAuthorSession = ctx.session
         end,
     })
-    local host = self.h.public.getLiveModuleHost("test-reset-host")
+    local host = self.h.moduleHost.getLiveHost("test-reset-host")
 
     host.drawTab({})
 
@@ -269,24 +279,29 @@ function TestModuleHost:testCreateModuleHostPassesAuthorHostToCallbacks()
         drawQuickContent = function(ctx)
             quickHost = ctx.host
         end,
-    }, {
-        registerIntegrations = function(authorHost)
+        configureHost = function(authorHost)
             callbackHost = authorHost
         end,
     })
 
-    local host = self.h.public.getLiveModuleHost("test-author-host")
+    local host = self.h.moduleHost.getLiveHost("test-author-host")
     host.drawTab({})
     host.drawQuickContent({})
 
     lu.assertEquals(returnedHost, callbackHost)
     lu.assertEquals(callbackHost, drawHost)
     lu.assertEquals(callbackHost, quickHost)
-    lu.assertEquals(callbackHost.getIdentity().id, "AuthorHostModule")
+    lu.assertEquals(callbackHost.getHostId(), "test-author-host")
+    lu.assertEquals(callbackHost.getModuleId(), "AuthorHostModule")
+    lu.assertEquals(callbackHost.getPackId(), "author-pack")
+    lu.assertNil(callbackHost.getIdentity)
     lu.assertEquals(callbackHost.getMeta().name, "Author Host Module")
     lu.assertTrue(callbackHost.isEnabled())
     lu.assertEquals(type(callbackHost.log), "function")
     lu.assertEquals(type(callbackHost.logIf), "function")
+    lu.assertEquals(type(callbackHost.fallbackUi), "table")
+    lu.assertEquals(type(callbackHost.gameCache), "table")
+    lu.assertEquals(type(callbackHost.hooks), "table")
     lu.assertEquals(type(callbackHost.tryActivate), "function")
     lu.assertNil(callbackHost.read)
     lu.assertNil(callbackHost.setEnabled)
@@ -318,7 +333,10 @@ function TestModuleHost:testFullHostOwnsAuthorHostCapabilities()
     })
 
     lu.assertEquals(type(host.isEnabled), "function")
-    lu.assertEquals(type(host.getIdentity), "function")
+    lu.assertEquals(type(host.getHostId), "function")
+    lu.assertEquals(type(host.getModuleId), "function")
+    lu.assertEquals(type(host.getPackId), "function")
+    lu.assertNil(host.getIdentity)
     lu.assertEquals(type(host.getMeta), "function")
     lu.assertEquals(type(host.log), "function")
     lu.assertEquals(type(host.logIf), "function")
@@ -330,8 +348,8 @@ function TestModuleHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFra
     local packId = "reload-pack"
     local rebuildReason = nil
 
-    self.h.public.coordinator.register(packId, { ModEnabled = true })
-    self.h.public.coordinator.registerRebuild(packId, function(reason)
+    self.h.coordinator.register(packId, { ModEnabled = true })
+    self.h.coordinator.registerRebuild(packId, function(reason)
         rebuildReason = reason
         return true
     end)
@@ -357,7 +375,7 @@ function TestModuleHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFra
 
     local applyCalls = 0
 
-    local previousState = self.h.moduleHost.getState(self.h.public.getLiveModuleHost("reload-pack.ReloadHost"))
+    local previousState = self.h.moduleHost.getState(self.h.moduleHost.getLiveHost("reload-pack.ReloadHost"))
     local prepared = self.h.moduleHost.prepareDefinition({
         _definitionStructuralFingerprint = previousState.definition._structuralFingerprint,
     }, {
@@ -377,26 +395,30 @@ function TestModuleHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFra
         definition = prepared,
         store = reloadStore,
         session = reloadSession,
-        registerPatchMutation = function(plan)
+        patchMutation = function(plan)
             applyCalls = applyCalls + 1
             plan:set({}, "unused", true)
         end,
         drawTab = function() end,
     })
-    local reloadedHost = self.h.public.getLiveModuleHost("reload-pack.ReloadHost")
+    local reloadedHost = self.h.moduleHost.getLiveHost("reload-pack.ReloadHost")
 
-    self.h.public.coordinator.register(packId, nil)
-    self.h.public.coordinator.registerRebuild(packId, nil)
+    self.h.coordinator.register(packId, nil)
+    self.h.coordinator.registerRebuild(packId, nil)
     lu.assertEquals(applyCalls, 0)
     lu.assertNotNil(rebuildReason)
-    lu.assertEquals(self.h.public.getLiveModuleHost("reload-pack.ReloadHost"), reloadedHost)
+    lu.assertEquals(self.h.moduleHost.getLiveHost("reload-pack.ReloadHost"), reloadedHost)
 end
 
 function TestModuleHost:testActivationFailureRestoresLiveHostAndIntegrations()
     local pluginGuid = "test-activation-rollback"
     local integrationId = "test.activation.rollback"
     local providerId = "RollbackProvider"
-    local previousApi = { value = "previous" }
+    local previousApi = {
+        read = function()
+            return "previous"
+        end,
+    }
 
     local firstDefinition = self.h.moduleHost.prepareDefinition({}, {
         id = "ActivationRollback",
@@ -407,17 +429,22 @@ function TestModuleHost:testActivationFailureRestoresLiveHostAndIntegrations()
         Enabled = true,
         DebugMode = false,
     }, firstDefinition)
-    local firstHost = createActivatedHost(self.h, pluginGuid, {
+    local firstHost, firstAuthorHost = createActivatedHost(self.h, pluginGuid, {
         definition = firstDefinition,
         store = firstStore,
         session = firstSession,
+        configureHost = function(authorHost)
+            authorHost.integrations.register(integrationId, {
+                providerId = providerId,
+                api = previousApi,
+            })
+        end,
         drawTab = function() end,
     })
-    self.h.public.integrations.register(integrationId, providerId, previousApi)
 
     local secondDefinition = self.h.moduleHost.prepareDefinition({}, {
         id = "ActivationRollback",
-        name = "Activation Rollback",
+        name = "Activation Rollback Replacement",
         storage = {},
     })
     local secondStore, secondSession = self.h:createModuleState({
@@ -429,25 +456,36 @@ function TestModuleHost:testActivationFailureRestoresLiveHostAndIntegrations()
         definition = secondDefinition,
         store = secondStore,
         session = secondSession,
-        registerIntegrations = function()
-            self.h.public.integrations.register(integrationId, providerId, { value = "replacement" })
-            error("integration boom")
-        end,
         drawTab = function() end,
+    })
+    secondAuthorHost.mutation.patch(function()
+        error("integration boom")
+    end)
+    secondAuthorHost.integrations.register(integrationId, {
+        providerId = providerId,
+        api = {
+            read = function()
+                return "replacement"
+            end,
+        },
     })
 
     local ok, err = secondAuthorHost.tryActivate()
-    local api = self.h.public.integrations.get(integrationId)
+    local value = firstAuthorHost.integrations.invoke(integrationId, "read", nil)
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "integration boom")
-    lu.assertEquals(self.h.public.getLiveModuleHost(pluginGuid), firstHost)
-    lu.assertEquals(api, previousApi)
+    lu.assertEquals(self.h.moduleHost.getLiveHost(pluginGuid), firstHost)
+    lu.assertEquals(self.h.moduleRuntimeRegistry.getPluginInfo(pluginGuid), {
+        pluginGuid = pluginGuid,
+        packId = nil,
+        moduleId = "ActivationRollback",
+        name = "Activation Rollback",
+    })
+    lu.assertEquals(value, "previous")
     lu.assertErrorMsgContains("host.not_activated", function()
         secondHost.flush()
     end)
-
-    self.h.public.integrations.unregisterProvider(providerId)
 end
 
 function TestModuleHost:testActivationFailureDropsNewStagedIntegrationProvider()
@@ -469,24 +507,30 @@ function TestModuleHost:testActivationFailureDropsNewStagedIntegrationProvider()
         definition = definition,
         store = store,
         session = session,
-        registerIntegrations = function()
-            self.h.public.integrations.register(integrationId, providerId, { value = "candidate" })
-            error("new integration boom")
-        end,
         drawTab = function() end,
+    })
+    authorHost.mutation.patch(function()
+        error("new integration boom")
+    end)
+    authorHost.integrations.register(integrationId, {
+        providerId = providerId,
+        api = {
+            read = function()
+                return "candidate"
+            end,
+        },
     })
 
     local ok, err = authorHost.tryActivate()
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "new integration boom")
-    lu.assertNil(self.h.public.getLiveModuleHost(pluginGuid))
-    lu.assertNil(self.h.public.integrations.get(integrationId))
+    lu.assertNil(self.h.moduleHost.getLiveHost(pluginGuid))
+    lu.assertNil(self.h.moduleRuntimeRegistry.getPluginInfo(pluginGuid))
+    lu.assertNil(authorHost.integrations.invoke(integrationId, "read", nil))
     lu.assertErrorMsgContains("host.not_activated", function()
         host.flush()
     end)
-
-    self.h.public.integrations.unregisterProvider(providerId)
 end
 
 function TestModuleHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
@@ -494,7 +538,7 @@ function TestModuleHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
     local pluginGuid = "test-activation-runtime-rollback"
     local target = { Value = "base" }
 
-    self.h.public.coordinator.register(packId, { ModEnabled = true })
+    self.h.coordinator.register(packId, { ModEnabled = true })
 
     local firstDefinition = self.h.moduleHost.prepareDefinition({}, {
         modpack = packId,
@@ -510,7 +554,7 @@ function TestModuleHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
         definition = firstDefinition,
         store = firstStore,
         session = firstSession,
-        registerPatchMutation = function(plan)
+        patchMutation = function(plan)
             plan:set(target, "Value", "first")
         end,
         drawTab = function() end,
@@ -531,14 +575,14 @@ function TestModuleHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
         definition = secondDefinition,
         store = secondStore,
         session = secondSession,
-        registerPatchMutation = function()
-            error("replacement boom")
-        end,
         drawTab = function() end,
     })
+    secondAuthorHost.mutation.patch(function()
+        error("replacement boom")
+    end)
 
     local ok, err = secondAuthorHost.tryActivate()
-    local liveHost = self.h.public.getLiveModuleHost(pluginGuid)
+    local liveHost = self.h.moduleHost.getLiveHost(pluginGuid)
     local targetValue = target.Value
 
     lu.assertFalse(ok)
@@ -567,11 +611,11 @@ function TestModuleHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBroken
         definition = definition,
         store = store,
         session = session,
-        registerIntegrations = function()
-            error("try activate boom")
-        end,
         drawTab = function() end,
     })
+    authorHost.mutation.patch(function()
+        error("try activate boom")
+    end)
 
     local ok, err = authorHost.tryActivate()
 
@@ -580,7 +624,7 @@ function TestModuleHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBroken
     lu.assertEquals(#self.h.warnings, 1)
     lu.assertStrContains(self.h.warnings[1], "host.activate_failed")
     lu.assertStrContains(self.h.warnings[1], "try activate boom")
-    lu.assertNil(self.h.public.getLiveModuleHost(pluginGuid))
+    lu.assertNil(self.h.moduleHost.getLiveHost(pluginGuid))
     lu.assertErrorMsgContains("host.not_activated", function()
         host.flush()
     end)
@@ -609,7 +653,7 @@ function TestModuleHost:testTryActivateModuleSucceedsThroughFullHost()
 
     lu.assertTrue(ok)
     lu.assertNil(err)
-    lu.assertEquals(self.h.public.getLiveModuleHost(pluginGuid), host)
+    lu.assertEquals(self.h.moduleHost.getLiveHost(pluginGuid), host)
 end
 
 function TestModuleHost:testActivationRefreshRemovesOmittedIntegrations()
@@ -626,18 +670,24 @@ function TestModuleHost:testActivationRefreshRemovesOmittedIntegrations()
         Enabled = true,
         DebugMode = false,
     }, firstDefinition)
-    createActivatedHost(self.h, pluginGuid, {
+    local _, firstAuthorHost = createActivatedHost(self.h, pluginGuid, {
         definition = firstDefinition,
         store = firstStore,
         session = firstSession,
-        drawTab = function() end,
-    }, {
-        registerIntegrations = function()
-            self.h.public.integrations.register(integrationId, providerId, { value = "first" })
+        configureHost = function(authorHost)
+            authorHost.integrations.register(integrationId, {
+                providerId = providerId,
+                api = {
+                    read = function()
+                        return "first"
+                    end,
+                },
+            })
         end,
+        drawTab = function() end,
     })
 
-    lu.assertNotNil(self.h.public.integrations.get(integrationId))
+    lu.assertEquals(firstAuthorHost.integrations.invoke(integrationId, "read", nil), "first")
 
     local secondDefinition = self.h.moduleHost.prepareDefinition({}, {
         id = providerId,
@@ -655,8 +705,7 @@ function TestModuleHost:testActivationRefreshRemovesOmittedIntegrations()
         drawTab = function() end,
     })
 
-    lu.assertNil(self.h.public.integrations.get(integrationId))
-    self.h.public.integrations.unregisterProvider(providerId)
+    lu.assertNil(firstAuthorHost.integrations.invoke(integrationId, "read", nil))
 end
 
 function TestModuleHost:testActivationRejectsReentrantActivateCalls()
@@ -675,17 +724,17 @@ function TestModuleHost:testActivationRejectsReentrantActivateCalls()
         definition = definition,
         store = store,
         session = session,
-        registerIntegrations = function()
-            authorHost.tryActivate()
-        end,
         drawTab = function() end,
     })
+    authorHost.mutation.patch(function()
+        authorHost.tryActivate()
+    end)
 
     local ok, err = authorHost.tryActivate()
 
     lu.assertTrue(ok)
     lu.assertNil(err)
-    lu.assertEquals(self.h.public.getLiveModuleHost("test-reentrant-activate"), host)
+    lu.assertEquals(self.h.moduleHost.getLiveHost("test-reentrant-activate"), host)
     lu.assertEquals(#self.h.warnings, 1)
     lu.assertStrContains(self.h.warnings[1], "host.activation_in_progress")
 end

@@ -9,33 +9,27 @@ This guide describes the supported module contract in Lib:
 ## Lib Surface
 
 Common module author surfaces:
-- `lib.config`
 - `lib.createModule(...)`
 - `lib.widgets.*`
 - `lib.nav.*`
 - `lib.imguiHelpers.*`
+- `host.integrations.*`
+- `host.gameCache.*`
 
-Standalone modules also use:
-- `lib.standaloneHost(...)`
-- `lib.standaloneUiBridge(...)`
+Fallback UI modules also use:
+- `host.fallbackUi.attachGuiOnce(...)`
 
 Use runtime behavior APIs only when the module owns that kind of behavior:
-- `lib.hooks.*`
-- `lib.overlays.*`
-- `lib.integrations.*`
-- `lib.gameCache.*`
-- `lib.mutation.*`
+- `host.hooks.*`
+- `host.overlays.*`
+- `host.mutation.*`
 
 Pack, Framework, migration, and advanced storage plumbing may also use:
 - `lib.tryCreateModule(...)`
-- `lib.getLiveModuleHost(...)`
-- `lib.coordinator.*`
-- `lib.resetStorageToDefaults(...)`
-- `lib.hashing.*`
+- `lib.createFrameworkRuntime(...)`
 
 Use the namespaced API directly. Normal module code should keep the author host
-returned by `lib.createModule(...)` and should not reach through
-`lib.getLiveModuleHost(...)` unless it is doing host/framework plumbing.
+returned by `lib.createModule(...)`.
 
 ## Capability Guides
 
@@ -75,12 +69,12 @@ local function drawQuickContent(ctx)
 end
 
 local function registerHooks(host, store)
-    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+    host.hooks.wrap("SomeGameFunction", function(base, ...)
         return base(...)
     end)
 end
 
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
@@ -92,16 +86,16 @@ local host = lib.createModule({
         { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
         { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
     },
-    registerHooks = registerHooks,
     drawTab = drawTab,
     drawQuickContent = drawQuickContent,
 })
+registerHooks(host, store)
 host.tryActivate()
 ```
 
 This example assumes coordinated/framework hosting.
-For standalone-only modules, `drawQuickContent` is optional and only matters if some external host uses it.
-If the module does not register runtime hooks, omit `registerHooks`.
+For fallback-only modules, `drawQuickContent` is optional and only matters if some external host uses it.
+If the module does not register runtime hooks, skip the hook declaration call.
 
 `lib.createModule(...)` is the supported module construction path.
 For `createModule(...)`, `pluginGuid` is the single stable lifecycle identity.
@@ -109,21 +103,22 @@ Lib owns the internal per-plugin runtime state for structural hot-reload
 tracking, hook refresh ownership, overlays, integrations, mutation runtime, and
 live-host lookup.
 Call `host.tryActivate()` after construction. That activation step publishes the
-live host, registers hooks, overlays, integrations, and syncs initial runtime behavior.
+live host, installs declared integrations, registers hooks and overlays, and
+syncs initial runtime behavior.
 Pack-level orchestrators can use `lib.tryCreateModule(...)` and
 `host.tryActivate()` when an invalid module should be logged and skipped rather
 than stopping sibling modules. These helpers preserve the lifecycle split:
 construction stays separate from activation, and each `try*` helper only wraps
 one phase.
-When `registerHooks` is provided, Lib calls it as
-`registerHooks(host, store)`. Ownerless `lib.hooks.*` calls inside this
-callback are scoped to the module's `pluginGuid`, so hook files do not need to
-know or manage an owner token. Modules that use shared runtime helper files
-should pass the needed store or narrower access/read closures into those helpers:
+Declare hooks and retained overlays on the host after construction and before
+`host.tryActivate()`. These declarations are scoped to the module's
+`pluginGuid`, so helper files do not need to know or manage an owner token.
+Modules that use shared runtime helper files should pass the needed store or
+narrower access/read closures into those helpers:
 
 ```lua
 local function registerHooks(host, store)
-    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+    host.hooks.wrap("SomeGameFunction", function(base, ...)
         if not host.isEnabled() then
             return base(...)
         end
@@ -140,8 +135,9 @@ Callback argument order follows a stable convention:
 - state/context handle next, using `session` for staged UI state and `host` for runtime/module context
 - `store` last when persisted runtime values are needed
 
-Examples: `drawTab(ctx)`, `registerHooks(host, store)`, and
-`registerPatchMutation(plan, host, store)`.
+Examples: `drawTab(ctx)`, local `registerHooks(host, store)` helpers, local
+overlay declaration helpers that call `host.overlays.*`, and
+`host.mutation.patch(function(plan, host, store) ... end)`.
 
 ## Definition Rules
 
@@ -228,9 +224,9 @@ Framework Quick Setup reads:
 For the focused hooks guide, read [capabilities/HOOKS.md](capabilities/HOOKS.md).
 
 Modules that register ModUtil path hooks should declare them inside
-`registerHooks(host, store)` and pass that callback to `lib.createModule(...)`.
-Ownerless `lib.hooks.*` calls inside the callback are scoped to the activating
-module's `pluginGuid`, so hook files do not need to manage owner tokens.
+local hook helpers by calling `host.hooks.*` before `host.tryActivate()`.
+Declarations are scoped to the activating module's `pluginGuid`, so hook files
+do not need to manage owner tokens.
 
 Use keyed overloads when one module needs several hooks on the same path.
 
@@ -238,10 +234,10 @@ Use keyed overloads when one module needs several hooks on the same path.
 
 For the focused mutation guide, read [capabilities/MUTATIONS.md](capabilities/MUTATIONS.md).
 
-Register `registerPatchMutation(plan, host, store)` only when the module mutates
-live run data. The callback describes the mutation plan for an enabled module.
-Lib owns apply/revert, enable/disable, settings commit, profile load, hot reload,
-and rollback behavior through the live host.
+Call `host.mutation.patch(function(plan, host, store) ... end)` before activation
+only when the module mutates live run data. The callback describes the mutation
+plan for an enabled module. Lib owns apply/revert, enable/disable, settings
+commit, profile load, hot reload, and rollback behavior through the live host.
 
 Patch plans are the only supported run-data mutation API. If a real mutation
 cannot be expressed by the current plan surface, add a first-class patch-plan
@@ -251,21 +247,22 @@ operation instead of bypassing the tracked lifecycle.
 
 Framework discovery requires:
 - a live host registered by `host.tryActivate()`
-- `host.getIdentity()`
+- `host.getHostId()`
+- `host.getModuleId()`
+- `host.getPackId()`
 - `host.getMeta()`
 - a prepared definition and Lib-created storage surface
 
-`lib.getLiveModuleHost(...)` exposes that full runtime host for Framework,
-standalone hosting, and Lib internals. Module code normally uses the author host
-returned by `lib.createModule(...)`.
+Framework resolves live `ModuleHost` values through its Framework runtime. Module
+code normally uses the author host returned by `lib.createModule(...)`.
 
 Framework behavior:
 - each coordinated module gets its own top-level tab
-- full-host `host.drawTab(imgui)` is the normal rendering contract
-- full-host `host.drawQuickContent(imgui)` participates only in Quick Setup
+- `ModuleHost.drawTab(imgui)` is the normal rendering contract
+- `ModuleHost.drawQuickContent(imgui)` participates only in Quick Setup
 - authored draw callbacks receive `drawTab(ctx)` and `drawQuickContent(ctx)`
 
-## Standalone Modules
+## Fallback UI Modules
 
 For non-framework hosting, use:
 
@@ -274,36 +271,33 @@ local PLUGIN_GUID = _PLUGIN.guid
 local data = import("mods/data.lua")
 local logic = import("mods/logic.lua").bind(data)
 local ui = import("mods/ui.lua").bind(data)
-local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
 
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     id = "ExampleModule",
     name = "Example Module",
     storage = data.buildStorage(),
-    registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+host.fallbackUi.attachGuiOnce(function(fallbackUi)
+    rom.gui.add_imgui(fallbackUi.renderWindow)
+    rom.gui.add_to_menu_bar(fallbackUi.addMenuBar)
+end)
+logic.registerHooks(host, store)
 host.tryActivate()
-lib.standaloneHost(PLUGIN_GUID)
-
-local function registerGui()
-    rom.gui.add_imgui(standaloneUi.renderWindow)
-    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
-end
 ```
 
 Notes:
-- `lib.standaloneHost(...)` suppresses its window/menu when the module is coordinated
-- `host.tryActivate()` syncs runtime mutation state for both coordinated and standalone modules
-- `lib.standaloneUiBridge(...)` keeps module-owned ROM GUI callsites stable while Lib owns the current runtime pointer
-- the standalone window includes built-in:
+- fallback UI suppresses its window/menu when the module is coordinated
+- `host.tryActivate()` syncs runtime mutation state for both coordinated and fallback UI modules
+- `host.fallbackUi.attachGuiOnce(...)` keeps module-owned ROM GUI callsites stable while Lib owns the current runtime pointer
+- the fallback UI window includes built-in:
   - `Enabled`
   - `Debug Mode`
   - `Resync Session`
-- the standalone window renders `drawTab`; Framework Quick Setup renders `drawQuickContent`
+- the fallback UI window renders `drawTab`; Framework Quick Setup renders `drawQuickContent`
 
 ## Complete Example
 
@@ -312,7 +306,7 @@ This is a minimal end-to-end module shape showing:
 - storage
 - `drawTab`
 - optional `drawQuickContent`
-- standalone wiring
+- fallback UI wiring
 
 ```lua
 local mods = rom.mods
@@ -332,7 +326,6 @@ local config = chalk.auto("config.lua")
 
 local PACK_ID = "example-pack"
 local PLUGIN_GUID = _PLUGIN.guid
-local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
 
 local drawTab
 local drawQuickContent
@@ -341,7 +334,7 @@ local registerHooks
 local function init()
     import_as_fallback(rom.game)
 
-    local host = lib.createModule({
+    local host, store = lib.createModule({
         pluginGuid = PLUGIN_GUID,
         config = config,
         modpack = PACK_ID,
@@ -363,13 +356,15 @@ local function init()
                 },
             },
         },
-        registerHooks = registerHooks,
         drawTab = drawTab,
         drawQuickContent = drawQuickContent,
     })
+    host.fallbackUi.attachGuiOnce(function(fallbackUi)
+        rom.gui.add_imgui(fallbackUi.renderWindow)
+        rom.gui.add_to_menu_bar(fallbackUi.addMenuBar)
+    end)
+    registerHooks(host, store)
     host.tryActivate()
-
-    lib.standaloneHost(PLUGIN_GUID)
 end
 
 function drawTab(ctx)
@@ -405,7 +400,7 @@ function drawQuickContent(ctx)
 end
 
 function registerHooks(host, store)
-    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+    host.hooks.wrap("SomeGameFunction", function(base, ...)
         if host.isEnabled() and store.read("FeatureEnabled") then
             -- Optional runtime behavior goes here.
         end
@@ -415,13 +410,8 @@ end
 
 local loader = reload.auto_single()
 
-local function registerGui()
-    rom.gui.add_imgui(standaloneUi.renderWindow)
-    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
-end
-
 modutil.once_loaded.game(function()
-    loader.load(registerGui, init)
+    loader.load(function() end, init)
 end)
 ```
 
@@ -430,8 +420,9 @@ Notes on the example:
 - `store` is passed to runtime hooks and mutation callbacks
 - draw callbacks receive the restricted author session through the live host
 - `host.tryActivate()` owns live coordinated host registration
-- `registerHooks(host, store)` is the normal place for `lib.hooks.*` declarations
+- `host.hooks.*` declarations happen before `host.tryActivate()`
+- `host.overlays.*` declarations happen before `host.tryActivate()`
+- `host.fallbackUi.attachGuiOnce(...)` keeps ROM GUI registration in module context without stacking across reloads
 - `drawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `drawQuickContent` is optional
-- `standaloneUi` is a Lib bridge; the module still owns its ROM GUI registration callsites
 - packed widgets use the session or row handle passed to the draw path

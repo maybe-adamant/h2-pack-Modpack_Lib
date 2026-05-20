@@ -1,203 +1,45 @@
 local deps = ...
 
-local logging = deps.logging
-local hostState = deps.hostState
-local runtime = deps.runtime
-local dispatchers = import('core/hooks/private_dispatchers.lua', nil, {
+local dispatchers = import('core/hooks/dispatchers.lua', nil, {
     modutil = deps.modutil,
-    logging = logging,
-    runtime = runtime,
+    logging = deps.logging,
+    runtime = deps.runtime,
 })
 
-local hooks = {}
-local hooksPublic = public.hooks or {}
-hooksPublic.Context = hooksPublic.Context or {}
-public.hooks = hooksPublic
-local ActiveHostInstallStack = {}
+local declarations = import('core/hooks/declarations.lua', nil, {
+    logging = deps.logging,
+})
 
-local function parseRegistrationArgs(path, keyOrValue, maybeValue, valueName)
-    if type(path) ~= "string" or path == "" then
-        logging.violate("hooks.invalid_registration", "lib.hooks: path must be a non-empty string")
-    end
-    if maybeValue == nil then
-        if keyOrValue == nil then
-            logging.violate("hooks.invalid_registration", "lib.hooks: %s is required", valueName)
-        end
-        return path, keyOrValue
-    end
-    if type(keyOrValue) ~= "string" or keyOrValue == "" then
-        logging.violate("hooks.invalid_registration", "lib.hooks: explicit key must be a non-empty string")
-    end
-    return keyOrValue, maybeValue
-end
+local hostInstall = import('core/hooks/host_install.lua', nil, {
+    logging = deps.logging,
+    dispatchers = dispatchers,
+})
 
-local function requireActiveInstall(apiName)
-    local install = ActiveHostInstallStack[#ActiveHostInstallStack]
-    if not install then
-        logging.violate(
-            "hooks.no_active_owner",
-            "lib.hooks.%s requires an active registerHooks context",
-            apiName
-        )
-    end
-    return install
-end
+local hostAdapter = import('core/hooks/adapter_host.lua', nil, {
+    logging = deps.logging,
+    hostState = deps.hostState,
+    declarations = declarations,
+    hostInstall = hostInstall,
+})
 
-local function getHostPluginGuid(host)
-    local state = hostState.get(host)
-    if not state then
-        logging.violate("hooks.invalid_registration", "hooks.installForHost: expected managed module host state")
-    end
+local author = import('core/hooks/adapter_author.lua', nil, {
+    logging = deps.logging,
+    hostState = deps.hostState,
+    declarations = declarations,
+})
 
-    local pluginGuid = state.pluginGuid
-    if type(pluginGuid) ~= "string" or pluginGuid == "" then
-        logging.violate("hooks.invalid_registration", "hooks.installForHost: host pluginGuid is required")
-    end
-    return pluginGuid
-end
+local system = import('core/hooks/adapter_system.lua', nil, {
+    logging = deps.logging,
+    declarations = declarations,
+    hostInstall = hostInstall,
+})
 
-local function recordHookDeclaration(kind, path, key, value)
-    local install = ActiveHostInstallStack[#ActiveHostInstallStack]
-    if not install then
-        return false
-    end
-    local byKind = install.declarations[kind]
-    local pathHooks = byKind[path]
-    if not pathHooks then
-        pathHooks = {
-            order = {},
-            slots = {},
-        }
-        byKind[path] = pathHooks
-    end
-    local slot = pathHooks.slots[key]
-    if not slot then
-        slot = {
-            key = key,
-        }
-        pathHooks.slots[key] = slot
-        pathHooks.order[#pathHooks.order + 1] = key
-    end
-    slot.value = value
-    return true
-end
+local service = {
+    installForHost = hostAdapter.installForHost,
+}
 
-function hooks.declareWrap(path, keyOrHandler, maybeHandler)
-    requireActiveInstall("Wrap")
-    local key, handler = parseRegistrationArgs(path, keyOrHandler, maybeHandler, "handler")
-    if type(handler) ~= "function" then
-        logging.violate("hooks.invalid_registration", "lib.hooks.Wrap: handler must be a function")
-    end
-    recordHookDeclaration("wrap", path, key, handler)
-end
-
---- Registers a host-owned ModUtil Path.Wrap handler in the active registerHooks pass.
----@param path string ModUtil path to wrap.
----@param keyOrHandler string|function Explicit hook key, or handler when no key is needed.
----@param maybeHandler function|nil Handler when an explicit key is supplied.
-function hooksPublic.Wrap(path, keyOrHandler, maybeHandler)
-    return hooks.declareWrap(path, keyOrHandler, maybeHandler)
-end
-
-function hooks.installPhysicalWrap(physicalOwner, path, keyOrHandler, maybeHandler)
-    local key, handler = parseRegistrationArgs(path, keyOrHandler, maybeHandler, "handler")
-    if type(handler) ~= "function" then
-        logging.violate("hooks.invalid_registration", "lib.hooks.Wrap: handler must be a function")
-    end
-
-    dispatchers.installPhysicalWrap(physicalOwner, path, key, handler)
-end
-
---- Registers a host-owned ModUtil Path.Override replacement in the active registerHooks pass.
----@param path string ModUtil path to override.
----@param keyOrReplacement string|function Explicit hook key, or replacement when no key is needed.
----@param maybeReplacement function|nil Replacement when an explicit key is supplied.
-function hooksPublic.Override(path, keyOrReplacement, maybeReplacement)
-    requireActiveInstall("Override")
-    local key, replacement = parseRegistrationArgs(path, keyOrReplacement, maybeReplacement, "replacement")
-    if type(replacement) ~= "function" then
-        logging.violate("hooks.invalid_registration", "lib.hooks.Override: replacement must be a function")
-    end
-    recordHookDeclaration("override", path, key, replacement)
-end
-
---- Registers a host-owned ModUtil Path.Context.Wrap handler in the active registerHooks pass.
----@param path string ModUtil path to context-wrap.
----@param keyOrContext string|function Explicit hook key, or context function when no key is needed.
----@param maybeContext function|nil Context function when an explicit key is supplied.
-function hooksPublic.Context.Wrap(path, keyOrContext, maybeContext)
-    requireActiveInstall("Context.Wrap")
-    local key, context = parseRegistrationArgs(path, keyOrContext, maybeContext, "context")
-    if type(context) ~= "function" then
-        logging.violate("hooks.invalid_registration", "lib.hooks.Context.Wrap: context must be a function")
-    end
-    recordHookDeclaration("contextWrap", path, key, context)
-end
-
-function hooks.installPhysicalContextWrap(physicalOwner, path, keyOrContext, maybeContext)
-    local key, context = parseRegistrationArgs(path, keyOrContext, maybeContext, "context")
-    if type(context) ~= "function" then
-        logging.violate("hooks.invalid_registration", "lib.hooks.Context.Wrap: context must be a function")
-    end
-
-    dispatchers.installPhysicalContextWrap(physicalOwner, path, key, context)
-end
-
-function hooks.installForHost(host, register, authorHost, store)
-    local pluginGuid = getHostPluginGuid(host)
-    local install = {
-        host = host,
-        pluginGuid = pluginGuid,
-        declarations = {
-            wrap = {},
-            override = {},
-            contextWrap = {},
-        },
-        committed = false,
-        slotsAttached = false,
-        disposed = false,
-        previousCurrentHost = nil,
-    }
-
-    if register ~= nil then
-        if type(register) ~= "function" then
-            logging.violate("hooks.invalid_registration", "hooks.installForHost: register must be a function")
-        end
-
-        ActiveHostInstallStack[#ActiveHostInstallStack + 1] = install
-        local ok, err = pcall(register, authorHost, store)
-        ActiveHostInstallStack[#ActiveHostInstallStack] = nil
-        if not ok then
-            error(err, 0)
-        end
-    end
-
-    return {
-        commit = function()
-            if install.disposed or install.committed then
-                return true, nil
-            end
-
-            install.previousCurrentHost = dispatchers.getCurrentHost(pluginGuid)
-            install.slotsAttached = true
-            dispatchers.attachHost(pluginGuid, host, install.declarations)
-            install.committed = true
-            return true, nil
-        end,
-        dispose = function()
-            if install.disposed then
-                return true, nil
-            end
-
-            if install.committed or install.slotsAttached then
-                dispatchers.detachHost(pluginGuid, host, install.declarations, install.previousCurrentHost)
-            end
-
-            install.slotsAttached = false
-            install.disposed = true
-            return true, nil
-        end,
-    }
-end
-
-return hooks
+return {
+    service = service,
+    author = author,
+    system = system,
+}

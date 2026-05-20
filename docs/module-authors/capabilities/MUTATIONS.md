@@ -6,7 +6,7 @@ Use mutations when the module changes live game tables based on committed settin
 
 ## Normal Shape
 
-Provide `registerPatchMutation(plan, host, store)` to `lib.createModule(...)`:
+Declare `host.mutation.patch(function(plan, host, store) ... end)` before activation:
 
 ```lua
 local function buildPatchPlan(plan, host, store)
@@ -22,9 +22,9 @@ local host = lib.createModule({
     id = MODULE_ID,
     name = "Example Module",
     storage = data.buildStorage(),
-    registerPatchMutation = buildPatchPlan,
     drawTab = ui.drawTab,
 })
+host.mutation.patch(buildPatchPlan)
 host.tryActivate()
 ```
 

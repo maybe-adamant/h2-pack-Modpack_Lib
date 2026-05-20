@@ -4,7 +4,7 @@ local logging = deps.logging
 local values = deps.values
 local storage = {}
 
-local typesModule = import('core/storage/private_types.lua', nil, {
+local typesModule = import('core/storage/types.lua', nil, {
     logging = logging,
     storage = storage,
     values = values,
@@ -12,7 +12,7 @@ local typesModule = import('core/storage/private_types.lua', nil, {
 storage.types = typesModule.types
 storage.NormalizeInteger = typesModule.NormalizeInteger
 
-local packed = import('core/storage/private_packed.lua', nil, {
+local packed = import('core/storage/packed.lua', nil, {
     logging = logging,
     storage = storage,
     types = storage.types,
@@ -23,7 +23,7 @@ storage.field = import('core/storage/storage_field.lua', nil, {
     logging = logging,
 })
 
-local tableStorage = import('core/storage/private_table.lua', nil, {
+local tableStorage = import('core/storage/table.lua', nil, {
     logging = logging,
     storage = storage,
     types = storage.types,

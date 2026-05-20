@@ -180,6 +180,7 @@ local function createBootHarness()
         public = public,
         config = config,
         imports = imports,
+        coordinator = imports["core/coordinator/coordinator.lua"],
         rom = rom,
         runtime = env.AdamantModpackLib_Runtime,
         menuCallbacks = menuCallbacks,
@@ -194,21 +195,21 @@ end
 function TestMainBoot.testMainLoadsPublicSurface()
     local h = createBootHarness()
 
-    lu.assertEquals(h.public.config, h.config)
-    lu.assertEquals(type(h.public.resetStorageToDefaults), "function")
+    lu.assertNil(h.public.config)
+    lu.assertNil(h.public.resetStorageToDefaults)
     lu.assertEquals(type(h.public.createModule), "function")
     lu.assertEquals(type(h.public.tryCreateModule), "function")
-    lu.assertEquals(type(h.public.getLiveModuleHost), "function")
-    lu.assertEquals(type(h.public.standaloneHost), "function")
-    lu.assertEquals(type(h.public.standaloneUiBridge), "function")
+    lu.assertNil(h.public.createSystem)
+    lu.assertEquals(type(h.public.createFrameworkRuntime), "function")
+    lu.assertNil(h.public.getLiveModuleHost)
 
-    lu.assertEquals(type(h.public.coordinator), "table")
-    lu.assertEquals(type(h.public.gameCache), "table")
-    lu.assertEquals(type(h.public.hashing), "table")
-    lu.assertEquals(type(h.public.hooks), "table")
-    lu.assertEquals(type(h.public.integrations), "table")
-    lu.assertEquals(type(h.public.mutation), "table")
-    lu.assertEquals(type(h.public.overlays), "table")
+    lu.assertNil(h.public.coordinator)
+    lu.assertNil(h.public.gameCache)
+    lu.assertNil(h.public.hashing)
+    lu.assertNil(h.public.hooks)
+    lu.assertNil(h.public.integrations)
+    lu.assertNil(h.public.mutation)
+    lu.assertNil(h.public.overlays)
     lu.assertEquals(type(h.public.widgets), "table")
     lu.assertEquals(type(h.public.nav), "table")
     lu.assertEquals(type(h.public.imguiHelpers), "table")
@@ -216,8 +217,81 @@ function TestMainBoot.testMainLoadsPublicSurface()
     lu.assertEquals(type(h.runtime.moduleHost), "table")
     lu.assertEquals(type(h.runtime.hooks), "table")
     lu.assertEquals(type(h.runtime.overlays), "table")
-    lu.assertEquals(type(h.runtime.standalone), "table")
+    lu.assertEquals(type(h.runtime.fallbackUi), "table")
     lu.assertEquals(h.imports["core/init.lua"].coordinator, h.imports["core/coordinator/coordinator.lua"])
+end
+
+function TestMainBoot.testMainCreatesFrameworkRuntimeFacade()
+    local h = createBootHarness()
+    local runtime = h.public.createFrameworkRuntime("adamant-ModpackFramework")
+
+    lu.assertNil(runtime.getOwnerId)
+    lu.assertEquals(type(runtime.diagnostics), "table")
+    lu.assertEquals(type(runtime.diagnostics.isLibDebugEnabled), "function")
+    lu.assertEquals(type(runtime.diagnostics.setLibDebugEnabled), "function")
+    lu.assertEquals(type(runtime.coordinator), "table")
+    lu.assertEquals(type(runtime.coordinator.register), "function")
+    lu.assertEquals(type(runtime.coordinator.registerRebuild), "function")
+    lu.assertEquals(type(runtime.coordinator.isRegistered), "function")
+    lu.assertEquals(type(runtime.overlays), "table")
+    lu.assertEquals(type(runtime.overlays.order), "table")
+    lu.assertEquals(type(runtime.overlays.define), "function")
+    lu.assertEquals(type(runtime.modules), "table")
+    lu.assertEquals(type(runtime.modules.getLiveHost), "function")
+    lu.assertEquals(type(runtime.hashing), "table")
+    lu.assertEquals(type(runtime.hashing.getRoots), "function")
+    lu.assertEquals(type(runtime.hashing.toHash), "function")
+    lu.assertEquals(type(runtime.ui.suppressOverlays), "function")
+    lu.assertEquals(type(runtime.ui.areOverlaysSuppressed), "function")
+
+    lu.assertFalse(runtime.ui.areOverlaysSuppressed())
+    local token = runtime.ui.suppressOverlays()
+    lu.assertTrue(runtime.ui.areOverlaysSuppressed())
+    token.release()
+    lu.assertFalse(runtime.ui.areOverlaysSuppressed())
+
+    lu.assertFalse(runtime.diagnostics.isLibDebugEnabled())
+    runtime.diagnostics.setLibDebugEnabled(true)
+    lu.assertTrue(h.config.DebugMode)
+    lu.assertTrue(runtime.diagnostics.isLibDebugEnabled())
+    runtime.diagnostics.setLibDebugEnabled(false)
+    lu.assertFalse(h.config.DebugMode)
+    lu.assertNil(runtime.modules.getLiveHost(""))
+end
+
+function TestMainBoot.testMainFrameworkRuntimeRejectsInvalidLibDebugMode()
+    local h = createBootHarness()
+    local runtime = h.public.createFrameworkRuntime("adamant-ModpackFramework")
+
+    lu.assertErrorMsgContains("frameworkRuntime.diagnostics.setLibDebugEnabled: enabled must be a boolean", function()
+        runtime.diagnostics.setLibDebugEnabled("true")
+    end)
+end
+
+function TestMainBoot.testMainFrameworkRuntimeRejectsInvalidOverlayScope()
+    local h = createBootHarness()
+    local runtime = h.public.createFrameworkRuntime("adamant-ModpackFramework")
+
+    lu.assertErrorMsgContains("frameworkRuntime.overlays.define: packId must be a non-empty string", function()
+        runtime.overlays.define("", "hud", function() end)
+    end)
+    lu.assertErrorMsgContains("frameworkRuntime.overlays.define: name must be a non-empty string", function()
+        runtime.overlays.define("test", "", function() end)
+    end)
+    lu.assertErrorMsgContains("frameworkRuntime.overlays.define: register must be a function", function()
+        runtime.overlays.define("test", "hud", true)
+    end)
+end
+
+function TestMainBoot.testMainFrameworkRuntimeRejectsInvalidCaller()
+    local h = createBootHarness()
+
+    lu.assertErrorMsgContains("createFrameworkRuntime: frameworkPluginGuid must be adamant-ModpackFramework", function()
+        h.public.createFrameworkRuntime("test-module")
+    end)
+    lu.assertErrorMsgContains("createFrameworkRuntime: packId is not accepted", function()
+        h.public.createFrameworkRuntime("adamant-ModpackFramework", "test")
+    end)
 end
 
 function TestMainBoot.testMainUsesExpectedBootExternals()
@@ -273,7 +347,7 @@ end
 function TestMainBoot.testMainDebugMenuHidesWhenCoordinatorIsRegistered()
     local h = createBootHarness()
     local beginMenuCalls = 0
-    h.public.coordinator.register("coordinated-pack", { ModEnabled = true })
+    h.coordinator.register("coordinated-pack", { ModEnabled = true })
     h.rom.ImGui = {
         BeginMenu = function()
             beginMenuCalls = beginMenuCalls + 1

@@ -82,7 +82,7 @@ flowchart TD
     subgraph UI_HOST["UI / Host"]
         direction TB
         HOST["module host"]
-        STANDALONE["standalone host"]
+        FALLBACK_UI["fallback UI"]
         WIDGETS["widgets / nav"]
     end
 
@@ -107,12 +107,12 @@ sequenceDiagram
     participant State as Store/Session
     participant Host as Module Host
     participant Effects as Hooks/Overlays/Integrations/Mutations
-    participant Framework as Framework/Standalone
+    participant Framework as Framework/Fallback UI
 
     Module->>Lib: lib.createModule(opts)
     Lib->>Lib: prepareDefinition(definition)
     Lib->>State: create store/session
-    Lib->>Host: create full host + author host
+    Lib->>Host: create ModuleHost + AuthorHost
     Lib-->>Module: authorHost, store
 
     Module->>Host: host.tryActivate()

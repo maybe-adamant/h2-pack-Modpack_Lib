@@ -7,7 +7,6 @@ local state = runtime.overlays
 state.renderer = state.renderer or {}
 state.renderer.textElements = state.renderer.textElements or {}
 state.renderer.stackRows = state.renderer.stackRows or {}
-state.physicalHookOwner = state.physicalHookOwner or {}
 
 state.uiSuppressors = state.uiSuppressors or {}
 state.nextUiSuppressorId = state.nextUiSuppressorId or 0

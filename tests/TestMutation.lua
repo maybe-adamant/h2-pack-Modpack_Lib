@@ -10,16 +10,16 @@ end
 
 function TestMutation:setUp()
     self.harness = createLibHarness()
-    self.public = self.harness.public.mutation
     self.mutation = self.harness.mutation
+    self.mutationPlan = self.harness.mutationPlan
 end
 
 function TestMutation:applyPlan(plan)
-    return self.mutation.applyPlan(plan)
+    return self.mutationPlan.applyPlan(plan)
 end
 
 function TestMutation:revertPlan(plan)
-    return self.mutation.revertPlan(plan)
+    return self.mutationPlan.revertPlan(plan)
 end
 
 function TestMutation:testBackupRestoresChangedAndRemovedValues()
@@ -27,7 +27,7 @@ function TestMutation:testBackupRestoresChangedAndRemovedValues()
         Count = 1,
         Nested = { Value = "old" },
     }
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
 
     backup(tbl, "Count", "Nested", "Missing")
     tbl.Count = 7
@@ -46,7 +46,7 @@ function TestMutation:testPlanSetSetManyAndTransformApplyAndRevert()
         Name = "old",
         Flag = false,
     }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :set(tbl, "Count", 2)
         :setMany(tbl, {
             Name = "new",
@@ -72,8 +72,8 @@ function TestMutation:testPlanSetSetManyAndTransformApplyAndRevert()
     lu.assertFalse(self:revertPlan(plan))
 end
 
-function TestMutation:testPublicPlanDoesNotExposeExecutionMethods()
-    local plan = self.public.createPlan()
+function TestMutation:testPlanDoesNotExposeExecutionMethods()
+    local plan = self.mutationPlan.createPlan()
 
     lu.assertNil(plan.apply)
     lu.assertNil(plan.revert)
@@ -83,15 +83,15 @@ function TestMutation.testPlanExecutorSurvivesLibReload()
     local runtime = {}
     local first = createLibHarness({ runtime = runtime })
     local tbl = { Value = "base" }
-    local plan = first.public.mutation.createPlan()
+    local plan = first.mutationPlan.createPlan()
         :set(tbl, "Value", "patched")
 
-    lu.assertTrue(first.mutation.applyPlan(plan))
+    lu.assertTrue(first.mutationPlan.applyPlan(plan))
     lu.assertEquals(tbl.Value, "patched")
 
     local second = createLibHarness({ runtime = runtime })
 
-    lu.assertTrue(second.mutation.revertPlan(plan))
+    lu.assertTrue(second.mutationPlan.revertPlan(plan))
     lu.assertEquals(tbl.Value, "base")
 end
 
@@ -102,7 +102,7 @@ function TestMutation:testPlanTransformReceivesCopiedCurrentValueOnly()
         },
     }
     local seenExtraArgCount = nil
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :transform(tbl, "Data", function(current, ...)
             seenExtraArgCount = select("#", ...)
             current.Count = current.Count + 1
@@ -122,7 +122,7 @@ function TestMutation:testPlanTransformErrorCannotMutateOriginalCurrentValue()
             Count = 1,
         },
     }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :transform(tbl, "Data", function(current)
             current.Count = 999
             error("transform boom")
@@ -141,7 +141,7 @@ function TestMutation:testPlanTransformClonesReturnedTable()
         },
     }
     local replacement = { Count = 2 }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :transform(tbl, "Data", function()
             return replacement
         end)
@@ -158,7 +158,7 @@ function TestMutation:testPlanAppendAndAppendUniqueApplyAndRevert()
             { id = 1 },
         },
     }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :append(tbl, "Values", "b")
         :appendUnique(tbl, "Values", "a")
         :appendUnique(tbl, "Objects", { id = 1 })
@@ -188,7 +188,7 @@ function TestMutation:testPlanRemoveElementAndSetElementApplyAndRevert()
     local sameId = function(a, b)
         return a.id == b.id
     end
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :removeElement(tbl, "Values", "b")
         :setElement(tbl, "Objects", { id = 1 }, { id = 1, value = "new" }, sameId)
 
@@ -208,7 +208,7 @@ end
 
 function TestMutation:testPlanListOperationsCreateMissingLists()
     local tbl = {}
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :append(tbl, "Values", "a")
         :appendUnique(tbl, "Objects", { id = 1 })
 
@@ -226,19 +226,19 @@ function TestMutation:testPlanListOperationsRejectNonTableTargets()
     }
 
     lu.assertErrorMsgContains("append requires table", function()
-        local plan = self.public.createPlan()
+        local plan = self.mutationPlan.createPlan()
             :append(tbl, "Values", "a")
         self:applyPlan(plan)
     end)
 
     lu.assertErrorMsgContains("removeElement requires table", function()
-        local plan = self.public.createPlan()
+        local plan = self.mutationPlan.createPlan()
             :removeElement(tbl, "Values", "a")
         self:applyPlan(plan)
     end)
 
     lu.assertErrorMsgContains("setElement requires table", function()
-        local plan = self.public.createPlan()
+        local plan = self.mutationPlan.createPlan()
             :setElement(tbl, "Values", "a", "b")
         self:applyPlan(plan)
     end)
@@ -249,7 +249,7 @@ function TestMutation:testPlanApplyRestoresEarlierMutationsWhenLaterOperationFai
         Count = 1,
         Values = "not-list",
     }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :set(tbl, "Count", 2)
         :append(tbl, "Values", "a")
 
@@ -268,7 +268,7 @@ function TestMutation:testPlanReapplyAfterRevertCapturesFreshSnapshot()
     local tbl = {
         Count = 1,
     }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :set(tbl, "Count", 2)
 
     lu.assertTrue(self:applyPlan(plan))
@@ -289,7 +289,7 @@ function TestMutation:testFailedPlanRetryRestoresToLatestSnapshot()
         Count = 1,
         Values = "not-list",
     }
-    local plan = self.public.createPlan()
+    local plan = self.mutationPlan.createPlan()
         :set(tbl, "Count", 2)
         :append(tbl, "Values", "a")
 
@@ -319,14 +319,14 @@ function TestMutation:testCommittedNoopSyncReceiptDisposesSuccessfully()
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local host, authorHost = self.harness.moduleHost.create({
+    local host = self.harness.moduleHost.create({
         pluginGuid = "test-noop-mutation-receipt",
         definition = definition,
         store = store,
         session = session,
         drawTab = function() end,
     })
-    local receipt = self.mutation.syncForHost(host, nil, authorHost, store)
+    local receipt = self.mutation.syncForHost(host)
 
     local ok, err = receipt.commit()
     lu.assertTrue(ok, tostring(err))

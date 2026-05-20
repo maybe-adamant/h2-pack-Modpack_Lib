@@ -17,7 +17,7 @@ Use each state surface for one job:
 
 | Surface | Use it for | Where it appears |
 | --- | --- | --- |
-| `store` | persisted runtime reads and unstaged runtime-cache writes | `registerHooks`, `registerPatchMutation`, `registerIntegrations`, `registerOverlays` |
+| `store` | persisted runtime reads and unstaged runtime-cache writes | host capability declarations, hook/overlay helpers, mutation callbacks |
 | `session` | staged UI reads/writes | `drawTab`, `drawQuickContent` |
 | `config` | Chalk-owned backing table | local to `main.lua` |
 
@@ -31,7 +31,7 @@ function ui.drawTab(ctx)
 end
 
 function logic.registerHooks(host, store)
-    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+    host.hooks.wrap("SomeGameFunction", function(base, ...)
         if host.isEnabled() and store.read("FeatureEnabled") then
             -- Runtime behavior reads committed state.
         end

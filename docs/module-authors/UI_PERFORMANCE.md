@@ -27,8 +27,8 @@ This document assumes:
 - debug toggles write persisted values through the host/framework flow
 - hash/profile import and config flush behavior belong to host/framework plumbing, not draw callbacks
 - framework/host own `session` commit timing
-- standalone UI registers ROM callbacks through `lib.standaloneUiBridge(...)`
-  and installs the active runtime through `lib.standaloneHost(...)`
+- fallback UI registers ROM callbacks through `host.fallbackUi.attachGuiOnce(...)`
+  and installs the active runtime during `host.tryActivate()`
 
 ## Per-Frame Checklist
 
@@ -100,9 +100,8 @@ Do not hand-roll flush logic inside draw code.
 
 Ownership:
 - framework-hosted modules commit after `drawTab` / `drawQuickContent`
-- standalone modules should register GUI callbacks through
-  `lib.standaloneUiBridge(...)` and install runtime state through
-  `lib.standaloneHost(...)`
+- fallback UI modules should register GUI callbacks through
+  `host.fallbackUi.attachGuiOnce(...)`; activation installs runtime state
 
 The module's job is:
 - render from `session`

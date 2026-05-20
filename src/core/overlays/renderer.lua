@@ -3,10 +3,9 @@ local deps = ...
 local rendererState = deps.state
 local isUiSuppressed = deps.isUiSuppressed
 local logging = deps.logging
-local hooks = deps.hooks
 local values = deps.values
 local overlayOrder = deps.order
-local physicalHookOwner = deps.physicalHookOwner
+local rendererSystem = deps.system
 local overlayGameDeps = deps.gameDeps
 
 local refreshStackRows
@@ -340,18 +339,19 @@ local function refreshVisibility()
 end
 
 local function ensureGameHooks()
-    hooks.installPhysicalWrap(physicalHookOwner, "StartRoomPresentation", "overlays:roomPresentation",
-        function(base, currentRun, currentRoom, metaPointsAwarded)
+    rendererSystem.hooks.define(function(hooks)
+        hooks.wrap("StartRoomPresentation", "roomPresentation", function(base, currentRun, currentRoom, metaPointsAwarded)
             base(currentRun, currentRoom, metaPointsAwarded)
             refreshVisibility()
         end)
-    hooks.installPhysicalWrap(physicalHookOwner, "ShowCombatUI", "overlays:showCombatUI", function(base, flag, args)
-        base(flag, args)
-        refreshVisibility()
-    end)
-    hooks.installPhysicalWrap(physicalHookOwner, "HideCombatUI", "overlays:hideCombatUI", function(base, flag, args)
-        base(flag, args)
-        refreshVisibility()
+        hooks.wrap("ShowCombatUI", "showCombatUI", function(base, flag, args)
+            base(flag, args)
+            refreshVisibility()
+        end)
+        hooks.wrap("HideCombatUI", "hideCombatUI", function(base, flag, args)
+            base(flag, args)
+            refreshVisibility()
+        end)
     end)
 end
 

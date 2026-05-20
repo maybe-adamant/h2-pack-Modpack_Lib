@@ -6,8 +6,11 @@ callbacks and makes patch plans the only supported run-data mutation model.
 ## What Changed
 
 - `registerManualMutation` is no longer a recognized module creation option.
+- `registerPatchMutation` moved from `lib.createModule(...)` opts to
+  `host.mutation.patch(...)` before activation.
 - Hybrid patch/manual mutation lifecycles are no longer supported.
 - `lib.mutation.createBackup()` is no longer public API.
+- `lib.mutation.createPlan()` is no longer public API.
 - Patch plans no longer expose public `apply`/`revert` execution methods.
 - `plan:transform(tbl, key, fn)` now calls `fn(currentCopy)` only.
 - `transform` callbacks must return the replacement value for `tbl[key]`.
@@ -60,11 +63,11 @@ local host = lib.createModule({
     id = MODULE_ID,
     name = "Example Module",
     storage = data.buildStorage(),
-    registerPatchMutation = function(plan, host, store)
-        plan:set(SomeGameTable, "SomeKey", true)
-    end,
     drawTab = ui.drawTab,
 })
+host.mutation.patch(function(plan, host, store)
+    plan:set(SomeGameTable, "SomeKey", true)
+end)
 ```
 
 For list edits, prefer the existing list operations:
@@ -114,8 +117,8 @@ unrelated globals inside `transform`; the plan tracks only the target key.
 Do not move arbitrary side effects into `transform` to replace manual mutation.
 Use the lifecycle surface that owns the side effect:
 
-- hooks: `registerHooks(...)`
-- overlays: `registerOverlays(...)`
-- integrations: `registerIntegrations(...)`
+- hooks: `host.hooks.*` declarations before activation
+- overlays: `host.overlays.*` declarations before activation
+- integrations: `host.integrations.register(...)` before activation
 - persistent runtime values: storage plus `store.writeUnstaged(...)`
 - unrepresented run-data edits: add a patch-plan operation

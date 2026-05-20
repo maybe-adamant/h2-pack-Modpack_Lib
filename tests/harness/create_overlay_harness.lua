@@ -49,6 +49,11 @@ end
 
 local function createGameDeps(game)
     return {
+        gameCache = {
+            CurrentRun = function()
+                return rawget(_G, "CurrentRun")
+            end,
+        },
         runData = {
             SetupRunData = function() end,
         },
@@ -102,7 +107,6 @@ local function createOverlayHarness(opts)
     return {
         harness = base,
         public = base.public,
-        overlayPublic = base.public.overlays,
         config = base.config,
         runtime = base.runtime,
         overlayState = base.runtime.overlays,
@@ -111,6 +115,7 @@ local function createOverlayHarness(opts)
         overlays = base.overlays,
         moduleHost = base.moduleHost,
         moduleState = base.moduleState,
+        createSystem = base.createSystem,
         game = game,
         modutil = modutil,
 
@@ -118,7 +123,7 @@ local function createOverlayHarness(opts)
             return createModuleState(base, config, definition)
         end,
 
-        createHostWithOverlays = function(pluginGuid, registerOverlays, hostOpts)
+        createHostWithOverlays = function(pluginGuid, declareOverlays, hostOpts)
             hostOpts = hostOpts or {}
             local definition = base.moduleHost.prepareDefinition({}, {
                 id = hostOpts.id or "OverlayHost",
@@ -134,11 +139,15 @@ local function createOverlayHarness(opts)
                 definition = definition,
                 store = store,
                 session = session,
-                registerOverlays = registerOverlays,
                 onSettingsCommitted = hostOpts.onSettingsCommitted,
-                registerIntegrations = hostOpts.registerIntegrations,
                 drawTab = function() end,
             })
+            if hostOpts.patchMutation ~= nil then
+                authorHost.mutation.patch(hostOpts.patchMutation)
+            end
+            if type(declareOverlays) == "function" then
+                declareOverlays(authorHost.overlays, authorHost, store)
+            end
             return host, authorHost, store, session, definition
         end,
     }

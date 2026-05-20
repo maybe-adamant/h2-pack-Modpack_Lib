@@ -11,8 +11,8 @@ function TestOverlays:dispatch(owner)
     return self.h.overlays.dispatchCommit(owner, {})
 end
 
-function TestOverlays:activateHostWithOverlays(pluginGuid, registerOverlays, opts)
-    local host, authorHost, store, session = self.h.createHostWithOverlays(pluginGuid, registerOverlays, opts)
+function TestOverlays:activateHostWithOverlays(pluginGuid, declareOverlays, opts)
+    local host, authorHost, store, session = self.h.createHostWithOverlays(pluginGuid, declareOverlays, opts)
     local ok, err = authorHost.tryActivate()
     lu.assertTrue(ok, tostring(err))
     return host, authorHost, store, session
@@ -37,7 +37,7 @@ function TestOverlays:testRetainedLineUsesHudComponentAndVisibilityHooks()
         alphas[#alphas + 1] = args
     end
 
-    self.h.overlayPublic.defineSystem("test.overlay.line", function(overlays)
+    self.h.createSystem("test.overlay.line").overlays.define(function(overlays)
         overlays.createLine("message", {
             componentName = "TestOverlay",
             region = "middleRightStack",
@@ -78,7 +78,8 @@ function TestOverlays:testRetainedLineUsesHudComponentAndVisibilityHooks()
 end
 
 function TestOverlays:testRetainedLinesUseStableMiddleRightOrderingAndBands()
-    self.h.overlayPublic.defineSystem("test.overlay.order", function(overlays)
+    local system = self.h.createSystem("test.overlay.order")
+    system.overlays.define(function(overlays)
         overlays.createLine("module", {
             componentName = "ModuleOverlay",
             region = "middleRightStack",
@@ -87,13 +88,13 @@ function TestOverlays:testRetainedLinesUseStableMiddleRightOrderingAndBands()
         overlays.createLine("framework", {
             componentName = "FrameworkOverlay",
             region = "middleRightStack",
-            order = self.h.overlayPublic.order.framework + 1,
+            order = system.overlays.order.framework + 1,
             minWidth = 80,
         })
         overlays.createLine("debug", {
             componentName = "DebugOverlay",
             region = "middleRightStack",
-            order = self.h.overlayPublic.order.debug,
+            order = system.overlays.order.debug,
             minWidth = 80,
         })
         overlays.onCommit(function(ctx)
@@ -160,7 +161,7 @@ function TestOverlays:testUiSuppressionTokenGloballyHidesAndRestoresRetainedOver
         alphas[#alphas + 1] = args
     end
 
-    self.h.overlayPublic.defineSystem("test.overlay.suppression", function(overlays)
+    self.h.createSystem("test.overlay.suppression").overlays.define(function(overlays)
         overlays.createLine("line", {
             componentName = "SuppressedOverlay",
             region = "middleRightStack",
@@ -172,21 +173,34 @@ function TestOverlays:testUiSuppressionTokenGloballyHidesAndRestoresRetainedOver
         end)
     end)
 
-    lu.assertFalse(self.h.overlayPublic.isUiSuppressed())
+    lu.assertFalse(self.h.overlays.isUiSuppressed())
 
-    local firstToken = self.h.overlayPublic.suppressForUi()
-    lu.assertTrue(self.h.overlayPublic.isUiSuppressed())
+    local firstToken = self.h.overlays.suppressForUi()
+    lu.assertTrue(self.h.overlays.isUiSuppressed())
     lu.assertEquals(alphas[#alphas].Fraction, 0.0)
 
-    local secondToken = self.h.overlayPublic.suppressForUi()
+    local secondToken = self.h.overlays.suppressForUi()
     firstToken.release()
-    lu.assertTrue(self.h.overlayPublic.isUiSuppressed())
+    lu.assertTrue(self.h.overlays.isUiSuppressed())
     lu.assertEquals(alphas[#alphas].Fraction, 0.0)
 
     secondToken.release()
-    lu.assertFalse(self.h.overlayPublic.isUiSuppressed())
+    lu.assertFalse(self.h.overlays.isUiSuppressed())
     lu.assertEquals(alphas[#alphas].Fraction, 1.0)
 
     secondToken.release()
-    lu.assertFalse(self.h.overlayPublic.isUiSuppressed())
+    lu.assertFalse(self.h.overlays.isUiSuppressed())
+end
+
+function TestOverlays:testFrameworkSuppressionFacadeSharesOverlaySuppressionState()
+    local framework = self.h.harness.overlaysBundle.framework
+
+    lu.assertFalse(framework.ui.areOverlaysSuppressed())
+    local token = framework.ui.suppressOverlays()
+    lu.assertTrue(self.h.overlays.isUiSuppressed())
+    lu.assertTrue(framework.ui.areOverlaysSuppressed())
+
+    token.release()
+    lu.assertFalse(self.h.overlays.isUiSuppressed())
+    lu.assertFalse(framework.ui.areOverlaysSuppressed())
 end

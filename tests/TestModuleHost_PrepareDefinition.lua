@@ -159,8 +159,8 @@ function TestModuleHost_PrepareDefinition:testCreateModuleHostRequestsCoordinato
     local owner = {}
     local rebuildReason = nil
 
-    self.h.public.coordinator.register("test-pack", { ModEnabled = true })
-    self.h.public.coordinator.registerRebuild("test-pack", function(reason)
+    self.h.coordinator.register("test-pack", { ModEnabled = true })
+    self.h.coordinator.registerRebuild("test-pack", function(reason)
         rebuildReason = reason
         return true
     end)
@@ -191,7 +191,7 @@ function TestModuleHost_PrepareDefinition:testCreateModuleHostRequestsCoordinato
     createAndActivate(self.h, "test-module", prepared, store, session)
 
     lu.assertTrue(owner.requiresFullReload)
-    lu.assertNotNil(self.h.public.getLiveModuleHost("test-module"))
+    lu.assertNotNil(self.h.moduleHost.getLiveHost("test-module"))
     lu.assertNotNil(rebuildReason)
     lu.assertEquals(rebuildReason.kind, "structural_definition_changed")
     lu.assertEquals(rebuildReason.moduleId, "Example")
@@ -202,7 +202,7 @@ end
 function TestModuleHost_PrepareDefinition:testCreateModuleHostErrorsWhenCoordinatedRebuildCallbackIsMissing()
     local owner = {}
 
-    self.h.public.coordinator.register("test-pack", { ModEnabled = true })
+    self.h.coordinator.register("test-pack", { ModEnabled = true })
 
     self.h.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
@@ -232,14 +232,14 @@ function TestModuleHost_PrepareDefinition:testCreateModuleHostErrorsWhenCoordina
     lu.assertFalse(ok)
     lu.assertStrContains(err, "host.structural_rebuild_unavailable")
     lu.assertTrue(owner.requiresFullReload)
-    lu.assertNotNil(self.h.hostState.getPendingCoordinatorRebuild(prepared))
+    lu.assertNotNil(self.h.moduleRuntimeRegistry.getPendingCoordinatorRebuild(prepared))
 end
 
 function TestModuleHost_PrepareDefinition:testCreateModuleHostErrorsAndKeepsPendingReasonWhenRebuildRequestIsRejected()
     local owner = {}
 
-    self.h.public.coordinator.register("test-pack", { ModEnabled = true })
-    self.h.public.coordinator.registerRebuild("test-pack", function()
+    self.h.coordinator.register("test-pack", { ModEnabled = true })
+    self.h.coordinator.registerRebuild("test-pack", function()
         return false
     end)
 
@@ -271,7 +271,7 @@ function TestModuleHost_PrepareDefinition:testCreateModuleHostErrorsAndKeepsPend
     lu.assertFalse(ok)
     lu.assertStrContains(err, "host.structural_rebuild_unavailable")
     lu.assertTrue(owner.requiresFullReload)
-    lu.assertNotNil(self.h.hostState.getPendingCoordinatorRebuild(prepared))
+    lu.assertNotNil(self.h.moduleRuntimeRegistry.getPendingCoordinatorRebuild(prepared))
 end
 
 function TestModuleHost_PrepareDefinition:testPrepareDefinitionKeepsStableStructuralFingerprint()

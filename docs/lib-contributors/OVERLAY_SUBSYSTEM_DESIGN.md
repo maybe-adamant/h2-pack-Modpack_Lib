@@ -28,29 +28,33 @@ Modules own:
 
 ## Module API
 
-Modules declare retained overlays through an optional module definition callback:
+Modules declare retained overlays through the author-host overlay namespace:
 
 ```lua
-registerOverlays = function(overlays, host, store)
-end
+host.overlays.createLine("summary.igt", spec)
+host.overlays.onCommit(function(ctx, commit)
+    ctx.setLine("summary.igt", BuildSummary())
+    ctx.refresh("summary.igt")
+end)
 ```
 
-`registerOverlays` is called during host activation. The candidate host owns the
-overlay receipt, and overlay activation participates in host activation rollback.
+Declarations are open after host construction and close when activation starts.
+The candidate host owns the overlay receipt, and overlay activation participates
+in host activation rollback.
 
 ## Host Scoping
 
-Overlay element names are local to the module `pluginGuid` plus the committed
-host lifecycle:
+Overlay element names are local to the module owner id derived from
+`pluginGuid` plus the committed host lifecycle:
 
 ```lua
-overlays.createLine("summary.igt", spec)
-overlays.createTable("runs", spec)
+host.overlays.createLine("summary.igt", spec)
+host.overlays.createTable("runs", spec)
 ```
 
 Lib builds globally stable backing identifiers from:
 
-- Module runtime identity.
+- Capability owner id.
 - Local overlay name.
 - Retained table row slot, when applicable.
 - Column key, when applicable.
@@ -60,11 +64,13 @@ Two modules may use the same local overlay name without colliding.
 ## System Overlays
 
 Framework and Lib may need retained HUD lines that are not declared by a module.
-These use a narrow system overlay API instead of a general owner-token lifecycle
-surface:
+Lib internals use private system scopes, while Framework consumes the scoped
+runtime overlay facade:
 
 ```lua
-lib.overlays.defineSystem(ownerId, function(overlays)
+local runtime = lib.createFrameworkRuntime("adamant-ModpackFramework")
+
+runtime.overlays.define("pack", "hud", function(overlays)
     overlays.createLine("hash.marker", spec)
 end)
 ```
@@ -74,8 +80,9 @@ The system registrar intentionally exposes only `createLine(...)` and
 overlay capabilities.
 
 System overlays are trusted first-party infrastructure for Lib fallback and
-Framework HUD markers. They refresh directly through `defineSystem`; they do not
-participate in host activation receipts or retained overlay transactions.
+Framework HUD markers. They refresh directly through private system scopes or
+the Framework runtime overlay facade; they do not participate in module host
+activation receipts.
 
 ## Retained Elements
 
@@ -85,7 +92,7 @@ A line is a single retained display row. The name intentionally avoids `row` so 
 unambiguous.
 
 ```lua
-overlays.createLine("summary.igt", {
+host.overlays.createLine("summary.igt", {
     region = "middleRightStack",
     order = 100,
     visible = function()
@@ -123,7 +130,7 @@ String values are a convenience for one-column lines.
 A table is a fixed retained table projection with named columns and a maximum row count.
 
 ```lua
-overlays.createTable("runs", {
+host.overlays.createTable("runs", {
     region = "middleRightStack",
     order = 200,
     maxRows = 11,
@@ -196,7 +203,7 @@ The context does not expose:
 
 - `store.write`.
 - The full store object.
-- The full host object.
+- The `ModuleHost`.
 - Mutation plans.
 - Hook registration.
 
@@ -217,7 +224,7 @@ they should be designed as a separate Lib capability and then made available to 
 ### Settings Commit
 
 ```lua
-overlays.onCommit(function(ctx, commit)
+host.overlays.onCommit(function(ctx, commit)
     ctx.setTable("runs", BuildRunRows())
     ctx.refreshRegion("middleRightStack")
 end)
@@ -235,7 +242,7 @@ state.
 ### Intervals
 
 ```lua
-overlays.onInterval("tick", 0.05, function(ctx)
+host.overlays.onInterval("tick", 0.05, function(ctx)
     UpdateSnapshot()
     ctx.setLine("summary.igt", BuildIgtLine())
     ctx.refresh("summary.igt")
@@ -252,7 +259,7 @@ replacement. `when` controls callback execution; it does not unregister the inte
 ### After Hooks
 
 ```lua
-overlays.afterHook("StartNewRun", function(ctx, event)
+host.overlays.afterHook("StartNewRun", function(ctx, event)
     ctx.setTable("runs", BuildInitialRunRows(event.result))
     ctx.refreshRegion("middleRightStack")
 end)
@@ -279,15 +286,17 @@ contains the full return-value array for multi-return hooks.
 ## Hot Reload And Rollback
 
 Overlay refresh is private retained-registry plumbing behind host receipts and
-the narrow system overlay API:
+the narrow system/framework overlay APIs:
 
 ```lua
-overlays.installForHost(host, registerOverlays, authorHost, store)
-lib.overlays.defineSystem(ownerId, register)
+overlays.installForHost(host, authorHost, store)
+frameworkRuntime.overlays.define(packId, "hud", register)
 ```
 
-`installForHost` participates in host activation rollback. `defineSystem` is a
-direct first-party refresh path for fixed infrastructure overlays.
+`installForHost` participates in host activation rollback.
+The Framework overlay facade is a direct first-party refresh path for fixed
+Framework infrastructure overlays. Lib-owned fixed overlays use private system
+scopes.
 
 Refresh behavior:
 
@@ -307,27 +316,27 @@ Activation behavior:
 The retained API builds on private HUD component and stacked-layout renderer functions. Module authors
 should not register HUD components or stacked rows directly.
 
-- `lib.overlays.defineSystem` is the retained system-overlay entry point.
-- Module `registerOverlays` is the retained module-overlay entry point.
-- `lib.overlays.suppressForUi` remains public because Framework and standalone module UIs need to hide
-  overlays while foreground configuration UI is open.
+- `frameworkRuntime.overlays.define` is the Framework retained overlay entry point.
+- Module `host.overlays.*` is the retained module-overlay entry point.
+- Framework overlay suppression is exposed through `frameworkRuntime.ui`.
+- Fallback module UI suppression uses the internal overlay service.
 
-New code should use host-owned module declarations or the narrow system line
-surface only.
+New code should use host-owned module declarations, Framework runtime overlays,
+or private Lib system scopes only.
 
 ## Timer Target Shape
 
 The Speedrun Timer should become a retained overlay consumer with structure similar to:
 
 ```lua
-function timerApi.RegisterOverlays(overlays, host, store)
-    overlays.createLine("summary.igt", summaryIgtSpec)
-    overlays.createLine("summary.rta", summaryRtaSpec)
-    overlays.createLine("summary.lrt", summaryLrtSpec)
-    overlays.createTable("batch", batchTableSpec)
-    overlays.createTable("splits", splitsTableSpec)
+function timerApi.declareOverlays(host, store)
+    host.overlays.createLine("summary.igt", summaryIgtSpec)
+    host.overlays.createLine("summary.rta", summaryRtaSpec)
+    host.overlays.createLine("summary.lrt", summaryLrtSpec)
+    host.overlays.createTable("batch", batchTableSpec)
+    host.overlays.createTable("splits", splitsTableSpec)
 
-    overlays.onCommit(function(ctx, commit)
+    host.overlays.onCommit(function(ctx, commit)
         ApplyCommittedDisplayState(commit)
         ctx.setLine("summary.igt", BuildSummaryLine("igt"))
         ctx.setLine("summary.rta", BuildSummaryLine("rta"))
@@ -337,7 +346,7 @@ function timerApi.RegisterOverlays(overlays, host, store)
         ctx.refreshRegion("middleRightStack")
     end)
 
-    overlays.onInterval("tick", TIMER_REFRESH_INTERVAL, function(ctx)
+    host.overlays.onInterval("tick", TIMER_REFRESH_INTERVAL, function(ctx)
         UpdateTimerSnapshot()
         ctx.setLine("summary.igt", BuildSummaryLine("igt"))
         ctx.setLine("summary.rta", BuildSummaryLine("rta"))
@@ -349,7 +358,7 @@ function timerApi.RegisterOverlays(overlays, host, store)
         when = HasActiveDisplayLoop,
     })
 
-    overlays.afterHook("StartNewRun", function(ctx)
+    host.overlays.afterHook("StartNewRun", function(ctx)
         ctx.setTable("batch", BuildBatchRows())
         ctx.setTable("splits", BuildSplitRows())
         ctx.refreshRegion("middleRightStack")
@@ -364,7 +373,7 @@ return line values and table rows.
 
 Lib tests:
 
-- `registerOverlays` activates and receives an overlay declaration surface.
+- `host.overlays.*` records declarations before activation.
 - `createLine` creates a host-scoped retained line.
 - `setLine` updates retained line values.
 - `createTable` creates fixed-capacity retained rows.
@@ -376,7 +385,7 @@ Lib tests:
 - `onCommit` runs after module `onSettingsCommitted`.
 - `onInterval` runs while active and is cleaned up on refresh/removal.
 - `afterHook` observes hook args/results and cannot alter return values.
-- `defineSystem` supports system-owned HUD lines and cleans omitted system declarations.
+- Framework runtime overlays and private system overlays support first-party HUD lines and clean omitted declarations.
 
 Timer tests:
 

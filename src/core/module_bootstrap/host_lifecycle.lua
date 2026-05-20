@@ -80,7 +80,7 @@ local function resyncSession(def, session)
     return mismatches
 end
 
-local function commitSession(def, mutationBundle, settingsObserver, authorHost, store, session, pluginGuid)
+local function commitSession(host, def, mutationBundle, settingsObserver, authorHost, store, session)
     if not session.isDirty() then
         return true, nil
     end
@@ -102,7 +102,7 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
         return notifySettingsCommitted(def, settingsObserver, authorHost, store, commitContext)
     end
 
-    local ok, err = mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    local ok, err = mutation.applyForHost(host)
     if ok then
         return notifySettingsCommitted(def, settingsObserver, authorHost, store, commitContext)
     end
@@ -110,7 +110,7 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
     session._restoreConfigSnapshot(snapshot)
     session._reloadFromConfig()
 
-    local rollbackOk, rollbackErr = mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    local rollbackOk, rollbackErr = mutation.applyForHost(host)
     if not rollbackOk then
         logging.violate("lifecycle.session_rollback_reapply_failed", "%s: session rollback reapply failed: %s",
             tostring(def.name or def.id or "module"),
@@ -121,7 +121,7 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
     return false, err
 end
 
-local function setEnabled(def, mutationBundle, authorHost, store, enabled, pluginGuid)
+local function setEnabled(host, def, store, enabled)
     local nextEnabled = enabled == true
     local currentEnabled = store.read("Enabled") == true
     local packEnabled = isPackEnabled(def and def.modpack)
@@ -130,11 +130,11 @@ local function setEnabled(def, mutationBundle, authorHost, store, enabled, plugi
 
     local ok, err
     if nextEffective and currentEffective then
-        ok, err = mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+        ok, err = mutation.applyForHost(host)
     elseif nextEffective then
-        ok, err = mutation.applyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+        ok, err = mutation.applyForHost(host)
     elseif currentEffective then
-        ok, err = mutation.revertForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+        ok, err = mutation.revertForHost(host)
     else
         ok, err = true, nil
     end

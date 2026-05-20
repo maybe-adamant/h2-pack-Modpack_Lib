@@ -7,15 +7,18 @@ local integrations = deps.integrations
 local hooks = deps.hooks
 local overlays = deps.overlays
 local mutation = deps.mutation
+local fallbackUi = deps.fallbackUi
 local coordinator = deps.coordinator
 local definition = deps.definition
 local hostState = deps.hostState
+local moduleRuntimeRegistry = deps.moduleRuntimeRegistry
 local storage = deps.storage
 local widgets = deps.widgets
+local authorHostService = deps.authorHost
 local moduleHost = {
     prepareDefinition = definition.prepareDefinition,
 }
-local hostLifecycle = import('core/module_bootstrap/private_host_lifecycle.lua', nil, {
+local hostLifecycle = import('core/module_bootstrap/host_lifecycle.lua', nil, {
     logging = logging,
     mutation = mutation,
     moduleState = moduleState,
@@ -49,24 +52,12 @@ function moduleHost.addEffectReceipt(host, name, receipt)
     }
 end
 
----@class AuthorHost
----@field isEnabled fun(): boolean
----@field getIdentity fun(): table
----@field getMeta fun(): table
----@field log fun(fmt: string, ...): nil
----@field logIf fun(fmt: string, ...): nil
----@field tryActivate fun(): boolean, string|nil
-
 ---@class ModuleHostOpts
 ---@field definition ModuleDefinition
 ---@field pluginGuid string
 ---@field store ManagedStore
 ---@field session Session
----@field registerHooks fun(host: AuthorHost, store: ManagedStore)|nil
----@field registerPatchMutation fun(plan: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
----@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
----@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field drawTab fun(ctx: DrawContext)
 ---@field drawQuickContent fun(ctx: DrawContext)|nil
 
@@ -78,7 +69,9 @@ end
 ---@field widgets BoundWidgets
 
 ---@class ModuleHost
----@field getIdentity fun(): table
+---@field getHostId fun(): string
+---@field getModuleId fun(): string
+---@field getPackId fun(): string|nil
 ---@field getMeta fun(): table
 ---@field affectsRunData fun(): boolean
 ---@field getHashHints fun(): table|nil
@@ -100,15 +93,8 @@ end
 ---@field drawTab fun(imgui: table)
 ---@field drawQuickContent fun(imgui: table)|nil
 
-function public.getLiveModuleHost(pluginGuid)
-    if type(pluginGuid) ~= "string" or pluginGuid == "" then
-        return nil
-    end
-    return moduleHost.getLiveHost(pluginGuid)
-end
-
 function moduleHost.getLiveHost(pluginGuid)
-    return hostState.getLiveHost(pluginGuid)
+    return moduleRuntimeRegistry.getLiveHost(pluginGuid)
 end
 
 local KnownHostOpts = {
@@ -116,11 +102,7 @@ local KnownHostOpts = {
     pluginGuid = true,
     store = true,
     session = true,
-    registerHooks = true,
-    registerPatchMutation = true,
     onSettingsCommitted = true,
-    registerIntegrations = true,
-    registerOverlays = true,
     drawTab = true,
     drawQuickContent = true,
 }
@@ -133,37 +115,17 @@ local function ValidateKnownOpts(opts, context)
     end
 end
 
-local function BuildMutationBundle(opts)
-    local patchMutation = opts.registerPatchMutation
+local function CreateMutationBundle()
+    return {
+        patchMutation = nil,
+    }
+end
 
-    if patchMutation ~= nil and type(patchMutation) ~= "function" then
-        logging.violate("host.invalid_create_opts", "moduleHost.create: registerPatchMutation must be a function")
-    end
+local function ValidateSettingsObserver(opts)
     if opts.onSettingsCommitted ~= nil and type(opts.onSettingsCommitted) ~= "function" then
         logging.violate("host.invalid_create_opts", "moduleHost.create: onSettingsCommitted must be a function")
     end
-
-    return {
-        affectsRunData = patchMutation ~= nil,
-        patchMutation = patchMutation,
-    }, opts.onSettingsCommitted
-end
-
----@param host ModuleHost
----@return AuthorHost authorHost Module-safe projection of the full host surface.
-local function CreateAuthorHost(host)
-    return {
-        isEnabled = host.isEnabled,
-        getIdentity = host.getIdentity,
-        getMeta = host.getMeta,
-        tryActivate = host.tryActivate,
-        log = function(fmt, ...)
-            return host.log(fmt, ...)
-        end,
-        logIf = function(fmt, ...)
-            return host.logIf(fmt, ...)
-        end,
-    }
+    return opts.onSettingsCommitted
 end
 
 local function CreateDrawContext(imgui, authorSession, authorHost)
@@ -178,7 +140,16 @@ local function CreateDrawContext(imgui, authorSession, authorHost)
     }
 end
 
---- Creates full and author-facing host objects for Framework and standalone hosting.
+local function CreatePluginInfo(pluginGuid, def)
+    return {
+        pluginGuid = pluginGuid,
+        packId = def.modpack,
+        moduleId = def.id,
+        name = def.name,
+    }
+end
+
+--- Creates full and author-facing host objects for Framework and fallback UI.
 --- Activation is explicit through the returned author host.
 ---@param opts ModuleHostOpts
 ---@return ModuleHost host Full module host.
@@ -192,9 +163,6 @@ function moduleHost.create(opts)
     local pluginGuid = opts.pluginGuid
     local store = opts.store
     local session = opts.session
-    local registerHooks = opts.registerHooks
-    local registerIntegrations = opts.registerIntegrations
-    local registerOverlays = opts.registerOverlays
     if type(def) ~= "table" or def._preparedDefinition ~= true then
         logging.violate("host.invalid_create_opts", "moduleHost.create: prepared definition is required")
     end
@@ -211,23 +179,11 @@ function moduleHost.create(opts)
 
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
-    local mutationBundle, settingsObserver = BuildMutationBundle(opts)
+    local mutationBundle = CreateMutationBundle()
+    local settingsObserver = ValidateSettingsObserver(opts)
 
     if type(drawTab) ~= "function" then
         logging.violate("host.invalid_create_opts", "moduleHost.create: drawTab is required")
-    end
-    if registerHooks ~= nil then
-        if type(registerHooks) ~= "function" then
-            logging.violate("host.invalid_create_opts", "moduleHost.create: registerHooks must be a function")
-        end
-    end
-    if registerIntegrations ~= nil and type(registerIntegrations) ~= "function" then
-        logging.violate("host.invalid_create_opts", "moduleHost.create: registerIntegrations must be a function")
-    end
-    if registerOverlays ~= nil then
-        if type(registerOverlays) ~= "function" then
-            logging.violate("host.invalid_create_opts", "moduleHost.create: registerOverlays must be a function")
-        end
     end
     ---@type ModuleHost
     local host = {}
@@ -254,7 +210,7 @@ function moduleHost.create(opts)
 
     local authorSession = moduleState.createAuthorSession(session, {
         resetToDefaults = function(resetOpts)
-            return moduleState.resetStorageToDefaults(def.storage, session, resetOpts)
+            return moduleState.resetSessionToDefaults(def.storage, session, resetOpts)
         end,
     })
 
@@ -268,11 +224,16 @@ function moduleHost.create(opts)
         end
     end
 
-    function host.getIdentity()
-        return {
-            id = def.id,
-            modpack = def.modpack,
-        }
+    function host.getHostId()
+        return pluginGuid
+    end
+
+    function host.getModuleId()
+        return def.id
+    end
+
+    function host.getPackId()
+        return def.modpack
     end
 
     function host.getMeta()
@@ -302,8 +263,8 @@ function moduleHost.create(opts)
     function host.writeAndFlush(alias, value)
         requireActivated("writeAndFlush")
         session.write(alias, value)
-        local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
-            pluginGuid)
+        local ok, err = hostLifecycle.commitSession(host, def, mutationBundle, notifySettingsCommitted, authorHost, store,
+            session)
         return ok, err
     end
 
@@ -317,8 +278,7 @@ function moduleHost.create(opts)
         if not session.isDirty() then
             return true
         end
-        return hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
-            pluginGuid)
+        return hostLifecycle.commitSession(host, def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
     end
 
     function host.reloadFromConfig()
@@ -333,7 +293,7 @@ function moduleHost.create(opts)
 
     function host.resetToDefaults(resetOpts)
         requireActivated("resetToDefaults")
-        return moduleState.resetStorageToDefaults(def.storage, session, resetOpts)
+        return moduleState.resetSessionToDefaults(def.storage, session, resetOpts)
     end
 
     function host.commitIfDirty()
@@ -341,8 +301,8 @@ function moduleHost.create(opts)
         if not session.isDirty() then
             return true, nil, false
         end
-        local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
-            pluginGuid)
+        local ok, err = hostLifecycle.commitSession(host, def, mutationBundle, notifySettingsCommitted, authorHost, store,
+            session)
         return ok, err, ok == true
     end
 
@@ -352,7 +312,7 @@ function moduleHost.create(opts)
 
     function host.setEnabled(enabled)
         requireActivated("setEnabled")
-        return hostLifecycle.setEnabled(def, mutationBundle, authorHost, store, enabled, pluginGuid)
+        return hostLifecycle.setEnabled(host, def, store, enabled)
     end
 
     function host.setDebugMode(enabled)
@@ -374,19 +334,19 @@ function moduleHost.create(opts)
 
     function host.applyMutation()
         requireActivated("applyMutation")
-        return mutation.applyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+        return mutation.applyForHost(host)
     end
 
     function host.revertMutation()
         requireActivated("revertMutation")
-        return mutation.revertForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+        return mutation.revertForHost(host)
     end
 
     function host.tryActivate()
         return moduleHost.tryActivate(host)
     end
 
-    authorHost = CreateAuthorHost(host)
+    authorHost = authorHostService.create(host)
 
     function host.drawTab(imgui)
         requireActivated("drawTab")
@@ -405,12 +365,10 @@ function moduleHost.create(opts)
         mutationBundle = mutationBundle,
         pluginGuid = pluginGuid,
         store = store,
-        registerHooks = registerHooks,
-        registerIntegrations = registerIntegrations,
-        registerOverlays = registerOverlays,
         authorSession = authorSession,
         authorHost = authorHost,
         effectReceipts = {},
+        fallbackUiRequested = false,
         activated = false,
     })
 
@@ -482,10 +440,7 @@ function moduleHost.activate(host)
         logging.violate("host.invalid_activate_opts", "moduleHost.activate: host is required")
     end
 
-    local pluginGuid = state.pluginGuid
-    local registerHooks = state.registerHooks
-    local registerIntegrations = state.registerIntegrations
-    local registerOverlays = state.registerOverlays
+    local pluginGuid = host.getHostId()
     local store = state.store
     local authorHost = state.authorHost
     local def = state.definition
@@ -496,12 +451,13 @@ function moduleHost.activate(host)
     if state.activating == true then
         logging.violate("host.activation_in_progress", "moduleHost.activate: host activation is already in progress")
     end
-    local identity = host.getIdentity()
     local meta = host.getMeta()
-    local packId = identity.modpack
-    local pendingCoordinatorRebuild = hostState.getPendingCoordinatorRebuild(def)
+    local moduleId = host.getModuleId()
+    local packId = host.getPackId()
+    local pendingCoordinatorRebuild = moduleRuntimeRegistry.getPendingCoordinatorRebuild(def)
     local hasPendingCoordinatorRebuild = pendingCoordinatorRebuild ~= nil
-    local previousHost = hostState.getLiveHost(pluginGuid)
+    local previousHost = moduleRuntimeRegistry.getLiveHost(pluginGuid)
+    local previousPluginInfo = moduleRuntimeRegistry.getPluginInfo(pluginGuid)
     local candidateReceipts = {}
     local retireReceipts = {}
     local published = false
@@ -520,22 +476,25 @@ function moduleHost.activate(host)
     end
 
     local ok, err = pcall(function()
-        addReceipt("integrations", integrations.installForHost(host, registerIntegrations, authorHost, store), true)
-        addReceipt("hooks", hooks.installForHost(host, registerHooks, authorHost, store), true)
-        addReceipt("overlays", overlays.installForHost(host, registerOverlays, authorHost, store), true)
+        addReceipt("integrations", integrations.installForHost(host), true)
+        addReceipt("hooks", hooks.installForHost(host), true)
+        addReceipt("overlays", overlays.installForHost(host, authorHost, store), true)
 
         if not hasPendingCoordinatorRebuild then
-            addReceipt("mutation", mutation.syncForHost(host, state.mutationBundle, authorHost, store), false)
+            addReceipt("mutation", mutation.syncForHost(host), false)
         elseif hasPendingCoordinatorRebuild then
             local requested = coordinator.requestRebuild(packId, pendingCoordinatorRebuild)
             if requested then
-                hostState.setPendingCoordinatorRebuild(def, nil)
+                moduleRuntimeRegistry.setPendingCoordinatorRebuild(def, nil)
             else
                 logging.violate(
                     "host.structural_rebuild_unavailable",
                     "%s structural definition changed during hot reload; full reload required",
-                    tostring(meta.name or identity.id or "module"))
+                    tostring(meta.name or moduleId or "module"))
             end
+        end
+        if state.fallbackUiRequested == true then
+            addReceipt("fallbackUi", fallbackUi.installForHost(host), true)
         end
 
         for _, entry in ipairs(candidateReceipts) do
@@ -559,7 +518,8 @@ function moduleHost.activate(host)
         state.effectReceipts = retireReceipts
         state.activating = false
         state.activated = true
-        hostState.setLiveHost(pluginGuid, host)
+        moduleRuntimeRegistry.setLiveHost(pluginGuid, host)
+        moduleRuntimeRegistry.setPluginInfo(pluginGuid, CreatePluginInfo(pluginGuid, def))
         published = true
     end)
 
@@ -567,14 +527,15 @@ function moduleHost.activate(host)
         state.activating = false
         state.activated = false
         disposeReceipts(candidateReceipts, "host.activation_rollback_failed",
-            tostring(meta.name or identity.id or "module") .. " activation rollback failed")
+            tostring(meta.name or moduleId or "module") .. " activation rollback failed")
         if published then
-            hostState.setLiveHost(pluginGuid, previousHost)
+            moduleRuntimeRegistry.setLiveHost(pluginGuid, previousHost)
+            moduleRuntimeRegistry.setPluginInfo(pluginGuid, previousPluginInfo)
         end
         error(err, 0)
     end
 
-    retireOldHost(previousHost, meta.name or identity.id or "module")
+    retireOldHost(previousHost, meta.name or moduleId or "module")
     return authorHost
 end
 

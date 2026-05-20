@@ -10,7 +10,7 @@ ModpackLib provides the common plumbing that those projects usually need:
 - a persistent `store` model for runtime hook logic
 - profile and hash helpers for saving, loading, and identifying settings
 - mutation helpers for modules that patch run data
-- module host helpers for coordinated and standalone usage
+- module host helpers for coordinated and fallback UI usage
 - reusable ImGui widgets and navigation helpers
 
 The library is designed around immediate-mode UI. Module authors write normal
@@ -21,23 +21,23 @@ local data = import("mods/data.lua")
 local logic = import("mods/logic.lua").bind(data)
 local ui = import("mods/ui.lua").bind(data)
 
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     id = "ExampleModule",
     name = "Example Module",
     storage = data.buildStorage(),
-    registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+logic.registerHooks(host, store)
 host.tryActivate()
 ```
 
-`pluginGuid` is the stable lifecycle identity; Lib owns the internal hot-reload
-state for hooks, overlays, integrations, mutation runtime, and structural reload
-tracking. Pass `registerHooks` when the module uses `lib.hooks.*`.
-`host.tryActivate()` registers the live host for coordinated discovery and standalone hosting.
+`pluginGuid` is the stable runtime identity; Lib owns the internal hot-reload
+state for hooks, overlays, integrations, game cache, mutation runtime, and
+structural reload tracking. Declare runtime hooks on `host.hooks.*` before activation.
+`host.tryActivate()` registers the live host for coordinated discovery and installs requested fallback UI.
 Every module definition must declare a stable `id` and display `name`; `modpack`
 is optional and marks modules that participate in Framework coordination.
 
@@ -73,14 +73,11 @@ Reference and historical notes:
 
 ## Public Surface
 
-- `lib.config`
-- `lib.coordinator`
-- `lib.mutation`
-- `lib.hashing`
-- `lib.hooks`
-- `lib.overlays`
-- `lib.integrations`
-- `lib.gameCache`
+- `host.hooks`
+- `host.overlays`
+- `host.integrations`
+- `host.gameCache`
+- `host.fallbackUi`
 - `lib.imguiHelpers`
 - `lib.widgets`
 - `lib.nav`
@@ -88,11 +85,7 @@ Reference and historical notes:
 Common top-level helpers:
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
-- `lib.standaloneHost(...)`
-- `lib.standaloneUiBridge(...)`
-- `lib.getLiveModuleHost(...)`
-- `lib.coordinator.isRegistered(...)`
-- `lib.resetStorageToDefaults(...)`
+- `lib.createFrameworkRuntime(...)`
 
 Most authors start with `lib.createModule(...)`.
 Pack orchestrators that should skip invalid modules instead of stopping sibling

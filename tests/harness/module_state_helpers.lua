@@ -15,7 +15,7 @@ function helpers.createModuleState(harness, config, definition)
 end
 
 function helpers.getHostLifecycle(harness)
-    return assert(harness.imports["core/module_bootstrap/private_host_lifecycle.lua"], "host lifecycle service missing")
+    return assert(harness.imports["core/module_bootstrap/host_lifecycle.lua"], "host lifecycle service missing")
 end
 
 function helpers.withLoggingPolicy(policy, callback)

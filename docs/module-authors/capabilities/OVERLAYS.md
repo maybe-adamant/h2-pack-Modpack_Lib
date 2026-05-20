@@ -6,53 +6,52 @@ Use overlays when the module needs a retained display. Use widgets when the modu
 
 ## Normal Shape
 
-Declare overlays inside `registerOverlays(overlays, host, store)` and pass that callback to `lib.createModule(...)`:
+Create the host, declare overlays on `host.overlays`, then activate:
 
 ```lua
-local function registerOverlays(overlays, host, store)
-    overlays.createLine("summary.igt", {
-        region = "middleRightStack",
-        order = lib.overlays.order.module,
-        columnGap = 20,
-        columns = {
-            { key = "label", minWidth = 40 },
-            { key = "time", minWidth = 80 },
-        },
-    })
-
-    overlays.onCommit(function(ctx)
-        ctx.setLine("summary.igt", {
-            label = "IGT:",
-            time = "00:00.00",
-        })
-        ctx.refresh("summary.igt")
-    end)
-end
-```
-
-Then pass it into module creation:
-
-```lua
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     id = MODULE_ID,
     name = "Example Module",
     storage = data.buildStorage(),
-    registerOverlays = registerOverlays,
     drawTab = ui.drawTab,
 })
+
+host.overlays.createLine("summary.igt", {
+    region = "middleRightStack",
+    order = host.overlays.order.module,
+    columnGap = 20,
+    columns = {
+        { key = "label", minWidth = 40 },
+        { key = "time", minWidth = 80 },
+    },
+})
+
+host.overlays.onCommit(function(ctx)
+    ctx.setLine("summary.igt", {
+        label = "IGT:",
+        time = "00:00.00",
+    })
+    ctx.refresh("summary.igt")
+end)
+
 host.tryActivate()
 ```
+
+`host.overlays` is bound to the module host, so overlay declarations do not need
+an owner token or a construction-time callback.
 
 ## Retained Elements
 
 Use:
 
-- `overlays.createLine(name, spec)`
-- `overlays.createTable(name, spec)`
+- `host.overlays.createLine(name, spec)`
+- `host.overlays.createTable(name, spec)`
 
-Retained element names are local to the module's `pluginGuid` lifecycle. Different modules can reuse the same local element names without colliding.
+Retained element names are local to the module owner id derived from
+`pluginGuid`. Different modules can reuse the same local element names without
+colliding.
 
 The shared managed region currently exposed to modules is:
 
@@ -60,17 +59,17 @@ The shared managed region currently exposed to modules is:
 
 Order bands:
 
-- `lib.overlays.order.framework`
-- `lib.overlays.order.module`
-- `lib.overlays.order.debug`
+- `host.overlays.order.framework`
+- `host.overlays.order.module`
+- `host.overlays.order.debug`
 
 ## Projection Events
 
 Overlay projections can update retained elements from:
 
-- `overlays.onCommit(function(ctx, commit) ... end)`
-- `overlays.onInterval(name, seconds, function(ctx, event) ... end, opts)`
-- `overlays.afterHook(path, function(ctx, event) ... end)`
+- `host.overlays.onCommit(function(ctx, commit) ... end)`
+- `host.overlays.onInterval(name, seconds, function(ctx, event) ... end, opts)`
+- `host.overlays.afterHook(path, function(ctx, event) ... end)`
 
 The projection context exposes:
 
@@ -93,23 +92,16 @@ Overlay visibility has multiple gates:
 
 - Lib applies the global game-HUD gate.
 - Each overlay can provide its own `visible` boolean or callback.
-- Framework and standalone configuration UI suppress the entire overlay layer while open.
+- Framework and fallback configuration UI suppress the entire overlay layer while open.
 
-Module code normally does not need to call suppression APIs directly. They are available when a custom foreground ImGui UI must temporarily hide Lib overlays:
-
-```lua
-local token = lib.overlays.suppressForUi()
--- later
-token.release()
-```
-
-Suppression is reference-counted. Always release the token you acquire.
+Module code does not call suppression APIs directly. Framework and Lib
+fallback UI windows acquire and release suppression through their runtime
+facades while foreground configuration UI is open.
 
 ## Common Mistakes
 
 - Do not render overlay text directly from draw-tab UI code.
 - Do not use overlays for editable configuration.
-- Do not keep suppression tokens forever.
 - Do not read staged session values from projection callbacks.
 
 See also:

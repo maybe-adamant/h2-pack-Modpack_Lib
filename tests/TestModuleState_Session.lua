@@ -432,8 +432,8 @@ function TestModuleState_Session:testTableStorageHashRoundTripsRows()
         { Enabled = true, Limit = 1, ChoiceMode = 2, Note = "a|b=%c" },
     }
 
-    local encoded = self.harness.public.hashing.toHash(tableNode, value)
-    local decoded = self.harness.public.hashing.fromHash(tableNode, encoded)
+    local encoded = self.harness.hashing.toHash(tableNode, value)
+    local decoded = self.harness.hashing.fromHash(tableNode, encoded)
 
     lu.assertEquals(#decoded, 2)
     lu.assertFalse(decoded[1].Enabled)

@@ -1,9 +1,9 @@
 local lu = require("luaunit")
-local createStandaloneHarness = require("tests/harness/create_standalone_harness")
+local createFallbackUiHarness = require("tests/harness/create_fallback_ui_harness")
 
-TestStandaloneHost = {}
+TestFallbackUi = {}
 
-local PLUGIN_GUID = "test-standalone-module"
+local PLUGIN_GUID = "test-fallback-ui-module"
 
 local function makeHost(opts)
     opts = opts or {}
@@ -18,15 +18,18 @@ local function makeHost(opts)
     local debugMode = opts.debugMode == true
     local host = {
         calls = calls,
-        getIdentity = function()
-            return {
-                id = opts.id or "StandaloneTest",
-                modpack = opts.modpack,
-            }
+        getHostId = function()
+            return opts.pluginGuid or PLUGIN_GUID
+        end,
+        getModuleId = function()
+            return opts.id or "FallbackUiTest"
+        end,
+        getPackId = function()
+            return opts.modpack
         end,
         getMeta = function()
             return {
-                name = opts.name or "Standalone Test",
+                name = opts.name or "Fallback UI Test",
             }
         end,
         affectsRunData = function()
@@ -130,37 +133,43 @@ local function makeImgui(opts)
     return imgui, calls
 end
 
-function TestStandaloneHost:setUp()
-    self.h = createStandaloneHarness()
+local function createBridge(h, pluginGuid)
+    local bridge = nil
+    local _, authorHost = h:createLibHost(pluginGuid or PLUGIN_GUID)
+    authorHost.fallbackUi.attachGuiOnce(function(ui)
+        bridge = ui
+    end)
+    return bridge
+end
+
+function TestFallbackUi:setUp()
+    self.h = createFallbackUiHarness()
     self.h:captureWarnings()
 end
 
-function TestStandaloneHost:tearDown()
+function TestFallbackUi:tearDown()
     self.h:restoreWarnings()
 end
 
-function TestStandaloneHost:testErrorsWhenPluginGuidMissing()
-    lu.assertErrorMsgContains("pluginGuid is required", function()
-        self.h.public.standaloneHost()
+function TestFallbackUi:testAttachGuiOnceRequiresManagedHost()
+    lu.assertErrorMsgContains("expected managed module host", function()
+        self.h.fallbackUi.attachGuiOnce(nil, function() end)
     end)
 end
 
-function TestStandaloneHost:testBridgeErrorsWhenPluginGuidMissing()
-    lu.assertErrorMsgContains("pluginGuid is required", function()
-        self.h.public.standaloneUiBridge()
+function TestFallbackUi:testAttachGuiOnceRequiresRegisterCallback()
+    local _, authorHost = self.h:createLibHost(PLUGIN_GUID)
+    lu.assertErrorMsgContains("register must be a function", function()
+        authorHost.fallbackUi.attachGuiOnce()
     end)
 end
 
-function TestStandaloneHost:testErrorsWhenModuleHasNoLiveHost()
-    self.h:installHost(nil)
-
-    lu.assertErrorMsgContains("no live module host is registered", function()
-        self.h.public.standaloneHost(PLUGIN_GUID)
+function TestFallbackUi:testBridgeCallbacksNoOpBeforeRuntimeExists()
+    local bridge = nil
+    local _, authorHost = self.h:createLibHost(PLUGIN_GUID)
+    authorHost.fallbackUi.attachGuiOnce(function(ui)
+        bridge = ui
     end)
-end
-
-function TestStandaloneHost:testBridgeCallbacksNoOpBeforeRuntimeExists()
-    local bridge = self.h.public.standaloneUiBridge(PLUGIN_GUID)
 
     local okMenu, errMenu = pcall(bridge.addMenuBar)
     local okRender, errRender = pcall(bridge.renderWindow)
@@ -171,47 +180,43 @@ function TestStandaloneHost:testBridgeCallbacksNoOpBeforeRuntimeExists()
     lu.assertTrue(okClosed, errClosed)
 end
 
-function TestStandaloneHost:testCreatesRuntimeWhenModuleIsNotCoordinated()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testCreatesRuntimeWhenModuleIsNotCoordinated()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", nil)
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
 
     lu.assertEquals(type(runtime.renderWindow), "function")
     lu.assertEquals(type(runtime.addMenuBar), "function")
     lu.assertEquals(type(runtime.handleHostGuiClosed), "function")
 end
 
-function TestStandaloneHost:testBridgeDispatchesInstalledRuntime()
-    local bridge = self.h.public.standaloneUiBridge(PLUGIN_GUID)
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testBridgeDispatchesInstalledRuntime()
+    local bridge = createBridge(self.h)
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", nil)
     local imgui = makeImgui({ menuClicked = true })
     self.h.rom.ImGui = imgui
 
-    self.h.public.standaloneHost(PLUGIN_GUID)
+    self.h:installFallbackRuntime(host)
     bridge.addMenuBar()
     bridge.renderWindow()
 
     lu.assertEquals(host.calls.drawTab, 1)
 end
 
-function TestStandaloneHost:testBridgeDispatchesReplacementRuntime()
-    local bridge = self.h.public.standaloneUiBridge(PLUGIN_GUID)
-    local firstHost = makeHost({ modpack = "standalone-pack", name = "First Standalone" })
-    self.h:installHost(firstHost)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testBridgeDispatchesReplacementRuntime()
+    local bridge = createBridge(self.h)
+    local firstHost = makeHost({ modpack = "fallback-pack", name = "First Fallback UI" })
+    self.h.coordinator.register("fallback-pack", nil)
     self.h.rom.ImGui = makeImgui({ menuClicked = true })
-    self.h.public.standaloneHost(PLUGIN_GUID)
+    self.h:installFallbackRuntime(firstHost)
     bridge.addMenuBar()
     bridge.renderWindow()
 
-    local secondHost = makeHost({ modpack = "standalone-pack", name = "Second Standalone" })
-    self.h:installHost(secondHost)
+    local secondHost = makeHost({ modpack = "fallback-pack", name = "Second Fallback UI" })
     self.h.rom.ImGui = makeImgui({ menuClicked = true })
-    self.h.public.standaloneHost(PLUGIN_GUID)
+    self.h:installFallbackRuntime(secondHost)
     bridge.addMenuBar()
     bridge.renderWindow()
 
@@ -219,50 +224,65 @@ function TestStandaloneHost:testBridgeDispatchesReplacementRuntime()
     lu.assertEquals(secondHost.calls.drawTab, 1)
 end
 
-function TestStandaloneHost:testStandaloneRuntimeReplacementClosesPreviousRuntime()
-    local firstHost = makeHost({ modpack = "standalone-pack", name = "First Standalone" })
-    self.h:installHost(firstHost)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testFallbackRuntimeReplacementClosesPreviousRuntime()
+    local firstHost = makeHost({ modpack = "fallback-pack", name = "First Fallback UI" })
+    self.h.coordinator.register("fallback-pack", nil)
     self.h.rom.ImGui = makeImgui({ menuClicked = true })
-    local firstRuntime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local firstRuntime = self.h:installFallbackRuntime(firstHost)
     firstRuntime.addMenuBar()
 
     lu.assertEquals(self.h:countUiSuppressors(), 1)
 
-    local secondHost = makeHost({ modpack = "standalone-pack", name = "Second Standalone" })
-    self.h:installHost(secondHost)
-    self.h.public.standaloneHost(PLUGIN_GUID)
+    local secondHost = makeHost({ modpack = "fallback-pack", name = "Second Fallback UI" })
+    self.h:installFallbackRuntime(secondHost)
 
     lu.assertEquals(self.h:countUiSuppressors(), 0)
 end
 
-function TestStandaloneHost:testStandaloneRuntimeIsRetiredWithOwningHost()
-    local pluginGuid = "test-standalone-retired-with-host"
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testFallbackRuntimeRollbackRestoresPreviousRuntime()
+    local firstHost = makeHost({ modpack = "fallback-pack", name = "First Fallback UI" })
+    local secondHost = makeHost({ modpack = "fallback-pack", name = "Second Fallback UI" })
+    self.h.coordinator.register("fallback-pack", nil)
+
+    local firstRuntime = self.h:installFallbackRuntime(firstHost)
+    local secondReceipt = self.h.fallbackUi.installForHost(secondHost)
+
+    lu.assertTrue(secondReceipt.commit())
+    lu.assertNotEquals(self.h:getFallbackUiRuntime(PLUGIN_GUID), firstRuntime)
+
+    lu.assertTrue(secondReceipt.dispose())
+
+    lu.assertEquals(self.h:getFallbackUiRuntime(PLUGIN_GUID), firstRuntime)
+end
+
+function TestFallbackUi:testFallbackRuntimeIsRetiredWithOwningHost()
+    local pluginGuid = "test-fallback-ui-retired-with-host"
+    self.h.coordinator.register("fallback-pack", nil)
 
     local firstHost = self.h:createActivatedLibHost(pluginGuid, {
-        id = "StandaloneRuntimeRetire",
-        name = "Standalone Runtime Retire",
+        id = "FallbackUiRuntimeRetire",
+        name = "Fallback UI Runtime Retire",
+        attachFallbackUi = true,
     })
-    local firstRuntime = self.h.public.standaloneHost(pluginGuid)
+    local firstRuntime = self.h:getFallbackUiRuntime(pluginGuid)
     local secondHost = self.h:createActivatedLibHost(pluginGuid, {
-        id = "StandaloneRuntimeRetire",
-        name = "Standalone Runtime Retire",
+        id = "FallbackUiRuntimeRetire",
+        name = "Fallback UI Runtime Retire",
+        attachFallbackUi = true,
     })
 
     lu.assertNotEquals(firstHost, secondHost)
-    lu.assertNil(self.h:getStandaloneRuntime(pluginGuid))
-    lu.assertNotEquals(self.h:getStandaloneRuntime(pluginGuid), firstRuntime)
+    lu.assertNotNil(self.h:getFallbackUiRuntime(pluginGuid))
+    lu.assertNotEquals(self.h:getFallbackUiRuntime(pluginGuid), firstRuntime)
 end
 
-function TestStandaloneHost:testSkipsStandaloneLifecycleAndUiWhenCoordinated()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", { ModEnabled = true })
+function TestFallbackUi:testSkipsFallbackUiLifecycleWhenCoordinated()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", { ModEnabled = true })
     local imgui, calls = makeImgui({ menuClicked = true })
     self.h.rom.ImGui = imgui
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
     runtime.addMenuBar()
     runtime.renderWindow()
 
@@ -270,50 +290,45 @@ function TestStandaloneHost:testSkipsStandaloneLifecycleAndUiWhenCoordinated()
     lu.assertEquals(calls.begin, 0)
 end
 
-function TestStandaloneHost:testFallbackMarkerHidesWhenOnlyStandaloneRuntimeIsCoordinated()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", { ModEnabled = true })
+function TestFallbackUi:testFallbackMarkerHidesWhenOnlyFallbackRuntimeIsCoordinated()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", { ModEnabled = true })
 
-    self.h.public.standaloneHost(PLUGIN_GUID)
+    self.h:installFallbackRuntime(host)
     local row = self.h:getFallbackMarkerRow()
 
     lu.assertNotNil(row)
     lu.assertFalse(row.visible())
 end
 
-function TestStandaloneHost:testFallbackMarkerShowsWhenStandaloneRuntimeIsUncoordinated()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testFallbackMarkerShowsWhenFallbackRuntimeIsUncoordinated()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", nil)
 
-    self.h.public.standaloneHost(PLUGIN_GUID)
+    self.h:installFallbackRuntime(host)
     local row = self.h:getFallbackMarkerRow()
 
     lu.assertNotNil(row)
     lu.assertTrue(row.visible())
 end
 
-function TestStandaloneHost:testFallbackMarkerShowsWhenAnyStandaloneRuntimeIsUncoordinated()
-    local coordinatedHost = makeHost({ modpack = "standalone-pack" })
-    local uncoordinatedHost = makeHost({ modpack = "other-pack" })
-    self.h:installHost(coordinatedHost)
-    self.h:installHost(uncoordinatedHost, "other-plugin")
-    self.h.public.coordinator.register("standalone-pack", { ModEnabled = true })
-    self.h.public.coordinator.register("other-pack", nil)
+function TestFallbackUi:testFallbackMarkerShowsWhenAnyFallbackRuntimeIsUncoordinated()
+    local coordinatedHost = makeHost({ modpack = "fallback-pack" })
+    local uncoordinatedHost = makeHost({ pluginGuid = "other-plugin", modpack = "other-pack" })
+    self.h.coordinator.register("fallback-pack", { ModEnabled = true })
+    self.h.coordinator.register("other-pack", nil)
 
-    self.h.public.standaloneHost(PLUGIN_GUID)
-    self.h.public.standaloneHost("other-plugin")
+    self.h:installFallbackRuntime(coordinatedHost)
+    self.h:installFallbackRuntime(uncoordinatedHost)
     local row = self.h:getFallbackMarkerRow()
 
     lu.assertNotNil(row)
     lu.assertTrue(row.visible())
 end
 
-function TestStandaloneHost:testMenuTogglesWindowAndRenderDrawsControls()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testMenuTogglesWindowAndRenderDrawsControls()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", nil)
     local imgui, calls = makeImgui({
         menuClicked = true,
         buttonClicks = {
@@ -322,32 +337,31 @@ function TestStandaloneHost:testMenuTogglesWindowAndRenderDrawsControls()
     })
     self.h.rom.ImGui = imgui
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
     runtime.addMenuBar()
     runtime.renderWindow()
 
     lu.assertEquals(calls.beginMenu, 1)
-    lu.assertEquals(calls.menuLabel, "Standalone Test")
-    lu.assertEquals(calls.menuItem, "Standalone Test")
+    lu.assertEquals(calls.menuLabel, "Fallback UI Test")
+    lu.assertEquals(calls.menuItem, "Fallback UI Test")
     lu.assertEquals(calls.setNextWindowSize, 1)
-    lu.assertEquals(calls.title, "Standalone Test###StandaloneTest")
+    lu.assertEquals(calls.title, "Fallback UI Test###FallbackUiTest")
     lu.assertEquals(calls.checkboxLabels, { "Enabled", "Debug Mode" })
     lu.assertEquals(host.calls.resync, 1)
     lu.assertEquals(host.calls.drawTab, 1)
     lu.assertEquals(host.calls.commitIfDirty, 1)
 end
 
-function TestStandaloneHost:testCloseFlushesRunDataAfterAffectingEnabledToggle()
+function TestFallbackUi:testCloseFlushesRunDataAfterAffectingEnabledToggle()
     local setupCalls = 0
     self.h.game.setupRunData = function()
         setupCalls = setupCalls + 1
     end
     local host = makeHost({
-        modpack = "standalone-pack",
+        modpack = "fallback-pack",
         affectsRunData = true,
     })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+    self.h.coordinator.register("fallback-pack", nil)
     local imgui = makeImgui({
         menuClicked = true,
         open = false,
@@ -357,7 +371,7 @@ function TestStandaloneHost:testCloseFlushesRunDataAfterAffectingEnabledToggle()
     })
     self.h.rom.ImGui = imgui
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
     runtime.addMenuBar()
     runtime.renderWindow()
     runtime.renderWindow()
@@ -366,17 +380,16 @@ function TestStandaloneHost:testCloseFlushesRunDataAfterAffectingEnabledToggle()
     lu.assertEquals(setupCalls, 1)
 end
 
-function TestStandaloneHost:testDebugToggleDoesNotMarkRunDataDirty()
+function TestFallbackUi:testDebugToggleDoesNotMarkRunDataDirty()
     local setupCalls = 0
     self.h.game.setupRunData = function()
         setupCalls = setupCalls + 1
     end
     local host = makeHost({
-        modpack = "standalone-pack",
+        modpack = "fallback-pack",
         affectsRunData = true,
     })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+    self.h.coordinator.register("fallback-pack", nil)
     local imgui = makeImgui({
         menuClicked = true,
         open = false,
@@ -386,7 +399,7 @@ function TestStandaloneHost:testDebugToggleDoesNotMarkRunDataDirty()
     })
     self.h.rom.ImGui = imgui
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
     runtime.addMenuBar()
     runtime.renderWindow()
 
@@ -394,17 +407,16 @@ function TestStandaloneHost:testDebugToggleDoesNotMarkRunDataDirty()
     lu.assertEquals(setupCalls, 0)
 end
 
-function TestStandaloneHost:testStandaloneWindowSuppressesOverlaysUntilClose()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testFallbackWindowSuppressesOverlaysUntilClose()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", nil)
     local imgui = makeImgui({
         menuClicked = true,
         open = false,
     })
     self.h.rom.ImGui = imgui
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
     runtime.addMenuBar()
 
     lu.assertEquals(self.h:countUiSuppressors(), 1)
@@ -414,14 +426,13 @@ function TestStandaloneHost:testStandaloneWindowSuppressesOverlaysUntilClose()
     lu.assertEquals(self.h:countUiSuppressors(), 0)
 end
 
-function TestStandaloneHost:testHostGuiClosedReleasesSuppressionWithoutClosingWindow()
-    local host = makeHost({ modpack = "standalone-pack" })
-    self.h:installHost(host)
-    self.h.public.coordinator.register("standalone-pack", nil)
+function TestFallbackUi:testHostGuiClosedReleasesSuppressionWithoutClosingWindow()
+    local host = makeHost({ modpack = "fallback-pack" })
+    self.h.coordinator.register("fallback-pack", nil)
     local imgui = makeImgui({ menuClicked = true })
     self.h.rom.ImGui = imgui
 
-    local runtime = self.h.public.standaloneHost(PLUGIN_GUID)
+    local runtime = self.h:installFallbackRuntime(host)
     runtime.addMenuBar()
     lu.assertEquals(self.h:countUiSuppressors(), 1)
 

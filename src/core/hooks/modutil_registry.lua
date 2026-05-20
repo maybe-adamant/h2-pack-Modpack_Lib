@@ -4,13 +4,13 @@ local modutil = deps.modutil
 local REGISTRY_KEY = "__adamantHooks"
 
 if not (modutil and modutil.mod and modutil.mod.Path) then
-    logging.violate("hooks.modutil_unavailable", "lib.hooks: SGG_Modding-ModUtil is not available")
+    logging.violate("hooks.modutil_unavailable", "hooks: SGG_Modding-ModUtil is not available")
 end
 local modutilPath = modutil.mod.Path
 
 local function getRegistry(owner)
     if type(owner) ~= "table" then
-        logging.violate("hooks.invalid_registration", "lib.hooks: owner must be a persistent table")
+        logging.violate("hooks.invalid_registration", "hooks: owner must be a persistent table")
     end
 
     local registry = owner[REGISTRY_KEY]
@@ -76,7 +76,7 @@ local function applyOverrideState(state)
             modutilPath.Override(state.path, function(...)
                 local current = state.replacement
                 if type(current) ~= "function" then
-                    logging.violate("hooks.inactive_override", "lib.hooks.Override: function replacement is inactive")
+                    logging.violate("hooks.inactive_override", "hooks.override: function replacement is inactive")
                 end
                 return current(...)
             end)
@@ -87,7 +87,7 @@ local function applyOverrideState(state)
             modutilPath.Override(state.path, function(...)
                 local current = state.replacement
                 if type(current) ~= "function" then
-                    logging.violate("hooks.inactive_override", "lib.hooks.Override: function replacement is inactive")
+                    logging.violate("hooks.inactive_override", "hooks.override: function replacement is inactive")
                 end
                 return current(...)
             end)

@@ -1,24 +1,16 @@
 local deps = ...
 
-local logging = deps.logging
-local overlayGameDeps = deps.gameDeps.overlays
-local hooks = deps.hooks
-local hostState = deps.hostState
-local runtime = deps.runtime
-local values = deps.values
-local overlays = {}
-local overlaysPublic = public.overlays or {}
+local service = {}
 
--- Public API: shared overlay order bands used by module and system retained overlays.
-overlaysPublic.order = overlaysPublic.order or {
+-- Shared overlay order bands used by module and system retained overlays.
+local overlayOrder = {
     framework = 0,
     module = 1000,
     debug = 2000,
 }
-public.overlays = overlaysPublic
 
-local overlayState = import('core/overlays/private_state.lua', nil, {
-    runtime = runtime,
+local overlayState = import('core/overlays/state.lua', nil, {
+    runtime = deps.runtime,
 })
 
 -- Shared overlay visibility gate. UI suppression is global because foreground
@@ -27,219 +19,87 @@ local function isUiSuppressed()
     return next(overlayState.uiSuppressors) ~= nil
 end
 
-local renderer = import('core/overlays/private_renderer.lua', nil, {
-    gameDeps = overlayGameDeps,
+local renderer = import('core/overlays/renderer.lua', nil, {
+    gameDeps = deps.gameDeps.overlays,
     state = overlayState.renderer,
     isUiSuppressed = isUiSuppressed,
-    logging = logging,
-    hooks = hooks,
-    values = values,
-    order = overlaysPublic.order,
-    physicalHookOwner = overlayState.physicalHookOwner,
+    logging = deps.logging,
+    values = deps.values,
+    order = overlayOrder,
+    system = deps.rendererSystem,
 })
 
-local retained = import('core/overlays/private_retained.lua', nil, {
+local retained = import('core/overlays/retained.lua', nil, {
     state = overlayState.retained,
     renderer = renderer,
-    logging = logging,
-    order = overlaysPublic.order,
+    logging = deps.logging,
+    order = overlayOrder,
+    rom = deps.rom,
     dispatchIntervals = function(now)
-        return overlays.dispatchIntervals(now)
+        return service.dispatchIntervals(now)
     end,
 })
 
--- Module overlay declarations are public by callback surface, not by global
--- function. Host activation passes a scoped registrar into registerOverlays(...)
--- with createLine/createTable/onCommit/onInterval/afterHook.
+local declarations = import('core/overlays/declarations.lua', nil, {
+    logging = deps.logging,
+})
 
--- Public API: acquire a token that hides all Lib-managed gameplay overlays while
--- foreground configuration UI is open.
-function overlays.suppressForUi()
-    overlayState.nextUiSuppressorId = overlayState.nextUiSuppressorId + 1
-    local id = overlayState.nextUiSuppressorId
-    local wasSuppressed = isUiSuppressed()
-    overlayState.uiSuppressors[id] = true
-    if not wasSuppressed then
-        renderer.refreshAll()
-    end
+local hostAdapter = import('core/overlays/adapter_host.lua', nil, {
+    logging = deps.logging,
+    hostState = deps.hostState,
+    hooks = deps.hooks,
+    retained = retained,
+    declarations = declarations,
+})
 
-    local released = false
-    return {
-        release = function()
-            if released then
-                return
-            end
-            released = true
-            overlayState.uiSuppressors[id] = nil
-            if not isUiSuppressed() then
-                renderer.refreshAll()
-            end
-        end,
-    }
-end
+local author = import('core/overlays/adapter_author.lua', nil, {
+    logging = deps.logging,
+    hostState = deps.hostState,
+    declarations = declarations,
+    order = overlayOrder,
+})
 
-function overlaysPublic.suppressForUi()
-    return overlays.suppressForUi()
-end
+local system = import('core/overlays/adapter_system.lua', nil, {
+    logging = deps.logging,
+    retained = retained,
+    order = overlayOrder,
+})
 
--- Public API: read whether any UI suppression token is currently active.
-function overlays.isUiSuppressed()
-    return isUiSuppressed()
-end
+local suppression = import('core/overlays/suppression.lua', nil, {
+    state = overlayState,
+    renderer = renderer,
+    isUiSuppressed = isUiSuppressed,
+})
 
-function overlaysPublic.isUiSuppressed()
-    return overlays.isUiSuppressed()
-end
+service.installForHost = hostAdapter.installForHost
+service.suppressForUi = suppression.suppressForUi
+service.isUiSuppressed = suppression.isUiSuppressed
 
-local function createAfterHookReceipt(host, paths)
-    if #paths == 0 then
-        return nil
-    end
-
-    return hooks.installForHost(host, function()
-        for _, path in ipairs(paths) do
-            local hookPath = path
-            hooks.declareWrap(hookPath, "overlay.after:" .. hookPath, function(base, ...)
-                local args = { ... }
-                local results = { base(...) }
-                overlays.dispatchAfterHook(host, hookPath, args, results)
-                return table.unpack(results)
-            end)
-        end
-    end)
-end
-
-local function disposeReceipt(receipt)
-    if not receipt then
-        return true, nil
-    end
-    return receipt.dispose()
-end
-
-function overlays.installForHost(host, register, authorHost, store)
-    local state = hostState.get(host)
-    if not state then
-        logging.violate("overlays.invalid_registration", "overlays.installForHost: expected managed module host state")
-    end
-
-    local pluginGuid = state.pluginGuid
-    if type(pluginGuid) ~= "string" or pluginGuid == "" then
-        logging.violate("overlays.invalid_registration", "overlays.installForHost: host pluginGuid is required")
-    end
-
-    local stagingOwner = {}
-    local pendingOwnerId = pluginGuid .. ":pending"
-    local currentOwnerId = pluginGuid .. ":current"
-    local transaction = retained.beginTransaction(stagingOwner)
-    local afterHookReceipt = nil
-    local afterHookReceiptCommitted = false
-    local committed = false
-    local disposed = false
-
-    local ok, err = pcall(function()
-        retained.refresh(stagingOwner, pendingOwnerId, authorHost, store, function(registrar)
-            if register then
-                return register(registrar, authorHost, store)
-            end
-        end, { hidden = true })
-        afterHookReceipt = createAfterHookReceipt(host, retained.getAfterHookPaths(stagingOwner))
-    end)
-
-    if not ok then
-        transaction.rollback()
-        error(err, 0)
-    end
-
-    return {
-        commit = function()
-            if disposed or committed then
-                return true, nil
-            end
-            if afterHookReceipt then
-                local hookOk, hookErr = afterHookReceipt.commit()
-                if not hookOk then
-                    return false, hookErr
-                end
-                afterHookReceiptCommitted = true
-            end
-            local clearOk, clearErr = retained.clearTableRegistriesByOwnerId(currentOwnerId, host)
-            if not clearOk then
-                if afterHookReceiptCommitted then
-                    disposeReceipt(afterHookReceipt)
-                    afterHookReceiptCommitted = false
-                end
-                return false, clearErr
-            end
-            transaction.commit()
-            retained.promoteTableRegistry(stagingOwner, host, currentOwnerId, authorHost, store)
-            committed = true
-            return true, nil
-        end,
-        dispose = function()
-            if disposed then
-                return true, nil
-            end
-            if not committed then
-                transaction.rollback()
-                if afterHookReceiptCommitted then
-                    disposeReceipt(afterHookReceipt)
-                    afterHookReceiptCommitted = false
-                end
-                disposed = true
-                return true, nil
-            end
-
-            local disposeTransaction = retained.beginTransaction(host)
-            local disposeOk, disposeErr = pcall(function()
-                retained.refresh(host, currentOwnerId, nil, nil, function() end)
-            end)
-            local hookOk, hookErr = disposeReceipt(afterHookReceipt)
-            afterHookReceiptCommitted = false
-            if disposeOk then
-                disposeTransaction.commit()
-                disposed = true
-                if not hookOk then
-                    return false, hookErr
-                end
-                return true, nil
-            end
-
-            disposeTransaction.rollback()
-            disposed = true
-            return false, disposeErr
-        end,
-    }
-end
+local framework = import('core/overlays/adapter_framework.lua', nil, {
+    logging = deps.logging,
+    suppression = suppression,
+    system = system,
+    order = overlayOrder,
+})
 
 -- Internal API: dispatch overlay projections after settings commit.
-function overlays.dispatchCommit(owner, commit)
+function service.dispatchCommit(owner, commit)
     return retained.dispatchCommit(owner, commit)
 end
 
 -- Internal API: dispatch retained interval projections from the ImGui tick driver.
-function overlays.dispatchIntervals(now)
+function service.dispatchIntervals(now)
     return retained.dispatchIntervals(now)
 end
 
 -- Internal API: dispatch an overlay after-hook projection registered by a retained owner.
-function overlays.dispatchAfterHook(owner, path, args, results)
+function service.dispatchAfterHook(owner, path, args, results)
     return retained.dispatchAfterHook(owner, path, args, results)
 end
 
--- Public API: declare narrow retained HUD lines for Lib/Framework systems that
--- are not owned by a module host.
-function overlays.defineSystem(ownerId, register)
-    if type(ownerId) ~= "string" or ownerId == "" then
-        logging.violate("overlays.invalid_registration", "lib.overlays.defineSystem: ownerId must be a non-empty string")
-    end
-
-    retained.refresh(ownerId, ownerId, nil, nil, register, { system = true })
-    overlays.dispatchCommit(ownerId, {})
-    return true
-end
-
-function overlaysPublic.defineSystem(ownerId, register)
-    return overlays.defineSystem(ownerId, register)
-end
-
-return overlays
+return {
+    service = service,
+    author = author,
+    system = system,
+    framework = framework,
+}

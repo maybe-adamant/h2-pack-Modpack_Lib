@@ -42,7 +42,7 @@ A module is built from four main pieces:
 - `session`
   Staged UI state. Draw code edits this and host/framework plumbing commits it later.
 - `host`
-  The author-facing view returned by `lib.createModule(...)`. Call `host.tryActivate()` after construction so Framework and standalone hosting can use the registered live host.
+  The author-facing view returned by `lib.createModule(...)`. Call `host.tryActivate()` after construction so Framework and fallback UI can use the registered live host.
 
 Typical module flow:
 
@@ -80,7 +80,7 @@ Owns module wiring:
 - imports `data.lua`, `logic.lua`, and `ui.lua`
 - creates the module through `lib.createModule(...)`
 - activates the returned host
-- wires optional standalone UI
+- wires optional fallback UI
 
 Keep store/session/host creation here even if the module grows.
 
@@ -109,12 +109,12 @@ bound helpers on `ctx.widgets`.
 
 Owns gameplay and mutation behavior:
 
-- `registerHooks(host, store)`
+- local hook declaration helpers such as `registerHooks(host, store)`
 - optional `buildPatchPlan(...)`
 
 This code should read persisted state through the `store` passed to
-`registerHooks(...)`, patch mutation callbacks, or narrower access/read closures
-derived from that store.
+hook declaration helpers, patch mutation callbacks, or narrower access/read
+closures derived from that store.
 
 ## First Module Checklist
 
@@ -125,7 +125,7 @@ Start with the template, then fill in these pieces in order.
 At minimum:
 
 ```lua
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
@@ -186,7 +186,7 @@ Then attach it to the module definition:
 ```lua
 local data = import("mods/data.lua")
 
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
@@ -216,17 +216,17 @@ hashes, declare `stage = false, hash = false` and use
 ### 3. Create the module with storage and callbacks in `main.lua`
 
 ```lua
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
     id = "ExampleModule",
     name = "Example Module",
     storage = data.buildStorage(),
-    registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+logic.registerHooks(host, store)
 host.tryActivate()
 ```
 
@@ -277,16 +277,16 @@ local function BuildPatchPlan(plan, host, store)
 end
 ```
 
-Use `registerPatchMutation` for live run-data edits. If a mutation is not
+Use `host.mutation.patch(...)` for live run-data edits. If a mutation is not
 naturally expressed by the current patch-plan surface, add a patch-plan
 operation instead of bypassing the tracked lifecycle.
 
-If the module installs runtime hooks, declare them through ownerless `lib.hooks.*`
-calls from `registerHooks(...)`:
+If the module installs runtime hooks, declare them through `host.hooks.*` before
+activation:
 
 ```lua
 local function registerHooks(host, store)
-    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+    host.hooks.wrap("SomeGameFunction", function(base, ...)
         local result = base(...)
 
         if host.isEnabled() and store.read("FeatureEnabled") then
@@ -305,28 +305,28 @@ local data = import("mods/data.lua")
 local logic = import("mods/logic.lua").bind(data)
 local ui = import("mods/ui.lua").bind(data)
 
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
     id = MODULE_ID,
     name = "Example Module",
     storage = data.buildStorage(),
-    registerPatchMutation = logic.buildPatchPlan,
-    registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+host.mutation.patch(logic.buildPatchPlan)
+logic.registerHooks(host, store)
 host.tryActivate()
 ```
 
 This is the final `main.lua` module wiring shape.
 
-Framework uses it for coordinated modules. Standalone hosting uses it for module windows and menu items.
+Framework uses it for coordinated modules. Fallback UI uses it for module windows and menu items.
 
-If the module has no runtime hooks, `registerHooks` may be omitted.
+If the module has no runtime hooks, skip the hook declaration call.
 
-## Coordinated vs Standalone
+## Coordinated vs Fallback UI
 
 ### Coordinated
 
@@ -336,23 +336,21 @@ If the module belongs to a Framework-managed pack:
 - Framework calls `host.drawTab(...)`
 - optional quick setup uses `host.drawQuickContent(...)`
 
-### Standalone
+### Fallback UI
 
 If the module is not coordinated:
 
 ```lua
-local PLUGIN_GUID = _PLUGIN.guid
-local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
-
-local function registerGui()
-    rom.gui.add_imgui(standaloneUi.renderWindow)
-    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
-end
+host.fallbackUi.attachGuiOnce(function(fallbackUi)
+    rom.gui.add_imgui(fallbackUi.renderWindow)
+    rom.gui.add_to_menu_bar(fallbackUi.addMenuBar)
+end)
 ```
 
-Then call `lib.standaloneHost(PLUGIN_GUID)` after successful `host.tryActivate()`.
+Then call `host.tryActivate()`. Activation installs or swaps the active fallback
+UI runtime behind those stable callbacks.
 
-Standalone hosting automatically suppresses itself when the module is coordinated.
+Fallback UI automatically suppresses itself when the module is coordinated.
 
 ## How State Actually Flows
 
@@ -453,14 +451,14 @@ lib = mods["adamant-ModpackLib"]
 And for local callback declarations:
 
 ```lua
----@type fun(imgui: table, session: AuthorSession, host: AuthorHost)
+---@type fun(ctx: AdamantModpackLib.DrawContext)
 local drawTab
----@type fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
+---@type fun(ctx: AdamantModpackLib.DrawContext)|nil
 local drawQuickContent
 ```
 
-That lets LuaLS infer the author `session` and `host` types through
-`local function drawTab(...)`.
+That lets LuaLS infer `ctx.imgui`, the author `ctx.session`, the author
+`ctx.host`, and bound `ctx.widgets` through `local function drawTab(ctx)`.
 
 ## Recommended Next Reads
 

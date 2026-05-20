@@ -12,7 +12,7 @@ The module rebuild path is:
 
 - `lib.createModule(...)`
 - `host.tryActivate()`
-- `standaloneHost(...)` when running outside Framework coordination
+- requested fallback UI when running outside Framework coordination
 
 The Framework rebuild is correct, but it is not coalesced across a multi-module reload wave.
 
@@ -82,16 +82,16 @@ What would remove it:
 - platform APIs that provide reliable undo handles for all runtime effects
 - or a project decision to trade substantially more internal complexity for recovery from obscure broken dev-reload states
 
-## Standalone UI Attachment Is Callsite-Bound
+## Fallback UI Attachment Is Callsite-Bound
 
-Standalone module UI uses stable callbacks from `lib.standaloneUiBridge(pluginGuid)`, but the ROM GUI callback attachment still belongs in module code.
+Fallback module UI uses stable callbacks from `host.fallbackUi.attachGuiOnce(...)`, but the ROM GUI callback attachment still belongs in module code.
 
 What this means in practice:
 
 - `rom.gui.add_imgui(...)` and `rom.gui.add_to_menu_bar(...)` must run from the module's own callsite
 - Lib can swap the runtime behind the bridge after `host.tryActivate()`
 - Lib cannot fully fold ROM GUI callback attachment into host activation
-- standalone runtime cleanup is host-owned after activation, but the original ROM callback attachment is not an activation receipt
+- fallback UI runtime cleanup is host-owned after activation, but the original ROM callback attachment is not an activation receipt
 
 Why this exists:
 
@@ -101,7 +101,7 @@ Why this exists:
 What would remove it:
 
 - a ROM API that lets Lib attach GUI callbacks for an explicit plugin identity
-- or a public Lib API that moves all standalone UI declaration into module host construction and no longer requires module-owned ROM GUI registration
+- or a ROM/module-loader contract that lets Lib attach GUI callbacks without losing module attribution
 
 ## Mutation Recompute Is Per Operation And Best-Effort
 
@@ -175,14 +175,14 @@ What would remove it:
 
 ## Some Removed Hooks Can Leave Inert Wrappers
 
-Lib hook dispatch prevents normal hot reload from stacking active wrappers for stable pluginGuid/path/key registrations.
+Lib hook dispatch prevents normal hot reload from stacking active wrappers for stable owner-id/path/key registrations.
 
 One development-only caveat remains: if the same wrap or context-wrap site is removed, hot reloaded, re-added, and hot reloaded again within one live game process, an inert wrapper can remain until restart.
 
 Why this exists:
 
 - ModUtil path wraps are compositional and do not expose precise removal for every wrapper shape
-- Lib can make omitted registrations inert, but cannot always erase the physical wrapper already installed in ModUtil
+- Lib can make omitted registrations inert, but cannot always erase the ModUtil wrapper already installed
 
 What would remove it:
 

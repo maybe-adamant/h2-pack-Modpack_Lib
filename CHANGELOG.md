@@ -10,12 +10,27 @@ All notable changes to this project will be documented in this file.
 - Removed old `configKey`, `lifetime`, and `runtime` storage declaration compatibility in favor of explicit `persist`, `stage`, and `hash` axes.
 - Lib now injects `Enabled` and `DebugMode` as built-in prepared storage aliases instead of requiring module-authored config defaults.
 - Module definitions now require both stable `id` and display `name`; `modpack` remains optional.
-- Module callbacks receive the author host consistently: `registerHooks(host, store)`, `registerIntegrations(host, store)`, `registerOverlays(overlays, host, store)`, `registerPatchMutation(plan, host, store)`, and `onSettingsCommitted(host, store, commit)`. Draw callbacks now receive `drawTab(ctx)` and `drawQuickContent(ctx)`, where `ctx` contains `imgui`, author `session`, author `host`, and bound `widgets`.
+- Module callbacks receive the author host consistently: `host.mutation.patch(function(plan, host, store) ... end)` and `onSettingsCommitted(host, store, commit)`. Draw callbacks now receive `drawTab(ctx)` and `drawQuickContent(ctx)`, where `ctx` contains `imgui`, author `session`, author `host`, and bound `widgets`.
+- Runtime hooks are now declared through `host.hooks.*` before activation; the old ownerless `lib.hooks.*` registration surface and `createModule({ registerHooks = ... })` path have been removed.
+- Integration providers are now declared with `host.integrations.register(...)` before activation, and consumers call through `host.integrations.invoke(...)`; the old global integration surface has been removed.
+- Retained module overlays are now declared with `host.overlays.*` before activation; the old `createModule({ registerOverlays = ... })` path has been removed.
+- The global `lib.overlays.*` namespace has been removed; use `host.overlays.*`, `lib.createFrameworkRuntime(...).overlays`, or `lib.createFrameworkRuntime(...).ui` depending on the consumer.
+- The global `lib.createSystem(...)` helper has been removed; Framework owns non-module overlays through `lib.createFrameworkRuntime(...).overlays`, while Lib system scopes remain internal.
+- The global `lib.hashing.*` namespace has been removed; Framework consumes hashing through `lib.createFrameworkRuntime(...).hashing`.
+- The global `lib.config` export has been removed; Framework controls Lib diagnostics through `lib.createFrameworkRuntime(...).diagnostics`.
+- The global `lib.getLiveModuleHost(...)` helper has been removed; Framework resolves live hosts through `lib.createFrameworkRuntime(...).modules`.
+- `lib.createFrameworkRuntime(...)` now requires the Framework plugin guid, while Framework overlays take the pack id at definition time to scope retained owners.
+- Framework now consumes coordinator registration through `lib.createFrameworkRuntime(...).coordinator`, so coordinator mods can route pack registration through Framework.
+- The global `lib.coordinator.*` namespace has been removed; Framework consumes coordinator registration through `lib.createFrameworkRuntime(...).coordinator`.
+- The global `lib.resetStorageToDefaults(...)` helper has been removed; use `host.resetToDefaults(...)` or draw-scoped `ctx.session.resetToDefaults(...)`.
+- Game cache is now exposed to module authors through `host.gameCache.currentRun.*`; the old global `lib.gameCache.*` surface has been removed.
 - `lib.createModule(...)` / `lib.tryCreateModule(...)` now accept module definition fields directly; the old nested `definition = { ... }` option has been removed.
 - Bound draw widgets now target root alias strings or `StorageField` values; table row widgets use `row:field(alias)` instead of rebinding widgets with `ctx.widgets.forSession(...)`.
 - Module authors now construct through `lib.createModule(...)` / `lib.tryCreateModule(...)` and activate through `host.tryActivate()`; lower-level definition/state/host construction is internal.
+- Author hosts now expose `host.gameCache.currentRun.*` as a bound game-cache helper.
+- Game cache, integrations, hooks, and similar capability modules now return named service/author/public bundles where applicable so backend services, host facades, and remaining `lib.*` exports stay separated.
 - Host activation now stages and commits hooks, integrations, overlays, and mutation sync through host-owned receipts, so omitted registrations are removed on reload and activation failures roll back candidate effects.
-- `lib.hooks.Override(...)` now accepts function replacements only, matching the host-owned dispatcher model.
+- `host.hooks.override(...)` accepts function replacements only, matching the host-owned dispatcher model.
 - Retired separate internal lifecycle design notes; accepted lifecycle tradeoffs now live in `docs/references/KNOWN_LIMITATIONS.md`.
 - Persistent runtime-cache module state is now declared with `stage = false, hash = false`, read through `store.read(...)`, and written through `store.writeUnstaged(...)`.
 - Added first-class table storage roots with row-scoped aliases, staged table handles, read-only store table handles, packed child row access, and hash/profile serialization.
@@ -48,7 +63,7 @@ All notable changes to this project will be documented in this file.
 - Coordinated modules can request a Framework rebuild when structural definition shape changes during hot reload.
 - `createModuleHost(...)` now owns live-host publication and requires `drawTab`.
 - Public module host surface was narrowed around stable host accessors and behavior calls; direct raw definition access was removed.
-- `createModuleHost(...)` and `standaloneHost(...)` now require an explicit plugin guid captured at module load time.
+- `createModuleHost(...)` and fallback UI now require an explicit plugin guid captured at module load time.
 - Manual lifecycle hooks now receive the active author host and managed store as `apply(host, store)` and `revert(host, store)`.
 - Mutation lifecycle state is tracked by stable module identity where available, making reload/reapply behavior more robust.
 - Host startup sync now reverts active tracked mutation state when a module reloads disabled.
@@ -56,7 +71,7 @@ All notable changes to this project will be documented in this file.
 - Runtime-only storage aliases are excluded from session staging, profile/hash surfaces, and reset-to-defaults flows.
 - Host `writeAndFlush(...)` and `flush()` now notify `onSettingsCommitted` after successful dirty commits.
 - The fallback HUD marker now participates in the shared overlay layout instead of owning a separate HUD placement path.
-- Standalone module UI now suppresses Lib overlays while open and restores them on close after pending runtime flushes.
+- Fallback module UI now suppresses Lib overlays while open and restores them on close after pending runtime flushes.
 - Internal helper duplication was consolidated into shared internal value/store utilities.
 - Widget packed dropdown/radio helpers avoid repeated packed-choice classification work per frame.
 - Long-form guides and reference docs now live under `docs/`.
@@ -64,7 +79,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- Fixed standalone/coordinated checks to read persistent coordinator state instead of transient captured tables.
+- Fixed fallback/coordinated checks to read persistent coordinator state instead of transient captured tables.
 - Fixed fallback HUD marker hook registration so it no longer stacks raw ModUtil wraps across reloads.
 - Fixed manual mutation lifecycle paths so manual `apply`/`revert` receive the store consistently.
 - Fixed storage default fingerprinting so config default changes are part of the structural contract.
@@ -74,13 +89,13 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Expanded `API.md` to describe the current public Lib surface.
-- Updated module authoring docs around prepared definitions, Lib-owned host publication, standalone hosting, lifecycle behavior, hooks, integrations, widgets, and hash helpers.
+- Updated module authoring docs around prepared definitions, Lib-owned host publication, fallback UI, lifecycle behavior, hooks, integrations, widgets, and hash helpers.
 - Updated hot-reload docs around author-facing module reload support and infrastructure reload limitations.
 - Moved known limitations into Lib docs so shared modpack constraints have one home.
 
 ### Tests
 
-- Expanded test coverage for prepared definitions, lifecycle validation, stores/sessions, hooks, hashing, logging, mutation plans, nav, widgets, integrations, standalone hosting, and host publication.
+- Expanded test coverage for prepared definitions, lifecycle validation, stores/sessions, hooks, hashing, logging, mutation plans, nav, widgets, integrations, fallback UI, and host publication.
 
 ## [1.0.0] - 2026-04-20
 

@@ -15,7 +15,7 @@ end
 function TestStorageValidation:setUp()
     self.harness = createLibHarness()
     self.storage = self.harness.storage
-    self.hashing = assert(self.harness.public.hashing, "hashing public surface missing")
+    self.hashing = assert(self.harness.hashing, "hashing framework surface missing")
 end
 
 function TestStorageValidation:tearDown()
@@ -224,49 +224,4 @@ function TestStorageValidation:testPackedIntDerivesChildAliasesAndDefault()
     lu.assertEquals(storage[1].default, 5)
     lu.assertNotNil(self.storage.getAliases(storage).EnabledBit)
     lu.assertNotNil(self.storage.getAliases(storage).ModeBits)
-end
-
-function TestStorageValidation:testResetSessionToDefaultsResetsChangedPersistentRoots()
-    local config = { Flag = true, Count = 3, Filter = "ignored" }
-    local definition = prepareDefinition(self.harness, {
-        id = "ResetPersistentRoots",
-        name = "Reset Persistent Roots",
-        storage = {
-            { type = "bool", alias = "Flag", default = false },
-            { type = "int", alias = "Count", default = 1, min = 0, max = 5 },
-            { type = "string", alias = "Filter", persist = false, hash = false, default = "", maxLen = 32 },
-        },
-    })
-    local _, session = createModuleState(self.harness, config, definition)
-
-    session.write("Filter", "live")
-    local changed, count = self.harness.public.resetStorageToDefaults(definition.storage, session)
-
-    lu.assertTrue(changed)
-    lu.assertEquals(count, 2)
-    lu.assertFalse(session.read("Flag"))
-    lu.assertEquals(session.read("Count"), 1)
-    lu.assertEquals(session.read("Filter"), "live")
-end
-
-function TestStorageValidation:testResetSessionToDefaultsCanExcludeAliases()
-    local config = { Flag = true, ViewRegion = "Surface" }
-    local definition = prepareDefinition(self.harness, {
-        id = "ResetExcludeAliases",
-        name = "Reset Exclude Aliases",
-        storage = {
-            { type = "bool", alias = "Flag", default = false },
-            { type = "string", alias = "ViewRegion", default = "Underworld" },
-        },
-    })
-    local _, session = createModuleState(self.harness, config, definition)
-
-    local changed, count = self.harness.public.resetStorageToDefaults(definition.storage, session, {
-        exclude = { ViewRegion = true },
-    })
-
-    lu.assertTrue(changed)
-    lu.assertEquals(count, 1)
-    lu.assertFalse(session.read("Flag"))
-    lu.assertEquals(session.read("ViewRegion"), "Surface")
 end

@@ -1,6 +1,6 @@
 local createLibHarness = require("tests/harness/create_lib_harness")
 
-local PLUGIN_GUID = "test-standalone-module"
+local PLUGIN_GUID = "test-fallback-ui-module"
 local FALLBACK_OWNER = "adamant-lib.fallback-hud"
 local FALLBACK_ROW_KEY = "middleRightStack\0" .. FALLBACK_OWNER .. ":marker"
 
@@ -36,6 +36,11 @@ end
 
 local function createGameDeps(game)
     return {
+        gameCache = {
+            CurrentRun = function()
+                return rawget(_G, "CurrentRun")
+            end,
+        },
         runData = {
             SetupRunData = function()
                 return game.setupRunData()
@@ -67,7 +72,7 @@ local function createGameDeps(game)
     }
 end
 
-local function createStandaloneHarness(opts)
+local function createFallbackUiHarness(opts)
     opts = opts or {}
     local game = createGameState(opts)
     local base = createLibHarness({
@@ -88,10 +93,11 @@ local function createStandaloneHarness(opts)
         runtime = base.runtime,
         rom = base.rom,
         game = game,
-        standalone = base.standalone,
+        fallbackUi = base.fallbackUi,
         overlays = base.overlays,
         moduleHost = base.moduleHost,
         moduleState = base.moduleState,
+        moduleRuntimeRegistry = base.moduleRuntimeRegistry,
         hostState = base.hostState,
         coordinator = base.coordinator,
         overlayState = base.runtime.overlays,
@@ -118,7 +124,7 @@ local function createStandaloneHarness(opts)
     end
 
     function h:installHost(host, pluginGuid)
-        self.hostState.setLiveHost(pluginGuid or PLUGIN_GUID, host)
+        self.moduleRuntimeRegistry.setLiveHost(pluginGuid or PLUGIN_GUID, host)
     end
 
     function h:createModuleState(config, definition)
@@ -126,12 +132,12 @@ local function createStandaloneHarness(opts)
         return state.store, state.session
     end
 
-    function h:createActivatedLibHost(pluginGuid, hostOpts)
+    function h:createLibHost(pluginGuid, hostOpts)
         hostOpts = hostOpts or {}
         local definition = self.moduleHost.prepareDefinition({}, {
-            modpack = hostOpts.modpack or "standalone-pack",
-            id = hostOpts.id or "StandaloneTest",
-            name = hostOpts.name or "Standalone Test",
+            modpack = hostOpts.modpack or "fallback-pack",
+            id = hostOpts.id or "FallbackUiTest",
+            name = hostOpts.name or "Fallback UI Test",
             storage = {},
         })
         local store, session = self:createModuleState({
@@ -145,17 +151,33 @@ local function createStandaloneHarness(opts)
             session = session,
             drawTab = function() end,
         })
+        return host, authorHost
+    end
+
+    function h:createActivatedLibHost(pluginGuid, hostOpts)
+        hostOpts = hostOpts or {}
+        local host, authorHost = self:createLibHost(pluginGuid, hostOpts)
+        if hostOpts.attachFallbackUi == true then
+            authorHost.fallbackUi.attachGuiOnce(hostOpts.registerGui or function() end)
+        end
         local ok, err = authorHost.tryActivate()
         assert(ok, tostring(err))
         return host, authorHost
     end
 
-    function h:getStandaloneRuntime(pluginGuid)
-        return self.runtime.standalone.runtimes[pluginGuid]
+    function h:getFallbackUiRuntime(pluginGuid)
+        return self.runtime.fallbackUi.runtimes[pluginGuid]
+    end
+
+    function h:installFallbackRuntime(host)
+        local receipt = self.fallbackUi.installForHost(host)
+        local ok, err = receipt.commit()
+        assert(ok, tostring(err))
+        return self:getFallbackUiRuntime(host.getHostId())
     end
 
     function h:getFallbackMarkerRow()
-        self.standalone.createFallbackMarker()
+        self.fallbackUi.createFallbackMarker()
         return self.rendererState.stackRows[FALLBACK_ROW_KEY]
     end
 
@@ -170,4 +192,4 @@ local function createStandaloneHarness(opts)
     return h
 end
 
-return createStandaloneHarness
+return createFallbackUiHarness

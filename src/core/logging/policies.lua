@@ -39,7 +39,7 @@ return {
 
     ["game_cache.invalid_args"] = {
         severity = "error",
-        description = "Game cache access requires object, pack id, module id, and key arguments.",
+        description = "Game cache access requires valid owner id and key arguments.",
     },
     ["game_cache.invalid_bucket"] = {
         severity = "error",
@@ -48,6 +48,11 @@ return {
     ["game_cache.invalid_factory"] = {
         severity = "error",
         description = "Game cache factories must be functions that return tables.",
+    },
+
+    ["game_deps.invalid_boundary"] = {
+        severity = "error",
+        description = "Game dependency reads must match the expected game-global or ROM function shape.",
     },
 
     ["host.invalid_create_opts"] = {
@@ -77,10 +82,6 @@ return {
     ["host.definition_option_removed"] = {
         severity = "error",
         description = "Module authors must pass definition fields directly to createModule.",
-    },
-    ["host.invalid_standalone_binding"] = {
-        severity = "error",
-        description = "Standalone hosting requires a plugin guid with a registered live module host.",
     },
     ["host.enable_transition_failed"] = {
         severity = "warn",
@@ -119,10 +120,6 @@ return {
         severity = "error",
         description = "Inactive hook replacements should not be invoked after refresh invalidation.",
     },
-    ["hooks.no_active_owner"] = {
-        severity = "error",
-        description = "Ownerless hook APIs require an active module hook registration context.",
-    },
     ["hooks.modutil_unavailable"] = {
         severity = "error",
         description = "Hook registration requires SGG_Modding-ModUtil to be available.",
@@ -137,9 +134,43 @@ return {
         description = "An integration provider method failed; Lib returned the caller fallback.",
     },
 
+    ["system_scope.invalid_owner"] = {
+        severity = "error",
+        description = "System scopes require a stable owner id.",
+    },
+    ["framework_runtime.invalid_framework_plugin"] = {
+        severity = "error",
+        description = "Framework runtime construction requires the Framework plugin guid.",
+    },
+    ["framework_runtime.unexpected_pack"] = {
+        severity = "error",
+        description = "Framework runtime construction is not pack-scoped; pack ids belong to overlay definitions.",
+    },
+    ["framework_runtime.invalid_pack"] = {
+        severity = "error",
+        description = "Framework overlay declarations require a stable pack id.",
+    },
+    ["framework_runtime.invalid_debug_mode"] = {
+        severity = "error",
+        description = "Framework runtime diagnostics require boolean Lib debug mode values.",
+    },
+    ["framework_runtime.invalid_overlay_scope"] = {
+        severity = "error",
+        description = "Framework runtime overlay declarations require a stable scoped name.",
+    },
+
+    ["fallback_ui.invalid_args"] = {
+        severity = "error",
+        description = "Fallback UI attachment requires a managed host and one-time registration callback.",
+    },
+
     ["mutation.invalid_runtime_key"] = {
         severity = "error",
         description = "Mutation lifecycle operations require a stable plugin guid runtime key.",
+    },
+    ["mutation.invalid_registration"] = {
+        severity = "error",
+        description = "Mutation declarations require a managed module host and a patch callback before activation.",
     },
 
     ["lifecycle.on_settings_committed_failed"] = {

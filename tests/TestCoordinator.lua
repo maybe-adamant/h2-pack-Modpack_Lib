@@ -5,13 +5,12 @@ TestCoordinator = {}
 
 function TestCoordinator:setUp()
     self.harness = createLibHarness()
-    self.public = self.harness.public.coordinator
     self.coordinator = self.harness.coordinator
 end
 
-function TestCoordinator:testInternalSurfaceExcludesPublicRegistration()
-    lu.assertNil(self.coordinator.register)
-    lu.assertNil(self.coordinator.registerRebuild)
+function TestCoordinator:testInternalSurfaceContainsCoordinatorOperations()
+    lu.assertEquals(type(self.coordinator.register), "function")
+    lu.assertEquals(type(self.coordinator.registerRebuild), "function")
     lu.assertEquals(type(self.coordinator.isRegistered), "function")
     lu.assertEquals(type(self.coordinator.hasRegistrations), "function")
     lu.assertEquals(type(self.coordinator.getConfig), "function")
@@ -19,7 +18,6 @@ function TestCoordinator:testInternalSurfaceExcludesPublicRegistration()
 end
 
 function TestCoordinator:testNotRegisteredByDefault()
-    lu.assertFalse(self.public.isRegistered("test-pack"))
     lu.assertFalse(self.coordinator.isRegistered("test-pack"))
     lu.assertFalse(self.coordinator.hasRegistrations())
     lu.assertNil(self.coordinator.getConfig("test-pack"))
@@ -28,27 +26,25 @@ end
 function TestCoordinator:testRegisterAddsPackConfig()
     local config = { ModEnabled = true }
 
-    self.public.register("test-pack", config)
+    self.coordinator.register("test-pack", config)
 
-    lu.assertTrue(self.public.isRegistered("test-pack"))
     lu.assertTrue(self.coordinator.isRegistered("test-pack"))
     lu.assertTrue(self.coordinator.hasRegistrations())
     lu.assertIs(self.coordinator.getConfig("test-pack"), config)
 end
 
 function TestCoordinator:testUnrelatedPackIsIndependent()
-    self.public.register("other-pack", { ModEnabled = true })
+    self.coordinator.register("other-pack", { ModEnabled = true })
 
-    lu.assertTrue(self.public.isRegistered("other-pack"))
-    lu.assertFalse(self.public.isRegistered("test-pack"))
+    lu.assertTrue(self.coordinator.isRegistered("other-pack"))
+    lu.assertFalse(self.coordinator.isRegistered("test-pack"))
     lu.assertNil(self.coordinator.getConfig("test-pack"))
 end
 
 function TestCoordinator:testNilRegisterClearsPack()
-    self.public.register("test-pack", { ModEnabled = true })
-    self.public.register("test-pack", nil)
+    self.coordinator.register("test-pack", { ModEnabled = true })
+    self.coordinator.register("test-pack", nil)
 
-    lu.assertFalse(self.public.isRegistered("test-pack"))
     lu.assertFalse(self.coordinator.isRegistered("test-pack"))
     lu.assertFalse(self.coordinator.hasRegistrations())
     lu.assertNil(self.coordinator.getConfig("test-pack"))
@@ -58,30 +54,30 @@ function TestCoordinator:testMultiplePacksCoexist()
     local packA = { ModEnabled = true }
     local packB = { ModEnabled = false }
 
-    self.public.register("pack-a", packA)
-    self.public.register("pack-b", packB)
+    self.coordinator.register("pack-a", packA)
+    self.coordinator.register("pack-b", packB)
 
-    lu.assertTrue(self.public.isRegistered("pack-a"))
-    lu.assertTrue(self.public.isRegistered("pack-b"))
+    lu.assertTrue(self.coordinator.isRegistered("pack-a"))
+    lu.assertTrue(self.coordinator.isRegistered("pack-b"))
     lu.assertIs(self.coordinator.getConfig("pack-a"), packA)
     lu.assertIs(self.coordinator.getConfig("pack-b"), packB)
 end
 
 function TestCoordinator:testRegisterRejectsInvalidConfig()
     lu.assertErrorMsgContains("packId must be a non-empty string", function()
-        self.public.register("", { ModEnabled = true })
+        self.coordinator.register("", { ModEnabled = true })
     end)
     lu.assertErrorMsgContains("config must be a table", function()
-        self.public.register("bad-pack", true)
+        self.coordinator.register("bad-pack", true)
     end)
     lu.assertErrorMsgContains("config.ModEnabled must be a boolean", function()
-        self.public.register("bad-pack", {})
+        self.coordinator.register("bad-pack", {})
     end)
 end
 
 function TestCoordinator:testRebuildRequestsUseRegisteredCallback()
     local observedReason = nil
-    self.public.registerRebuild("pack-a", function(reason)
+    self.coordinator.registerRebuild("pack-a", function(reason)
         observedReason = reason
         return true
     end)
@@ -96,10 +92,10 @@ function TestCoordinator:testRebuildRequestsUseRegisteredCallback()
 end
 
 function TestCoordinator:testRebuildCallbackCanBeCleared()
-    self.public.registerRebuild("pack-a", function()
+    self.coordinator.registerRebuild("pack-a", function()
         return true
     end)
-    self.public.registerRebuild("pack-a", nil)
+    self.coordinator.registerRebuild("pack-a", nil)
 
     lu.assertFalse(self.coordinator.requestRebuild("pack-a", {
         kind = "test",
@@ -108,7 +104,7 @@ end
 
 function TestCoordinator:testRegisterRebuildRejectsInvalidCallback()
     lu.assertErrorMsgContains("callback must be a function", function()
-        self.public.registerRebuild("pack-a", true)
+        self.coordinator.registerRebuild("pack-a", true)
     end)
 end
 
@@ -117,15 +113,14 @@ function TestCoordinator.testCoordinatorRegistrySurvivesLibReload()
     local first = createLibHarness({ runtime = runtime })
     local rebuildCount = 0
 
-    first.public.coordinator.register("pack-a", { ModEnabled = false })
-    first.public.coordinator.registerRebuild("pack-a", function(reason)
+    first.coordinator.register("pack-a", { ModEnabled = false })
+    first.coordinator.registerRebuild("pack-a", function(reason)
         rebuildCount = rebuildCount + 1
         return reason.kind == "test"
     end)
 
     local second = createLibHarness({ runtime = runtime })
 
-    lu.assertTrue(second.public.coordinator.isRegistered("pack-a"))
     lu.assertTrue(second.coordinator.isRegistered("pack-a"))
     lu.assertEquals(second.coordinator.getConfig("pack-a"), { ModEnabled = false })
     lu.assertTrue(second.coordinator.requestRebuild("pack-a", {

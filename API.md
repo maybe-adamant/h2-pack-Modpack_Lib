@@ -5,22 +5,20 @@ This is the public Lib surface.
 Preferred usage uses top-level module authoring helpers plus namespaces for specialized APIs:
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
-- `lib.standaloneHost(...)`
-- `lib.standaloneUiBridge(...)`
-- `lib.coordinator.isRegistered(...)`
-- `lib.resetStorageToDefaults(...)`
-- `lib.hashing.*`
-- `lib.hooks.*`
-- `lib.overlays.*`
-- `lib.integrations.*`
-- `lib.gameCache.*`
-- `lib.mutation.*`
-- `lib.coordinator.*`
+- `lib.createFrameworkRuntime(...)`
+- `host.fallbackUi.*`
+- `host.hooks.*`
+- `host.overlays.*`
+- `host.integrations.*`
+- `host.gameCache.*`
+- `host.mutation.*`
 - `lib.widgets.*`
 - `lib.nav.*`
 - `lib.imguiHelpers.*`
 
-The top-level `lib.config` export also exposes Lib's Chalk config.
+Framework-owned live-host discovery, hash/profile, overlay, UI suppression, and
+diagnostic controls are available from
+`lib.createFrameworkRuntime("adamant-ModpackFramework")`.
 
 ## Core Model
 
@@ -37,91 +35,100 @@ Modules normally create and publish their behavior host through:
 Module/host creation requires:
 - `drawTab`
 
-Optional module capabilities are passed to module/host creation:
-- `registerPatchMutation`
+Optional module callbacks passed to module/host creation:
 - `onSettingsCommitted`
-- `registerHooks`
-- `registerOverlays`
-- `registerIntegrations`
 - `drawQuickContent`
+
+Host-owned capabilities can also be declared on the returned author host before
+activation:
+- `host.hooks.*`
+- `host.integrations.*`
+- `host.gameCache.*`
+- `host.mutation.*`
+- `host.overlays.*`
+- `host.fallbackUi.*`
 
 That host owns:
 - `drawTab`
 - optional `drawQuickContent`
-- built-in host state helpers for Framework and standalone hosting
+- built-in host state helpers for Framework and fallback UI
 
 Module behavior is hosted through Lib's live host registry.
 
-## `lib.config`
-
-Live Lib config loaded from Chalk.
-
-Meaningful field:
-- `lib.config.DebugMode`
-
-## `lib.integrations`
+## `host.integrations`
 
 Small registry for optional cross-module cooperation. Modules can publish a
 domain-named integration API, and consumers can use it when present while
 remaining fully functional when absent.
 
-Typical provider inside `registerIntegrations(host, store)`:
+Typical provider declaration before activation:
 
 ```lua
-lib.integrations.register("run-director.god-availability", MODULE_ID, {
-    isActive = function()
-        return host.isEnabled()
-    end,
-    isAvailable = function(godKey)
-        return true
-    end,
+local host, store = lib.createModule({
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
+    drawTab = ui.drawTab,
 })
+
+host.integrations.register("run-director.god-availability", {
+    providerId = MODULE_ID,
+    api = {
+        isActive = function()
+            return host.isEnabled()
+        end,
+        isAvailable = function(godKey)
+            return true
+        end,
+    },
+})
+
+host.tryActivate()
 ```
 
 `providerId` is the public provider identity returned to integration consumers.
-Module lifecycle refresh is scoped separately by `pluginGuid`; provider ids do
-not need to match the module's `pluginGuid`.
+Module lifecycle refresh is scoped separately by the module owner id, which Lib
+derives from `pluginGuid`; provider ids do not need to match the module's
+`pluginGuid`.
 
 Typical consumer:
 
 ```lua
-local active = lib.integrations.invoke("run-director.god-availability", "isActive", false)
+local active = host.integrations.invoke("run-director.god-availability", "isActive", false)
 if active then
-    return lib.integrations.invoke("run-director.god-availability", "isAvailable", true, godKey) ~= false
+    return host.integrations.invoke("run-director.god-availability", "isAvailable", true, godKey) ~= false
 end
 return true
 ```
 
 Surface:
-- `lib.integrations.register(id, providerId, api)`
-- `lib.integrations.unregister(id, providerId)`
-- `lib.integrations.unregisterProvider(providerId)`
-- `lib.integrations.invoke(id, methodName, fallback, ...)`
-- `lib.integrations.get(id)`
-- `lib.integrations.list(id)`
+- `host.integrations.register(id, { providerId = providerId, api = api })`
+- `host.integrations.invoke(id, methodName, fallback, ...)`
 
 Rules:
 - integration ids should describe domain behavior, not consumer names
 - absence means the optional enhancement is inactive
 - provider APIs should be safe to call when their module is disabled
-- consumers should prefer `invoke(...)` so Lib resolves active provider behavior at call time
-- when multiple providers exist, `get(id)` returns the most recently registered provider
+- consumers should prefer `host.integrations.invoke(...)` so Lib resolves active provider behavior at call time
+- when multiple providers exist, `invoke(...)` uses the most recently activated provider
 
-## `lib.gameCache`
+## `host.gameCache`
 
-Namespaced runtime cache buckets attached to live game tables such as `CurrentRun`, room data, or loot data.
+Namespaced runtime cache buckets attached to `CurrentRun`.
 
-Use this for module-owned runtime cache whose lifetime should follow that game
-table. It is not persisted, staged, hashed, profiled, or reset by Lib.
+Use this for module-owned runtime cache whose lifetime should follow the active
+run. It is not persisted, staged, hashed, profiled, or reset by Lib.
 
-The normal author path is `lib.createModule(...)`, which prepares the definition,
-creates the store/session pair, and returns the author-facing host plus the state
-handles to keep. `host.tryActivate()` publishes the live host and runs side effects.
+The normal author path is the author host returned by `lib.createModule(...)`.
+It binds the module's host id, backed by `pluginGuid`, so module code only
+supplies the cache domain and bucket key.
 
-Advanced use:
+Current run cache:
 
 ```lua
-local state = lib.gameCache.get(CurrentRun, PACK_ID, MODULE_ID, "run", function()
+local state = host.gameCache.currentRun.get("run", function()
     return {
         ForcedNPCPending = {},
         NPCEncounterSeen = {},
@@ -129,26 +136,28 @@ local state = lib.gameCache.get(CurrentRun, PACK_ID, MODULE_ID, "run", function(
 end)
 ```
 
+`currentRun.get(...)` returns `nil` when there is no active `CurrentRun`.
+
 Surface:
-- `lib.gameCache.get(object, packId, moduleId, key, factory?)`
-- `lib.gameCache.peek(object, packId, moduleId, key)`
-- `lib.gameCache.clear(object, packId, moduleId, key)`
+- `host.gameCache.currentRun.get(key, factory?)`
+- `host.gameCache.currentRun.peek(key)`
+- `host.gameCache.currentRun.clear(key)`
 
 Rules:
-- `object` must be a table
-- `packId`, `moduleId`, and `key` must be non-empty strings
+- `key` must be a non-empty string
 - `factory` runs only when the bucket is missing
 - `factory` must return a table when provided
-- cache is namespaced under one Lib-owned root on the object
+- cache is namespaced under one Lib-owned root on `CurrentRun`
 
 ## Store And Session
 
 ### `lib.createModule(opts)`
 
 Canonical module-construction helper.
-`pluginGuid` is the stable lifecycle identity. Lib owns the internal per-plugin
+`pluginGuid` is the stable runtime identity. Lib owns the internal per-plugin
 runtime state used for structural hot-reload tracking, hook refresh ownership,
-overlay ownership, integration refresh, mutation runtime, and live-host lookup.
+overlay ownership, integration refresh, game cache, mutation runtime, and
+live-host lookup.
 
 ```lua
 local data = import("mods/data.lua")
@@ -162,11 +171,11 @@ local host, store = lib.createModule({
     id = "ExampleModule",
     name = "Example Module",
     storage = data.buildStorage(),
-    registerPatchMutation = logic.buildPatchPlan,
-    registerHooks = logic.registerHooks,
     drawTab = ui.drawTab,
     drawQuickContent = ui.drawQuickContent,
 })
+host.mutation.patch(logic.buildPatchPlan)
+logic.registerHooks(host, store)
 host.tryActivate()
 ```
 
@@ -178,15 +187,11 @@ Returns:
 
 `createModule(...)` intentionally does not return the prepared definition or
 raw session. Draw callbacks receive a render-scoped context with `imgui`,
-author `session`, author `host`, and bound `widgets`. If `registerHooks` is
-provided, Lib calls it as:
+author `session`, author `host`, and bound `widgets`.
 
-```lua
-registerHooks(host, store)
-```
-
-Runtime helper files should receive the needed `store` or narrowed read/access
-closures from `registerHooks(...)`; draw/UI paths should continue using the
+Declare hooks on `host.hooks.*` before `host.tryActivate()`. Runtime helper
+files should receive the needed `store` or narrowed read/access closures from
+the module's hook-declaration code; draw/UI paths should continue using the
 session passed to draw callbacks.
 
 ### `lib.tryCreateModule(opts)`
@@ -398,9 +403,9 @@ Behavior:
 
 ## Reset Helpers
 
-### `lib.resetStorageToDefaults(storage, session, opts?)`
+### `host.resetToDefaults(opts?)`
 
-Resets changed persistent storage roots back to their defaults in the staged `session`.
+Resets changed persistent storage roots back to their defaults in the host's staged session.
 
 Returns:
 - `changed`
@@ -409,48 +414,52 @@ Returns:
 Options:
 - `exclude = { Alias = true }` skips specific root aliases.
 
-## `lib.hooks`
+Draw callbacks receive the same reset behavior through
+`ctx.session.resetToDefaults(opts?)`.
+
+## `host.hooks`
 
 Reload-stable wrappers around ModUtil path hooks.
 
-Hosted modules normally call ownerless hook APIs inside `registerHooks(...)`.
-Lib scopes those calls to the activating host for its `pluginGuid`.
+Hosted modules declare hooks on the author host returned by
+`lib.createModule(...)`. Lib scopes those declarations to the host's
+module owner id, derived from `pluginGuid`.
 
-### `lib.hooks.Wrap(path, handler)`
+### `host.hooks.wrap(path, handler)`
 
 Registers or updates a stable `modutil.mod.Path.Wrap(...)` dispatcher.
 
 Also supports:
-- `lib.hooks.Wrap(path, key, handler)`
+- `host.hooks.wrap(path, key, handler)`
 
 Use the keyed form when one module registers more than one wrap against the same path.
 
-### `lib.hooks.Override(path, replacement)`
+### `host.hooks.override(path, replacement)`
 
 Registers or updates a stable `modutil.mod.Path.Override(...)`.
 
 Also supports:
-- `lib.hooks.Override(path, key, replacement)`
+- `host.hooks.override(path, key, replacement)`
 
 `replacement` must be a function. Function replacements are dispatched through
 a stable wrapper so reloading updates behavior without stacking another
 override.
 
-### `lib.hooks.Context.Wrap(path, context)`
+### `host.hooks.contextWrap(path, context)`
 
 Registers or updates a stable `modutil.mod.Path.Context.Wrap(...)` dispatcher.
 
 Also supports:
-- `lib.hooks.Context.Wrap(path, key, context)`
+- `host.hooks.contextWrap(path, key, context)`
 
-These APIs are only valid inside `registerHooks(...)`. Lib-owned physical
+These APIs are only valid before `host.tryActivate()`. Lib-owned ModUtil
 dispatchers are private infrastructure, not a public owner-token surface.
 
 ### Typical module pattern
 
 ```lua
 local function registerHooks(host, store)
-    lib.hooks.Wrap("GetEligibleLootNames", function(base, ...)
+    host.hooks.wrap("GetEligibleLootNames", function(base, ...)
         local result = base(...)
         if host.isEnabled() and store.read("FeatureEnabled") then
             -- inspect or transform the wrapped call here
@@ -463,24 +472,26 @@ local PLUGIN_GUID = _PLUGIN.guid
 local data = import("mods/data.lua")
 local ui = import("mods/ui.lua").bind(data)
 
-local host = lib.createModule({
+local host, store = lib.createModule({
     pluginGuid = PLUGIN_GUID,
     config = config,
     modpack = PACK_ID,
     id = MODULE_ID,
     name = "Example Module",
     storage = data.buildStorage(),
-    registerHooks = registerHooks,
     drawTab = ui.drawTab,
 })
+registerHooks(host, store)
 host.tryActivate()
 ```
 
-When `host.tryActivate()` runs with `registerHooks`, activation runs the registration pass and deactivates hooks omitted by a later pass for the same `pluginGuid`.
+When `host.tryActivate()` runs, activation installs the declarations currently
+recorded on `host.hooks` and deactivates hooks omitted by a later host for the
+same module owner id.
 
-## `lib.overlays`
+## `host.overlays` And `frameworkRuntime.overlays`
 
-Host-scoped module overlays and system-scoped retained HUD projections for shared overlay placement.
+Host-scoped module overlays and Framework-scoped retained HUD projections for shared overlay placement.
 
 Overlay visibility has two layers:
 - Lib applies a global game-HUD gate, currently based on `ShowingCombatUI`.
@@ -490,48 +501,59 @@ Overlay visibility has two layers:
 
 When the global gate is closed, lib hides all retained overlay components even if their own `visible` callback returns true. Text callbacks may still be refreshed so the display is fresh when the game HUD returns.
 
-Framework and standalone module UIs use this gate so configuration UI and
+Framework and fallback module UIs use this gate so configuration UI and
 gameplay overlays are mutually exclusive on screen.
 
 Managed region:
 - `middleRightStack`: a right-anchored vertical stack used for framework markers and module status text.
 
 Order bands:
-- `lib.overlays.order.framework`
-- `lib.overlays.order.module`
-- `lib.overlays.order.debug`
+- `host.overlays.order.framework`
+- `host.overlays.order.module`
+- `host.overlays.order.debug`
+- `frameworkRuntime.overlays.order.*` exposes the same shared bands for Framework overlays.
 
-### Module `registerOverlays(overlays, host, store)`
+### Module `host.overlays`
 
-Modules declare overlay structure during host activation:
+Modules declare overlay structure on the returned author host before activation:
 
 ```lua
-registerOverlays = function(overlays, host, store)
-    overlays.createLine("summary.igt", {
-        region = "middleRightStack",
-        order = lib.overlays.order.module,
-        columnGap = 20,
-        columns = {
-            { key = "label", minWidth = 40 },
-            { key = "time", minWidth = 80 },
-        },
-    })
+local host, store = lib.createModule({
+    pluginGuid = PLUGIN_GUID,
+    config = config,
+    id = MODULE_ID,
+    name = "Example Module",
+    storage = data.buildStorage(),
+    drawTab = ui.drawTab,
+})
 
-    overlays.onCommit(function(ctx)
-        ctx.setLine("summary.igt", { label = "IGT:", time = "00:00.00" })
-        ctx.refresh("summary.igt")
-    end)
-end
+host.overlays.createLine("summary.igt", {
+    region = "middleRightStack",
+    order = host.overlays.order.module,
+    columnGap = 20,
+    columns = {
+        { key = "label", minWidth = 40 },
+        { key = "time", minWidth = 80 },
+    },
+})
+
+host.overlays.onCommit(function(ctx)
+    ctx.setLine("summary.igt", { label = "IGT:", time = "00:00.00" })
+    ctx.refresh("summary.igt")
+end)
+
+host.tryActivate()
 ```
 
-Retained element names are local to the module's `pluginGuid` host lifecycle and do not collide across modules.
+Retained element names are local to the module owner id derived from
+`pluginGuid` and do not collide across modules.
 
-### `overlays.createLine(name, spec)`
+### `host.overlays.createLine(name, spec)`
 
 Declares one retained display line. Lines can use a one-column convenience shape:
 
 ```lua
-overlays.createLine("message", {
+host.overlays.createLine("message", {
     region = "middleRightStack",
     minWidth = 120,
 })
@@ -540,7 +562,7 @@ overlays.createLine("message", {
 or explicit columns:
 
 ```lua
-overlays.createLine("summary.rta", {
+host.overlays.createLine("summary.rta", {
     region = "middleRightStack",
     columnGap = 20,
     columns = {
@@ -552,12 +574,12 @@ overlays.createLine("summary.rta", {
 
 Projection callbacks update lines through `ctx.setLine(name, values)`.
 
-### `overlays.createTable(name, spec)`
+### `host.overlays.createTable(name, spec)`
 
 Declares one fixed-capacity retained table projection:
 
 ```lua
-overlays.createTable("runs", {
+host.overlays.createTable("runs", {
     region = "middleRightStack",
     maxRows = 10,
     columnGap = 20,
@@ -576,9 +598,9 @@ tables through `ctx.setTable(name, rows)`.
 
 Supported retained overlay events:
 
-- `overlays.onCommit(function(ctx, commit) ... end)`
-- `overlays.onInterval(name, seconds, function(ctx, event) ... end, opts)`
-- `overlays.afterHook(path, function(ctx, event) ... end)`
+- `host.overlays.onCommit(function(ctx, commit) ... end)`
+- `host.overlays.onInterval(name, seconds, function(ctx, event) ... end, opts)`
+- `host.overlays.afterHook(path, function(ctx, event) ... end)`
 
 The projection context exposes read-only helpers plus named retained updates:
 
@@ -593,46 +615,75 @@ The projection context exposes read-only helpers plus named retained updates:
 - `ctx.refreshRegion(region)`
 - `ctx.refreshAll()`
 
-### `lib.overlays.defineSystem(ownerId, register)`
+### `frameworkRuntime.overlays.define(packId, name, register)`
 
-Declares narrow retained HUD lines for Lib/Framework systems that are not
-module-owned. The system registrar supports `createLine(...)` and
+Declares narrow retained HUD lines for one Framework-owned pack overlay scope.
+The `packId` and `name` are combined into a retained owner id, so one Framework
+runtime can own separate pack surfaces such as `hud` without sharing one
+retained overlay owner.
+The registrar supports `createLine(...)` and
 `onCommit(...)`; module-only projection events such as `onInterval(...)` and
 `afterHook(...)` are intentionally not exposed.
 
 ```lua
-lib.overlays.defineSystem("adamant-framework.pack.hud", function(overlays)
+local runtime = lib.createFrameworkRuntime("adamant-ModpackFramework")
+
+runtime.overlays.define("pack", "hud", function(overlays)
     overlays.createLine("hash", {
         region = "middleRightStack",
+        order = runtime.overlays.order.framework,
         minWidth = 120,
     })
 end)
 ```
 
-### `lib.overlays.suppressForUi()`
+Overlay UI suppression is not a public module-author API. Framework uses
+`lib.createFrameworkRuntime(...).ui`, and Lib fallback UI windows use the
+internal overlay service.
 
-Temporarily hides all Lib overlays while a foreground ImGui configuration UI is open.
+## `frameworkRuntime.diagnostics`
 
-Returns a token:
-- `token.release()`
+Framework-only diagnostics controls returned by
+`lib.createFrameworkRuntime("adamant-ModpackFramework")`.
 
-Suppression is reference-counted by active tokens. Overlays are refreshed when the
-first token is acquired and when the final token is released.
+### `frameworkRuntime.diagnostics.isLibDebugEnabled()`
 
-### `lib.overlays.isUiSuppressed()`
+Returns whether Lib internal diagnostic warnings are enabled.
 
-Returns whether any UI suppression token is currently active.
+### `frameworkRuntime.diagnostics.setLibDebugEnabled(enabled)`
 
-## `lib.hashing`
+Sets Lib internal diagnostic warnings. `enabled` must be a boolean.
 
-Hash/profile serialization and packed-bit helpers.
+## `frameworkRuntime.coordinator`
 
-### `lib.hashing.getRoots(storage)`
+Framework-only coordinator registration helpers returned by
+`lib.createFrameworkRuntime("adamant-ModpackFramework")`.
+
+### `frameworkRuntime.coordinator.register(packId, config)`
+
+Registers coordinator config for a pack. `config` may be `nil` to clear the
+registration.
+
+### `frameworkRuntime.coordinator.registerRebuild(packId, callback)`
+
+Registers the Framework rebuild callback used when coordinated module structure
+changes. `callback` may be `nil` to clear the callback.
+
+### `frameworkRuntime.coordinator.isRegistered(packId)`
+
+Returns whether a pack id is registered.
+
+## `frameworkRuntime.hashing`
+
+Framework-only hash/profile serialization and packed-bit helpers returned by
+`lib.createFrameworkRuntime("adamant-ModpackFramework")`.
+
+### `frameworkRuntime.hashing.getRoots(storage)`
 
 Returns prepared root nodes that participate in hash/profile serialization.
 The returned nodes are read-only metadata owned by Lib storage preparation; callers must not mutate them.
 
-### `lib.hashing.getAliases(storage)`
+### `frameworkRuntime.hashing.getAliases(storage)`
 
 Returns the prepared alias map.
 The returned map and nodes are read-only metadata owned by Lib storage preparation; callers must not mutate them.
@@ -643,134 +694,82 @@ Includes:
 - runtime-cache aliases
 - packed child aliases
 
-### `lib.hashing.valuesEqual(node, a, b)`
+### `frameworkRuntime.hashing.valuesEqual(node, a, b)`
 
 Storage-aware equality helper for comparing persisted/hash values.
 
-### `lib.hashing.getPackWidth(node)`
+### `frameworkRuntime.hashing.getPackWidth(node)`
 
 Returns the derived pack width for a node type that supports packing.
 
-### `lib.hashing.toHash(node, value)`
+### `frameworkRuntime.hashing.toHash(node, value)`
 
 Encodes one storage value for hash/profile serialization.
 
-### `lib.hashing.fromHash(node, str)`
+### `frameworkRuntime.hashing.fromHash(node, str)`
 
 Decodes one storage value from hash/profile serialization.
 
-### `lib.hashing.isHashTokenValid(node, str)`
+### `frameworkRuntime.hashing.isHashTokenValid(node, str)`
 
 Returns whether one serialized hash/profile token is syntactically valid for a prepared storage node.
 Use this at external hash/profile import boundaries before calling `fromHash(...)`.
 
-### `lib.hashing.readPackedBits(packed, offset, width)`
+### `frameworkRuntime.hashing.readPackedBits(packed, offset, width)`
 
 Raw numeric bit extraction helper.
 
-### `lib.hashing.writePackedBits(packed, offset, width, value)`
+### `frameworkRuntime.hashing.writePackedBits(packed, offset, width, value)`
 
 Raw numeric bit write helper.
 
-## `lib.mutation`
-
-### `lib.mutation.createPlan()`
-
-Creates a reversible mutation plan with:
-- `plan:set(...)`
-- `plan:setMany(...)`
-- `plan:transform(tbl, key, fn)`
-- `plan:append(...)`
-- `plan:appendUnique(...)`
-- `plan:removeElement(...)`
-- `plan:setElement(...)`
-
-`registerPatchMutation(plan, host, store)` is the supported module mutation
-entrypoint. Manual apply/revert mutation callbacks are not supported.
-Plans are declarative from the module-author surface; Lib owns execution during
-load, enable/disable, profile load, hot reload, and rollback paths.
-
-`plan:transform(...)` tracks and restores only `tbl[key]`. Its callback receives
-a copied current value and returns the replacement value for that key.
-
-## `lib.coordinator`
-
-Framework-facing coordinator helpers for coordinated module packs.
-
-### `lib.coordinator.register(packId, config)`
-
-Registers coordinator config for a pack. Framework uses this during coordinator initialization.
-
-### `lib.coordinator.isRegistered(packId)`
-
-Returns whether a pack id is registered.
-
-### `lib.coordinator.registerRebuild(packId, callback)`
-
-Registers a Framework rebuild callback for a coordinated pack.
-
-### `lib.coordinator.requestRebuild(packId, reason)`
-
-Requests a coordinated pack rebuild after a structural module change.
-
 Enabled/debug transitions, activation-time mutation sync, and session commit/resync are host responsibilities. Use the returned module host surface (`host.setEnabled`, `host.setDebugMode`, `host.flush`, `host.resync`) instead of calling internals directly.
 
-## Standalone Host
+## `host.fallbackUi`
 
-### `lib.standaloneHost(pluginGuid)`
+Fallback UI provides the module-owned ROM GUI callsites used when a module is
+not being coordinated by Framework.
 
-Initializes standalone module hosting and returns window/menu-bar renderers.
+### `host.fallbackUi.attachGuiOnce(register)`
 
-Call this after successful module activation. It is safe for coordinated modules;
-the returned runtime suppresses its window/menu when a coordinator is registered.
+Registers stable no-op-safe fallback UI callbacks once for the module's plugin
+guid. Call this before `host.tryActivate()`.
 
-`pluginGuid` must be the same plugin guid passed to `lib.createModule(...)`.
+The callback still owns the actual ROM registration, so it runs from the module
+context:
 
-Returned surface:
-- `runtime.renderWindow()`
-- `runtime.addMenuBar()`
-- `runtime.handleHostGuiClosed()`
+```lua
+host.fallbackUi.attachGuiOnce(function(fallbackUi)
+    rom.gui.add_imgui(fallbackUi.renderWindow)
+    rom.gui.add_to_menu_bar(fallbackUi.addMenuBar)
+end)
+```
 
 Behavior:
-- resolves the module's live host through the explicit `pluginGuid`
-- uses the activation-synced live host state; it does not run a separate mutation startup pass
-- suppresses the standalone window/menu when the module is coordinated
-- releases overlay suppression when the host ImGui layer is hidden globally, matching Framework-hosted UI behavior
-- renders built-in controls for:
+- `attachGuiOnce(...)` prevents callback stacking across hot reloads
+- `host.tryActivate()` installs or swaps the active fallback UI runtime
+- callbacks no-op until a runtime is active
+- fallback UI suppresses its window/menu when the module's pack is coordinated
+- the fallback window includes built-in:
   - `Enabled`
   - `Debug Mode`
   - `Resync Session`
 - then calls `moduleHost.drawTab(...)`
 - commits dirty staged state through `moduleHost.commitIfDirty()`
 
-### `lib.standaloneUiBridge(pluginGuid)`
+## `frameworkRuntime.modules`
 
-Returns stable no-op-safe callbacks for module-owned ROM GUI registration.
+Framework-only live module host discovery returned by
+`lib.createFrameworkRuntime("adamant-ModpackFramework")`.
 
-Use this when a module needs its own `rom.gui.add_imgui(...)` and
-`rom.gui.add_to_menu_bar(...)` callsites to remain in `main.lua`, while Lib owns
-the reload-sensitive standalone runtime pointer.
+### `frameworkRuntime.modules.getLiveHost(pluginGuid)`
 
-```lua
-local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
+Returns the full runtime host registered by module activation, or `nil` when
+the plugin guid is invalid or no live host is registered.
 
-local function registerGui()
-    rom.gui.add_imgui(standaloneUi.renderWindow)
-    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
-end
-```
-
-The bridge late-reads the current runtime installed by
-`lib.standaloneHost(pluginGuid)`. If no runtime exists yet, the callbacks return
-without error.
-
-### `lib.getLiveModuleHost(pluginGuid)`
-
-Returns the full runtime host registered by module activation.
-
-This is an infrastructure API for Framework discovery, standalone hosting, and
-Lib internals. Normal module code should keep the author host returned by
-`lib.createModule(...)` and use `store`/callback sessions for state access.
+This is infrastructure API for Framework discovery. Normal module code should
+keep the author host returned by `lib.createModule(...)` and use
+`store`/callback sessions for state access.
 
 ## `lib.widgets`
 

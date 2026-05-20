@@ -47,15 +47,18 @@ Safe to rebuild on every module `init`:
 Expected to persist across reloads:
 - Lib coordinator registrations under `AdamantModpackLib_Runtime.coordinator`
 - Lib live-host registry keyed by `pluginGuid` under `AdamantModpackLib_Runtime.moduleHost`
-- Lib hook dispatchers that map each plugin slot to its current host under `AdamantModpackLib_Runtime.hooks`
+- Lib hook dispatchers that map each capability owner slot to its current owner
+  object under `AdamantModpackLib_Runtime.hooks`
 - Framework pack registry and stable GUI callbacks
-- module-owned ROM GUI callbacks that call Lib bridge functions from
-  `lib.standaloneUiBridge(pluginGuid)`
+- module-owned ROM GUI callbacks attached through `host.fallbackUi.attachGuiOnce(...)`
+  and backed by Lib fallback UI bridges keyed by host id
 
 Modules pass `pluginGuid` as their stable lifecycle identity. The committed host
 for that plugin is the structural hot-reload baseline and the owner for managed
-hooks, overlays, integrations, and activation metadata. Mutation runtime remains
-plugin-scoped because raw game-table edits are process-global.
+hooks, overlays, integrations, and activation metadata. Capability backends
+receive this identity as an `ownerId`; system scopes provide their own scoped
+owner ids. Mutation runtime remains owner-scoped because raw game-table edits
+are process-global.
 
 ## Layer Responsibilities
 
@@ -98,7 +101,7 @@ Lib owns the shared reload-sensitive plumbing:
 - integration provider refresh
 - retained overlay registration and refresh
 - mutation runtime tracking for module reloads
-- standalone host suppression for coordinated modules
+- fallback UI suppression for coordinated modules
 
 ### Modules
 
@@ -107,8 +110,8 @@ Modules own their local rebuild:
 - keep `chalk`, `reload`, and raw config local to `main.lua`
 - keep persisted runtime reads on `store`
 - keep staged UI edits on the author-facing `session`
-- declare runtime hooks from a local or imported `registerHooks(host, store)` callback
-- declare retained overlays from `registerOverlays(overlays, host, store)`
+- declare runtime hooks on `host.hooks.*` before activation
+- declare retained overlays on `host.overlays.*` before activation
 
 ## Bootstrap Pattern
 
@@ -143,8 +146,8 @@ The important part is the split:
 During module creation and activation:
 - the module host closes over the current `definition`, `store`, and `session`
 - `host.tryActivate()` publishes the live host
-- Lib refreshes hook registrations for the module's `pluginGuid`; absent hook registrations for that module are deactivated
-- Lib refreshes integration registrations under the module's `pluginGuid`; absent integration providers for that module are removed
+- Lib refreshes hook registrations under the module owner id derived from `pluginGuid`; absent hook registrations for that owner are deactivated
+- Lib refreshes integration registrations under the module owner id derived from `pluginGuid`; absent integration providers for that owner are removed
 - if the coordinator for `definition.modpack` is already registered, Lib immediately syncs live mutation state
 
 That means one coordinated module reload refreshes its live runtime behavior immediately without forcing a pack rebuild.
@@ -183,16 +186,16 @@ game HUD refresh.
 
 ## Hook Model
 
-Raw ModUtil path hooks do not deduplicate. The stack solves that through `lib.hooks`.
+Raw ModUtil path hooks do not deduplicate. The stack solves that through `host.hooks`.
 
 Supported public hook entrypoints:
-- `lib.hooks.Wrap`
-- `lib.hooks.Override`
-- `lib.hooks.Context.Wrap`
+- `host.hooks.wrap`
+- `host.hooks.override`
+- `host.hooks.contextWrap`
 
 The model is:
-- register hook sites from `registerHooks(host, store)`
-- pass `pluginGuid` and `registerHooks` into `lib.createModule(...)`
+- register hook sites on the returned author host before activation
+- pass `pluginGuid` into `lib.createModule(...)`
 - call `host.tryActivate()` after construction
 - Lib runs the full registration pass during module activation
 
@@ -240,17 +243,17 @@ Lib reload is an infrastructure development path. If Lib's mutation internals
 reload while mutations are already active, use a full game process restart as the
 correctness boundary before validating mutation rollback behavior.
 
-## Coordinator And Standalone Behavior
+## Coordinator And Fallback UI Behavior
 
 Coordinator metadata is persisted on `AdamantModpackLib_Runtime.coordinator.coordinators`.
 
 Important consequences:
 - a Lib reload does not forget which packs are coordinated
-- standalone module windows remain suppressed for coordinated modules
-- activation-time mutation sync uses coordinator state when present and standalone module state otherwise
+- fallback UI windows remain suppressed for coordinated modules
+- activation-time mutation sync uses coordinator state when present and module state otherwise
 
-Activation syncs live mutation state for both coordinated and standalone modules.
-Framework init and `lib.standaloneHost(...)` do not run a separate startup mutation pass.
+Activation syncs live mutation state for both coordinated and fallback UI modules.
+Framework init and fallback UI activation do not run a separate startup mutation pass.
 This keeps non-structural module reloads on the same host activation path as cold startup.
 
 ## Safety By Scenario
@@ -311,8 +314,8 @@ coordinated path, use a full reload.
 - keep `chalk`, `reload`, and raw config local to `main.lua`
 - recreate `definition`, `store`, `session`, and the Lib-created live host in `init`
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
-- register runtime hooks through `registerHooks(host, store)` and ownerless `lib.hooks.*`
-- pass `pluginGuid` and `registerHooks` to `lib.createModule(...)` when the module owns runtime hooks
+- register runtime hooks through `host.hooks.*` before activation
+- pass `pluginGuid` to `lib.createModule(...)`
 - call `host.tryActivate()` after construction
 - keep stable GUI callbacks outside `init`
 - late-read current framework or module state from those stable callbacks when a stale closure would matter

@@ -6,10 +6,11 @@ TestMutation_BackupSystem = {}
 function TestMutation_BackupSystem:setUp()
     self.harness = createLibHarness()
     self.mutation = self.harness.mutation
+    self.mutationPlan = self.harness.mutationPlan
 end
 
 function TestMutation_BackupSystem:testBackupAndRestoreScalar()
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
     local tbl = { HP = 100, Name = "Player" }
 
     backup(tbl, "HP")
@@ -21,7 +22,7 @@ function TestMutation_BackupSystem:testBackupAndRestoreScalar()
 end
 
 function TestMutation_BackupSystem:testBackupAndRestoreMultipleKeys()
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
     local tbl = { A = 1, B = 2, C = 3 }
 
     backup(tbl, "A", "B")
@@ -35,7 +36,7 @@ function TestMutation_BackupSystem:testBackupAndRestoreMultipleKeys()
 end
 
 function TestMutation_BackupSystem:testBackupNilValue()
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
     local tbl = { A = 1 }
 
     backup(tbl, "Missing")
@@ -46,7 +47,7 @@ function TestMutation_BackupSystem:testBackupNilValue()
 end
 
 function TestMutation_BackupSystem:testBackupTable()
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
     local inner = { x = 1, y = 2 }
     local tbl = { Data = inner }
 
@@ -60,7 +61,7 @@ function TestMutation_BackupSystem:testBackupTable()
 end
 
 function TestMutation_BackupSystem:testBackupOnlyFirstCall()
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
     local tbl = { X = "original" }
 
     backup(tbl, "X")
@@ -72,7 +73,7 @@ function TestMutation_BackupSystem:testBackupOnlyFirstCall()
 end
 
 function TestMutation_BackupSystem:testMultipleTables()
-    local backup, restore = self.mutation.createBackup()
+    local backup, restore = self.mutationPlan.createBackup()
     local t1 = { A = 1 }
     local t2 = { B = 2 }
 
@@ -87,8 +88,8 @@ function TestMutation_BackupSystem:testMultipleTables()
 end
 
 function TestMutation_BackupSystem:testIsolatedSystems()
-    local backup1, restore1 = self.mutation.createBackup()
-    local _, restore2 = self.mutation.createBackup()
+    local backup1, restore1 = self.mutationPlan.createBackup()
+    local _, restore2 = self.mutationPlan.createBackup()
     local tbl = { X = "original" }
 
     backup1(tbl, "X")

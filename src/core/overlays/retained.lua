@@ -4,6 +4,7 @@ local retainedState = deps.state
 local renderer = deps.renderer
 local logging = deps.logging
 local overlayOrder = deps.order
+local rom = deps.rom
 
 local function resolveValue(value)
     if type(value) == "function" then
@@ -30,13 +31,13 @@ end
 
 local function validateName(apiName, name)
     if type(name) ~= "string" or name == "" then
-        logging.violate("overlays.invalid_registration", "lib.overlays.%s: name must be a non-empty string", apiName)
+        logging.violate("overlays.invalid_registration", "retained overlays.%s: name must be a non-empty string", apiName)
     end
 end
 
 local function validateSpec(apiName, spec)
     if type(spec) ~= "table" then
-        logging.violate("overlays.invalid_registration", "lib.overlays.%s: spec must be a table", apiName)
+        logging.violate("overlays.invalid_registration", "retained overlays.%s: spec must be a table", apiName)
     end
 end
 
@@ -87,7 +88,7 @@ local function getRegistry(owner, create)
     end
 
     if type(owner) ~= "table" then
-        logging.violate("overlays.invalid_registration", "lib.overlays: owner must be a persistent table or string")
+        logging.violate("overlays.invalid_registration", "retained overlays: owner must be a persistent table or string")
     end
 
     local registry = retainedState.tableRegistries[owner]
@@ -344,14 +345,14 @@ local function declareTable(registry, name, spec)
     if type(spec.columns) ~= "table" or #spec.columns == 0 then
         logging.violate(
             "overlays.invalid_registration",
-            "lib.overlays.createTable: columns must be a non-empty array"
+            "retained overlays.createTable: columns must be a non-empty array"
         )
     end
     local maxRows = tonumber(spec.maxRows)
     if not maxRows or maxRows < 1 or math.floor(maxRows) ~= maxRows then
         logging.violate(
             "overlays.invalid_registration",
-            "lib.overlays.createTable: maxRows must be a positive integer"
+            "retained overlays.createTable: maxRows must be a positive integer"
         )
     end
     registry.seenElements[name] = true
@@ -374,7 +375,7 @@ end
 
 local function registerCommitProjection(registry, callback)
     if type(callback) ~= "function" then
-        logging.violate("overlays.invalid_registration", "lib.overlays.onCommit: callback must be a function")
+        logging.violate("overlays.invalid_registration", "retained overlays.onCommit: callback must be a function")
     end
     registry.pendingEvents.commit[#registry.pendingEvents.commit + 1] = callback
 end
@@ -382,11 +383,11 @@ end
 local function registerIntervalProjection(registry, name, seconds, callback, opts)
     validateName("onInterval", name)
     if type(callback) ~= "function" then
-        logging.violate("overlays.invalid_registration", "lib.overlays.onInterval: callback must be a function")
+        logging.violate("overlays.invalid_registration", "retained overlays.onInterval: callback must be a function")
     end
     seconds = tonumber(seconds)
     if not seconds or seconds <= 0 then
-        logging.violate("overlays.invalid_registration", "lib.overlays.onInterval: seconds must be positive")
+        logging.violate("overlays.invalid_registration", "retained overlays.onInterval: seconds must be positive")
     end
     registry.pendingEvents.intervals[name] = {
         name = name,
@@ -401,7 +402,7 @@ end
 local function registerAfterHookProjection(registry, path, callback)
     validateName("afterHook", path)
     if type(callback) ~= "function" then
-        logging.violate("overlays.invalid_registration", "lib.overlays.afterHook: callback must be a function")
+        logging.violate("overlays.invalid_registration", "retained overlays.afterHook: callback must be a function")
     end
     registry.pendingEvents.afterHooks[path] = {
         path = path,
@@ -596,7 +597,7 @@ local function clearTableRegistriesByOwnerId(ownerId, exceptOwner)
     return true, nil
 end
 
-local dispatch = import('core/overlays/private_retained_dispatch.lua', nil, {
+local dispatch = import('core/overlays/retained_dispatch.lua', nil, {
     state = retainedState,
     renderer = renderer,
     getRegistry = getRegistry,
